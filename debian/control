@@ -1,0 +1,22 @@
+Source: tarantool-modulekit
+Priority: optional
+Section: database
+Maintainer: Roman Tsisyk <roman@tarantool.org>
+# cmake, tarantool-dev, libmsgpuck-dev are only needed for Lua/C and C modules
+Build-Depends: debhelper (>= 9), cdbs,
+               cmake (>= 2.8),
+               tarantool-dev (>= 1.6.8.0),
+               libmsgpuck-dev (>= 1.0.0),
+# For /usr/bin/prove
+               perl (>= 5.10.0)
+Standards-Version: 3.9.6
+Homepage: https://github.com/tarantool/modulekit
+Vcs-Git: git://github.com/tarantool/modulekit.git
+Vcs-Browser: https://github.com/tarantool/modulekit
+
+Package: tarantool-modulekit
+Architecture: i386 amd64 armhf arm64
+Depends: tarantool (>= 1.6.8.0), ${shlibs:Depends}, ${misc:Depends}
+Pre-Depends: ${misc:Pre-Depends}
+Description: Templates for Tarantool modules
+ A set of Lua, Lua/C and C module templates for Tarantool.
