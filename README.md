@@ -57,7 +57,7 @@ The library provides facilities for parsing schemas, exploring schemas programma
 (storing data in a DOM-like structure).
 Data presentation supports transparent conversion between schema versions.
 
-The module opperates rawly as follows.
+The module operates rawly as follows.
 Avro data presentation is built from the input.
 This step includes optional unflattening, i.e. the data undergo certain transformations before insertion in the DOM.
 For performance reasons string copies are shallow.
