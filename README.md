@@ -35,7 +35,7 @@ _, new_schema = avro.create_schema {
     name = "Frob",
     fields = {
       { name = "foo", type = "int" },
-      { name = "pi",  type = { type = "array", "items" = "int" } },
+      { name = "pi",  type = { type = "array", items = "int" } },
       { name = "bar", type = "string" }
     }
   }
