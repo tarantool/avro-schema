@@ -15,6 +15,7 @@ extern "C" {
 #include <assert.h>
 
 #include "parse.h"
+#include "emit.h"
 
 enum cache_mode {
 	DO_CACHE,
@@ -357,12 +358,16 @@ avro_error:
 	return 2;
 }
 
-const int lua_ir_options =
+const int lua_ir_b_options =
 	PARSER_ASSUME_NUL_TERM_STRINGS |
 	PARSER_ASSUME_NO_DUP_MAP_KEYS |
 	PARSER_ENABLE_FAST_SKIP |
 	PARSER_ENABLE_VERBOSE_RECORDS |
 	PARSER_ENABLE_TERSE_RECORDS;
+
+const int lua_ir_v_options =
+	EMITTER_ENABLE_VERBOSE_RECORDS |
+	EMITTER_ENABLE_TERSE_RECORDS;
 
 static int
 flatten(struct lua_State *L)
@@ -376,24 +381,21 @@ flatten(struct lua_State *L)
 	try
 	{
 		{
-			lua_parser_context          parser_context(L, 1);
-			lua_parser                  parser(parser_context);
-			ir_builder<lua_ir_options>  builder;
-			builder.process_value(parser, &xform_ctx->src);
+			lua_parser_context          pc(L, 1);
+			lua_parser                  parser(pc);
+			ir_builder<lua_ir_b_options>builder;
+			builder.build_value(parser, &xform_ctx->src);
 		}
-
-		char                       *json_str;
-		if (avro_value_to_json(&xform_ctx->dest, 0, &json_str) != 0) {
-			lua_pushboolean(L, 0);
-			lua_pushstring(L, avro_strerror());
-			st  = 2;
-			goto out;
+		{
+			lua_emitter_context         ec(L);
+			lua_emitter                 emitter(ec);
+			ir_visitor<lua_ir_v_options>visitor;
+			visitor.set_use_terse_records(true);
+			visitor.visit_value(emitter, &xform_ctx->dest);
 		}
-		// XXX leak
 		lua_pushboolean(L, 1);
-		lua_pushstring(L, json_str);
-		st = 2;
-		free(json_str);
+		lua_insert(L, -2);
+		st  = 2;
 		goto out;
 	}
 	catch (std::exception &e)
@@ -422,23 +424,20 @@ unflatten(struct lua_State *L)
 		{
 			lua_parser_context          pc(L, 1);
 			lua_parser                  parser(pc);
-			ir_builder<lua_ir_options>  builder;
+			ir_builder<lua_ir_b_options>builder;
 			builder.set_use_terse_records(true);
-			builder.process_value(parser, &xform_ctx->src);
+			builder.build_value(parser, &xform_ctx->src);
 		}
 
-		char                       *json_str;
-		if (avro_value_to_json(&xform_ctx->dest, 0, &json_str) != 0) {
-			lua_pushboolean(L, 0);
-			lua_pushstring(L, avro_strerror());
-			st  = 2;
-			goto out;
+		{
+			lua_emitter_context         ec(L);
+			lua_emitter                 emitter(ec);
+			ir_visitor<lua_ir_v_options>visitor;
+			visitor.visit_value(emitter, &xform_ctx->dest);
 		}
-		// XXX leak
 		lua_pushboolean(L, 1);
-		lua_pushstring(L, json_str);
-		st = 2;
-		free(json_str);
+		lua_insert(L, -2);
+		st  = 2;
 		goto out;
 	}
 	catch (std::exception &e)

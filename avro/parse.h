@@ -327,8 +327,9 @@ private:
 class lua_parser: private noncopyable
 {
 public:
-	typedef lua_parser_context parser_context;
-	lua_parser(lua_parser_context &context): context_(context)
+	typedef lua_parser_context context_type;
+	lua_parser(lua_parser_context &context)
+		: context_(context), L_(context.L_)
 	{
 		if (!lua_checkstack(L(), 4))
 			stack_overflow();
@@ -390,10 +391,11 @@ public:
 
 	lua_parser_context& context() { return context_; }
 protected:
-	struct lua_State *L() { return context_.L_; }
+	struct lua_State *L() { return L_; }
 	void check_table();
 private:
 	lua_parser_context &context_;
+	struct lua_State   *L_;
 };
 
 lua_parser &erase_type(lua_parser &parser) { return parser; }
@@ -556,28 +558,26 @@ template <int Flags>
 class ir_builder
 {
 public:
-	ir_builder()
-		: use_terse_records_(false)
-	{}
+	ir_builder(): use_terse_records_(false) {}
 	void set_use_terse_records(bool yes_no) { use_terse_records_ = yes_no; }
 
 	template <typename Parser>
-	void process_value(Parser &, avro_value_t *);
+	void build_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
-	void process_array_value(Parser &, avro_value_t *);
+	void build_array_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
-	void process_map_value(Parser &, avro_value_t *);
+	void build_map_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
-	void process_verbose_record_value(Parser &, avro_value_t *);
+	void build_verbose_record_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
-	void process_terse_record_value(Parser &, avro_value_t *);
+	void build_terse_record_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
-	void process_union_value(Parser &, avro_value_t *);
+	void build_union_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
 	void skip_value(Parser &, const avro_schema_t);
@@ -601,7 +601,7 @@ private:
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::process_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_value(Parser &parser, avro_value_t *dest)
 {
 	switch (avro_value_get_type(dest)) {
 	case AVRO_BOOLEAN:
@@ -648,9 +648,9 @@ ir_builder<Flags>::process_value(Parser &parser, avro_value_t *dest)
 		return;
 	case AVRO_ARRAY:
 		{
-			 typename Parser::parser_context::array_parser ap(
+			 typename Parser::context_type::array_parser ap(
 				 parser.context());
-			 process_array_value(ap, dest);
+			 build_array_value(ap, dest);
 		}
 		return;
 	case AVRO_ENUM:
@@ -675,30 +675,30 @@ ir_builder<Flags>::process_value(Parser &parser, avro_value_t *dest)
 		return;
 	case AVRO_MAP:
 		{
-			typename Parser::parser_context::map_parser mp(
+			typename Parser::context_type::map_parser mp(
 				parser.context());
-			process_map_value(mp, dest);
+			build_map_value(mp, dest);
 			mp.kill();
 		}
 		return;
 	case AVRO_RECORD:
 		if (use_terse_records()) {
-			typename Parser::parser_context::terse_record_parser rp(
+			typename Parser::context_type::terse_record_parser rp(
 				parser.context());
-			process_terse_record_value(rp, dest);
+			build_terse_record_value(rp, dest);
 			rp.kill();
 		} else {
-			typename Parser::parser_context::verbose_record_parser rp(
+			typename Parser::context_type::verbose_record_parser rp(
 				parser.context());
-			process_verbose_record_value(rp, dest);
+			build_verbose_record_value(rp, dest);
 			rp.kill();
 		}
 		return;
 	case AVRO_UNION:
 		{
-			typename Parser::parser_context::union_parser up(
+			typename Parser::context_type::union_parser up(
 				parser.context());
-			process_union_value(up, dest);
+			build_union_value(up, dest);
 			up.kill();
 		}
 		return;
@@ -710,20 +710,20 @@ ir_builder<Flags>::process_value(Parser &parser, avro_value_t *dest)
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::process_array_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_array_value(Parser &parser, avro_value_t *dest)
 {
 	while (parser.next()) {
 		avro_value_t child;
 		if (avro_value_append(dest, &child, NULL) != 0)
 			internal_error();
-		process_value(erase_type(parser), &child);
+		build_value(erase_type(parser), &child);
 	}
 }
 
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::process_map_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_map_value(Parser &parser, avro_value_t *dest)
 {
 	while (parser.next()) {
 		int rc;
@@ -747,14 +747,14 @@ ir_builder<Flags>::process_map_value(Parser &parser, avro_value_t *dest)
 		// XXX dup keys
 		if (rc != 0)
 			internal_error();
-		process_value(erase_type(parser), &child);
+		build_value(erase_type(parser), &child);
 	}
 }
 
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::process_verbose_record_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_verbose_record_value(Parser &parser, avro_value_t *dest)
 {
 	avro_schema_t schema = avro_value_get_schema(dest);
 	while (parser.next()) {
@@ -767,7 +767,7 @@ ir_builder<Flags>::process_verbose_record_value(Parser &parser, avro_value_t *de
 			record_index_error(schema, index);
 
 		if (field.iface) {
-			process_value(erase_type(parser), &field);
+			build_value(erase_type(parser), &field);
 		} else {
 			// on the fly schema conversion;
 			// excluded from target IR
@@ -781,7 +781,7 @@ ir_builder<Flags>::process_verbose_record_value(Parser &parser, avro_value_t *de
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::process_terse_record_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_terse_record_value(Parser &parser, avro_value_t *dest)
 {
 	avro_schema_t schema = avro_value_get_schema(dest);
 	size_t i, field_count = avro_schema_record_size(schema);
@@ -791,7 +791,7 @@ ir_builder<Flags>::process_terse_record_value(Parser &parser, avro_value_t *dest
 		if (avro_value_get_by_index(dest, i, &field, NULL) != 0)
 			internal_error();
 		if (field.iface != NULL) {
-			process_value(erase_type(parser), &field);
+			build_value(erase_type(parser), &field);
 		} else {
 			// on the fly schema conversion;
 			// excluded from target IR
@@ -805,14 +805,14 @@ ir_builder<Flags>::process_terse_record_value(Parser &parser, avro_value_t *dest
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::process_union_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_union_value(Parser &parser, avro_value_t *dest)
 {
 	avro_schema_t schema = avro_value_get_schema(dest);
 	int           tag    = resolve_union_tag(Flags, schema, parser.tag());
 	avro_value_t  branch;
 	if (avro_value_set_branch(dest, tag, &branch) != 0)
 		union_tag_error(schema, tag);
-	process_value(erase_type(parser), &branch);
+	build_value(erase_type(parser), &branch);
 }
 
 template <int Flags>
