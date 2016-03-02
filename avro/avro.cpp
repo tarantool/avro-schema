@@ -132,6 +132,10 @@ xform_ctx_gc(struct lua_State *L)
 	return 0;
 }
 
+const char get_json_encode[] =
+	"local json = require(\"json\")\n"
+	"return json.encode";
+
 static int
 create_schema(struct lua_State *L)
 {
@@ -139,6 +143,20 @@ create_schema(struct lua_State *L)
 	size_t len;
 	struct schema_plus *schema;
 
+	if (lua_type(L, 1) != LUA_TSTRING) {
+		// use json.encode (retrieved once and cached in upvalue)
+		lua_pushvalue(L, lua_upvalueindex(1));
+		if (lua_isnil(L, -1)) {
+			lua_pop(L, 1);
+			luaL_loadstring(L, get_json_encode);
+			lua_call(L, 0, 1);
+			lua_pushvalue(L, -1);
+			lua_replace(L, lua_upvalueindex(1));
+		}
+		lua_pushvalue(L, 1);
+		lua_call(L, 1, 1);
+		lua_replace(L, 1);
+	}
 	luaL_argcheck(L, lua_isstring(L, 1), 1, "`string' expected");
 	str = lua_tolstring(L, 1, &len);
 	schema = (struct schema_plus *)lua_newuserdata(L, sizeof(*schema));
@@ -462,7 +480,6 @@ LUA_API int
 luaopen_avro(lua_State *L)
 {
 	static const struct luaL_reg lib [] = {
-		{"create_schema",        create_schema},
 		{"schema_is_compatible", schema_is_compatible},
 		{"flatten",              flatten},
 		{"unflatten",            unflatten},
@@ -493,6 +510,9 @@ luaopen_avro(lua_State *L)
 
 	lua_newtable(L);
 	luaL_register(L, NULL, lib);
+	lua_pushnil(L);
+	lua_pushcclosure(L, create_schema, 1);
+	lua_setfield(L, -2, "create_schema");
 	return 1;
 }
 
