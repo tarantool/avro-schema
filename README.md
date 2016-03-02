@@ -1,5 +1,5 @@
 # tarantool-avro
-Apache Avro bindings for Tarantool
+[Apache Avro](http://avro.apache.org/docs/1.8.0/spec.html) bindings for Tarantool
 
 ```lua
 avro = require ('avro')
