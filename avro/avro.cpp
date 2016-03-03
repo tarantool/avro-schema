@@ -446,7 +446,6 @@ unflatten(struct lua_State *L)
 			builder.set_use_terse_records(true);
 			builder.build_value(parser, &xform_ctx->src);
 		}
-
 		{
 			lua_emitter_context         ec(L);
 			lua_emitter                 emitter(ec);
