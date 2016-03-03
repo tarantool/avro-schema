@@ -10,9 +10,9 @@ find_package(Tarantool)
 include_directories(${TARANTOOL_INCLUDE_DIRS})
 
 # Find MsgPuck llibrary
-set(MsgPuck_FIND_REQUIRED ON)
-find_package(MsgPuck)
-include_directories(${MSGPUCK_INCLUDE_DIRS})
+# set(MsgPuck_FIND_REQUIRED ON)
+# find_package(MsgPuck)
+# include_directories(${MSGPUCK_INCLUDE_DIRS})
 
 # Find other dependecies
 

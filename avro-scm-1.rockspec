@@ -1,8 +1,8 @@
-package = 'modulekit'
+package = 'avro'
 version = 'scm-1'
 
 source  = {
-    url    = 'git://github.com/tarantool/modulekit.git';
+    url    = 'git://github.com/tarantool/tarantool-avro.git';
     branch = 'master';
 }
 
@@ -12,9 +12,9 @@ description = {
     A ready to use module templates. Clone and modify to create
     new modules.
     ]];
-    homepage = 'https://github.com/tarantool/modulekit.git';
+    homepage = 'https://github.com/tarantool/tarantool-avro.git';
     license  = 'BSD';
-    maintainer = "Roman Tsisyk <roman@tarantool.org>";
+    maintainer = "NickZ <mejedi@gmail.com>";
 }
 
 dependencies = {
@@ -28,16 +28,14 @@ external_dependencies = {
 }
 
 build = {
-    type = 'builtin',
+    type = 'cmake',
 
     modules = {
-        ['modulekit'] = 'modulekit/init.lua';
-        ['modulekit.functions'] = 'modulekit/functions.lua';
-        ['modulekit.cfunctions'] = {
+        avro = {
+            sources = 'avro/avro.cpp',
             incdirs = {
-                '$(TARANTOOL_INCDIR)';
-            };
-            sources = 'modulekit/cfunctions.c';
+                "${TARANTOOL_INCDIR}"
+            }
         }
     }
 }
