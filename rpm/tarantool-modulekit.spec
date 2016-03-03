@@ -1,10 +1,10 @@
-Name: tarantool-modulekit
+Name: tarantool-avro
 Version: 1.0.1
 Release: 1%{?dist}
 Summary: Templates for Tarantool modules
 Group: Applications/Databases
 License: BSD
-URL: https://github.com/tarantool/modulekit
+URL: https://github.com/tarantool/avro
 Source0: https://github.com/tarantool/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
 BuildRequires: cmake >= 2.8
 BuildRequires: gcc >= 4.5

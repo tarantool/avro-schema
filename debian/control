@@ -1,4 +1,4 @@
-Source: tarantool-modulekit
+Source: tarantool-avro
 Priority: optional
 Section: database
 Maintainer: Roman Tsisyk <roman@tarantool.org>
@@ -6,15 +6,13 @@ Maintainer: Roman Tsisyk <roman@tarantool.org>
 Build-Depends: debhelper (>= 9), cdbs,
                cmake (>= 2.8),
                tarantool-dev (>= 1.6.8.0),
-               libmsgpuck-dev (>= 1.0.0),
-# For /usr/bin/prove
-               perl (>= 5.10.0)
+		       libjansson-dev
 Standards-Version: 3.9.6
-Homepage: https://github.com/tarantool/modulekit
-Vcs-Git: git://github.com/tarantool/modulekit.git
-Vcs-Browser: https://github.com/tarantool/modulekit
+Homepage: https://github.com/tarantool/tarantool-avro
+Vcs-Git: git://github.com/tarantool/tarantool-avro.git
+Vcs-Browser: https://github.com/tarantool/tarantool-avro
 
-Package: tarantool-modulekit
+Package: tarantool-avro
 Architecture: i386 amd64 armhf arm64
 Depends: tarantool (>= 1.6.8.0), ${shlibs:Depends}, ${misc:Depends}
 Pre-Depends: ${misc:Pre-Depends}

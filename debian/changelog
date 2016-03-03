@@ -1,12 +1,4 @@
-tarantool-modulekit (1.0.1-1) unstable; urgency=medium
-
-  * Fix tarantool-dev and libmsgpuck-dev dependencies
-  * Set correct Architecture
-  * Update Standards-Version
-
- -- Roman Tsisyk <roman@tarantool.org>  Wed, 17 Feb 2016 10:19:12 +0300
-
-tarantool-modulekit (1.0.0-1) unstable; urgency=low
+tarantool-avro (1.0.0-1) unstable; urgency=low
 
   * Initial release
 

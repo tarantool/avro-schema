@@ -1,8 +1,8 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Debianized-By: Roman Tsisyk <roman@tarantool.org>
-Upstream-Name: tarantool-modulekit
+Upstream-Name: tarantool-avro
 Upstream-Contact: roman@tarantool.org
-Source: https://github.com/tarantool/modulekit
+Source: https://github.com/tarantool/tarantool-avro
 
 Files: *
 Copyright: 2015 by Roman Tsisyk <roman@tarantool.org>
