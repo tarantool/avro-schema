@@ -169,7 +169,7 @@ set(CODEC_LIBRARIES ${ZLIB_LIBRARIES} ${LZMA_LIBRARIES} ${SNAPPY_LIBRARIES})
 set(CODEC_PKG "@ZLIB_PKG@ @LZMA_PKG@ @SNAPPY_PKG@")
 
 # Jansson JSON library
-pkg_check_modules(JANSSON jansson>=2.3)
+pkg_check_modules(JANSSON jansson>=2.0)
 if (JANSSON_FOUND)
     set(JANSSON_PKG libjansson)
     include_directories(${JANSSON_INCLUDE_DIR})
