@@ -12,7 +12,7 @@ env:
       - OS=fedora DIST=22 PACK=rpm
       - OS=fedora DIST=23 PACK=rpm
 #      - OS=fedora DIST=rawhide PACK=rpm
-      - OS=ubuntu DIST=precise PACK=deb
+#      - OS=ubuntu DIST=precise PACK=deb
       - OS=ubuntu DIST=trusty PACK=deb
       - OS=ubuntu DIST=wily PACK=deb
       - OS=ubuntu DIST=xenial PACK=deb
