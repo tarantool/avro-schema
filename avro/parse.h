@@ -410,7 +410,7 @@ public:
 	}
 	void kill()
 	{
-		assert(at_end());
+		// assert(at_end());
 		lua_pop(L(), 1);
 		lua_parser::kill();
 	}
@@ -502,8 +502,8 @@ public:
 	}
 	void kill()
 	{
-		if (lua_array_parser::next())
-			type_mismatch();
+		// if (lua_array_parser::next())
+		//	type_mismatch();
 		lua_array_parser::kill();
 	}
 	void next() {
