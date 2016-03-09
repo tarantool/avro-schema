@@ -1231,6 +1231,9 @@ avro_schema_from_json(const char *jsontext, const int32_t len,
 	AVRO_UNUSED(len);
 	AVRO_UNUSED(e);
 
+#ifndef JSON_DECODE_ANY
+#define JSON_DECODE_ANY 0
+#endif
 	root = json_loads(jsontext, JSON_DECODE_ANY, &json_error);
 	if (!root) {
 		avro_set_error("Error parsing JSON: %s", json_error.text);
