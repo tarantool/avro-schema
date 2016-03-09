@@ -31,11 +31,7 @@ make %{?_smp_mflags} check
 %make_install
 
 %files
-%{_libdir}/tarantool/*/
-%{_datarootdir}/tarantool/*/
-%doc README.md
-%{!?_licensedir:%global license %doc}
-%license LICENSE AUTHORS
+%{_libdir}/tarantool/avro.so
 
 %changelog
 * Wed Mar 9 2016 Nick Zavaritsky <mejedi@tarantool.org> 1.0.0-1
