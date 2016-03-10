@@ -1,4 +1,4 @@
-# tarantool-avro
+# tarantool-avro [![Build Status](https://travis-ci.org/tarantool/tarantool-avro.svg?branch=master)](https://travis-ci.org/tarantool/tarantool-avro)
 [Apache Avro](http://avro.apache.org/docs/1.8.0/spec.html) bindings for Tarantool
 
 ```lua
