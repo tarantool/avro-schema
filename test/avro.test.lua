@@ -57,6 +57,24 @@ local frob_v2_schema_p    = {
     }
 }
 local frob_v1_array_schema_p = { type = "array", items = frob_v1_schema_p }
+local complex_schema_p = {
+    type = "record",
+    name = "X.Complex",
+    fields = {
+        { name = "A", type = "int" },
+        { name = "B", type = "int" },
+        { name = "C", type = "int" },
+        { name = "D", type = {
+            type = "record",
+            name = "X.Nested",
+            fields = {
+                { name = "E", type = "int" },
+                { name = "F", type = "int" },
+                { name = "G", type = "int" }
+            }
+        }}
+    }
+}
 
 --
 -- load-good-schema
@@ -73,7 +91,8 @@ test:test('load-good-schema', function(test)
         {'load-string-array-schema',  string_array_schema_p,  'Avro schema (array)'},
         {'load-frob-v1-schema',       frob_v1_schema_p,       'Avro schema (X.Frob)'},
         {'load-frob-v2-schema',       frob_v2_schema_p,       'Avro schema (X.Frob)'},
-        {'load-frob-v1-array-schema', frob_v1_array_schema_p, 'Avro schema (array)'}
+        {'load-frob-v1-array-schema', frob_v1_array_schema_p, 'Avro schema (array)'},
+        {'load-complex-schema',       complex_schema_p,       'Avro schema (X.Complex)'}
     }
  
     test:plan(#tests)
@@ -180,12 +199,15 @@ test:test('flatten', function(test)
     local _, frob_v1_schema = create_schema(frob_v1_schema_p)
     local _, frob_v2_schema = create_schema(frob_v2_schema_p)
     local _, frob_v1_array_schema = create_schema(frob_v1_array_schema_p)
+    local _, complex_schema = create_schema(complex_schema_p)
     local ABC = { A = 1, B = 2, C = 3 }
     local flat_ABC = { 1, 2, 3 }
     local ABCD = { A = 1, B = 2, C = 3, D = 'test' }
     local flat_ABCD = { 1, 2, 3, 'test' }
+    local ABCDEFG = { A = 1, B = 2, C = 3, D = { E = 4, F = 5, G = 6 } }
+    local flat_ABCDEFG = { 1, 2, 3, 4, 5, 6 }
 
-    test:plan(6)
+    test:plan(7)
 
     test:is_deeply(
         { flatten(ABC, frob_v1_schema) },
@@ -208,6 +230,11 @@ test:test('flatten', function(test)
         'flatten-frob-v2-as-frob-v1')
 
     test:is_deeply(
+        { flatten(ABCDEFG, complex_schema) },
+        { true, flat_ABCDEFG },
+        'flatten-complex')
+
+    test:is_deeply(
         { flatten({ A = '', B = 2, C = 3 }, frob_v1_schema) },
         { false, 'type mismatch' },
         'flatten-error-type-mismatch')
@@ -227,12 +254,15 @@ test:test('unflatten', function(test)
     local _, frob_v1_schema = create_schema(frob_v1_schema_p)
     local _, frob_v2_schema = create_schema(frob_v2_schema_p)
     local _, frob_v1_array_schema = create_schema(frob_v1_array_schema_p)
+    local _, complex_schema = create_schema(complex_schema_p)
     local ABC = { A = 1, B = 2, C = 3 }
     local flat_ABC = { 1, 2, 3 }
     local ABCD = { A = 1, B = 2, C = 3, D = 'test' }
     local flat_ABCD = { 1, 2, 3, 'test' }
+    local ABCDEFG = { A = 1, B = 2, C = 3, D = { E = 4, F = 5, G = 6 } }
+    local flat_ABCDEFG = { 1, 2, 3, 4, 5, 6 }
 
-    test:plan(6)
+    test:plan(7)
 
     test:is_deeply(
         { unflatten(flat_ABC, frob_v1_schema) },
@@ -253,6 +283,11 @@ test:test('unflatten', function(test)
         { unflatten(flat_ABCD, frob_v2_schema, frob_v1_schema) },
         { true, ABC },
         'unflatten-frob-v2-as-frob-v1')
+
+    test:is_deeply(
+        { unflatten(flat_ABCDEFG, complex_schema) },
+        { true, ABCDEFG },
+        'unflatten-complex')
 
     test:is_deeply(
         { unflatten({ '', 2, 3 }, frob_v1_schema) },

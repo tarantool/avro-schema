@@ -1,6 +1,8 @@
 enum {
 	EMITTER_ENABLE_VERBOSE_RECORDS = 32,
 	EMITTER_ENABLE_TERSE_RECORDS   = 64,
+	EMITTER_ENABLE_COLLAPSE_NESTED = 128,
+	EMITTER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED = 256
 };
 
 class lua_emitter;
@@ -83,16 +85,18 @@ class lua_array_emitter: public lua_emitter
 {
 public:
 	lua_array_emitter(lua_emitter_context &context, int length)
-		: lua_emitter(context)
+		: lua_emitter(context), i(1)
 	{
 		lua_createtable(L(), length, 0);
 	}
 	void kill() {}
 	void begin_item(int) {}
-	void end_item(int i)
+	void end_item(int)
 	{
-		lua_rawseti(L(), -2, i+1);
+		lua_rawseti(L(), -2, i++);
 	}
+private:
+	lua_Integer i;
 };
 
 class lua_map_emitter: public lua_emitter
@@ -157,7 +161,7 @@ template <int Flags>
 class ir_visitor
 {
 public:
-	ir_visitor(): use_terse_records_(false) {}
+	ir_visitor(): use_terse_records_(false), collapse_nested_(false) {}
 	void set_use_terse_records(bool yes_no) { use_terse_records_ = yes_no; }
 
 	bool use_terse_records()
@@ -172,8 +176,26 @@ public:
 		}
 	}
 
+	bool collapse_nested()
+	{
+		if (Flags & EMITTER_ENABLE_COLLAPSE_NESTED) {
+			if (Flags & EMITTER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED)
+				return use_terse_records();
+			else
+				return use_terse_records() && collapse_nested_;
+		} else {
+			return false;
+		}
+	}
+
 	template <typename Emitter>
-	void visit_value(Emitter &, avro_value_t *);
+	void visit_value(Emitter &e, avro_value_t *v)
+	{
+		visit_value(e, v, avro_value_get_type(v));
+	}
+
+	template <typename Emitter>
+	void visit_value(Emitter &, avro_value_t *, avro_type_t);
 
 	template <typename Emitter>
 	void visit_array_value(Emitter &, avro_value_t *, size_t);
@@ -181,16 +203,20 @@ public:
 	template <typename Emitter>
 	void visit_map_value(Emitter &, avro_value_t *, size_t);
 
+	template <typename Emitter>
+	void visit_terse_record_value(Emitter &, avro_value_t *, size_t);
+
 private:
 	bool use_terse_records_;
+	bool collapse_nested_;
 };
 
 template <int Flags>
 template <typename Emitter>
 void
-ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val)
+ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val, avro_type_t type)
 {
-	switch (avro_value_get_type(val)) {
+	switch (type) {
 	case AVRO_BOOLEAN:
 		{
 			int v;
@@ -299,14 +325,18 @@ ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val)
 		return;
 	case AVRO_RECORD:
 		{
+			typedef typename Emitter::context_type::terse_record_emitter
+				terse_record_emitter;
 			size_t count;
 			if (avro_value_get_size(val, &count) != 0)
 				internal_error();
 			if (use_terse_records()) {
-				typename Emitter::context_type::terse_record_emitter re(
+				// XXX count is incorrect if collapse_nested is in
+				// effect
+				terse_record_emitter re(
 					emitter.context(),
 					static_cast<int>(count));
-				visit_array_value(re, val, count);
+				visit_terse_record_value(re, val, count);
 				re.kill();
 			} else {
 				typename Emitter::context_type::verbose_record_emitter re(
@@ -370,5 +400,32 @@ ir_visitor<Flags>::visit_map_value(
 		emitter.begin_item(static_cast<int>(i), key);
 		visit_value(erase_type(emitter), &item);
 		emitter.end_item(static_cast<int>(i), key);
+	}
+}
+
+template <int Flags>
+template <typename Emitter>
+void
+ir_visitor<Flags>::visit_terse_record_value(
+	Emitter &emitter, avro_value_t *val, size_t count)
+{
+	const bool collapse = collapse_nested();
+	size_t i;
+	for (i = 0; i < count; i++) {
+		avro_value_t item;
+		avro_type_t  type;
+		if (avro_value_get_by_index(val, i, &item, NULL) != 0)
+			internal_error();
+		type = avro_value_get_type(&item);
+		if (collapse && type == AVRO_RECORD) {
+			size_t count;
+			if (avro_value_get_size(&item, &count) != 0)
+				internal_error();
+			visit_terse_record_value(emitter, &item, count);
+		} else {
+			emitter.begin_item(static_cast<int>(i));
+			visit_value(erase_type(emitter), &item, type);
+			emitter.end_item(static_cast<int>(i));
+		}
 	}
 }

@@ -68,6 +68,8 @@ enum {
 	PARSER_ENABLE_FAST_SKIP          = 16,
 	PARSER_ENABLE_VERBOSE_RECORDS    = 32,
 	PARSER_ENABLE_TERSE_RECORDS      = 64,
+	PARSER_ENABLE_COLLAPSE_NESTED    = 128,
+	PARSER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED = 256
 };
 
 void check_utf8_string(int flags, const Bytes &b)
@@ -568,11 +570,20 @@ template <int Flags>
 class ir_builder
 {
 public:
-	ir_builder(): use_terse_records_(false) {}
+	ir_builder()
+		: use_terse_records_(false), collapse_nested_(false)
+	{}
 	void set_use_terse_records(bool yes_no) { use_terse_records_ = yes_no; }
+	void set_collapse_nested(bool yes_no) { collapse_nested_ = yes_no; }
 
 	template <typename Parser>
-	void build_value(Parser &, avro_value_t *);
+	void build_value(Parser &p, avro_value_t *v)
+	{
+		build_value(p, v, avro_value_get_type(v));
+	}
+
+	template <typename Parser>
+	void build_value(Parser &, avro_value_t *, avro_type_t);
 
 	template <typename Parser>
 	void build_array_value(Parser &, avro_value_t *);
@@ -604,16 +615,30 @@ public:
 		}
 	}
 
+	bool collapse_nested()
+	{
+		if (Flags & PARSER_ENABLE_COLLAPSE_NESTED) {
+			if (Flags & PARSER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED)
+				return use_terse_records();
+			else
+				return use_terse_records() && collapse_nested_;
+		} else {
+			return false;
+		}
+	}
+
 private:
 	bool use_terse_records_;
+	bool collapse_nested_;
 };
 
 template <int Flags>
 template <typename Parser>
 void
-ir_builder<Flags>::build_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags>::build_value(
+	Parser &parser, avro_value_t *dest, avro_type_t type)
 {
-	switch (avro_value_get_type(dest)) {
+	switch (type) {
 	case AVRO_BOOLEAN:
 		if (avro_value_set_boolean(dest, parser.consume_boolean()) != 0)
 			internal_error();
@@ -793,18 +818,26 @@ template <typename Parser>
 void
 ir_builder<Flags>::build_terse_record_value(Parser &parser, avro_value_t *dest)
 {
+	const bool collapse = collapse_nested();
 	avro_schema_t schema = avro_value_get_schema(dest);
 	size_t i, field_count = avro_schema_record_size(schema);
 	for (i = 0; i < field_count; i++) {
-		parser.next();
 		avro_value_t  field;
+		avro_type_t   type;
 		if (avro_value_get_by_index(dest, i, &field, NULL) != 0)
 			internal_error();
 		if (field.iface != NULL) {
-			build_value(erase_type(parser), &field);
+			type = avro_value_get_type(&field);
+			if (collapse && type == AVRO_RECORD) {
+				build_terse_record_value(parser, &field);
+			} else {
+				parser.next();
+				build_value(erase_type(parser), &field, type);
+			}
 		} else {
 			// on the fly schema conversion;
 			// excluded from target IR
+			parser.next();
 			skip_value(
 				erase_type(parser),
 				pure_schema_record_field_get_by_index(schema, i));
