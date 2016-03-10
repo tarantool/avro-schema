@@ -26,7 +26,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fPIC -fvisibility=hidden -fv
 add_subdirectory(avro)
 add_subdirectory(libavro)
 
-# Add `make check
-add_custom_target(check
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    COMMAND env true)
+enable_testing()
+add_test(avro tarantool ${CMAKE_SOURCE_DIR}/test/avro.test.lua)
+set_tests_properties(avro PROPERTIES ENVIRONMENT "BINARY_DIR=${PROJECT_BINARY_DIR}")
+add_custom_target(check COMMAND ctest -V)

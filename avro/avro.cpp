@@ -90,8 +90,8 @@ resolver_to_string(struct lua_State *L)
 	avro_value_iface_t **wrapper;
 	wrapper = (avro_value_iface_t **)
 		luaL_checkudata(L, 1, resolver_typename);
-	lua_pushliteral(L, "Avro schema resolver");
 	(void)wrapper;
+	lua_pushliteral(L, "Avro schema resolver");
 	return 1;
 }
 
@@ -130,6 +130,17 @@ xform_ctx_gc(struct lua_State *L)
 		luaL_checkudata(L, 1, xform_ctx_typename);
 	finalize_xform_ctx(xform_ctx);
 	return 0;
+}
+
+static int
+xform_ctx_to_string(struct lua_State *L)
+{
+	struct xform_ctx *xform_ctx;
+	xform_ctx = (struct xform_ctx *)
+		luaL_checkudata(L, 1, xform_ctx_typename);
+	(void)xform_ctx;
+	lua_pushliteral(L, "Avro xform ctx");
+	return 1;
 }
 
 const char get_json_encode[] =
@@ -469,6 +480,16 @@ out:
 	return st;
 }
 
+static int
+get_metatables(struct lua_State *L)
+{
+	// used in tests to hook __gc
+	luaL_getmetatable(L, schema_typename);
+	luaL_getmetatable(L, resolver_typename);
+	luaL_getmetatable(L, xform_ctx_typename);
+	return 3;
+}
+
 extern "C" {
 
 LUA_API int
@@ -484,6 +505,7 @@ luaopen_avro(lua_State *L)
 		{"unflatten",            unflatten},
 		{"_get_resolver_cache",  get_resolver_cache},
 		{"_create_resolver",     create_resolver},
+		{"_get_metatables",      get_metatables},
 		{NULL, NULL}
 	};
 	// avro.schema
@@ -492,20 +514,18 @@ luaopen_avro(lua_State *L)
 	lua_setfield(L, -2, "__gc");
 	lua_pushcclosure(L, schema_to_string, 0);
 	lua_setfield(L, -2, "__tostring");
-	lua_pushliteral(L, "");
-	lua_setfield(L, -2, "__metatable");
 	// avro.resolver
 	luaL_newmetatable(L, resolver_typename);
 	lua_pushcclosure(L, resolver_gc, 0);
 	lua_setfield(L, -2, "__gc");
 	lua_pushcclosure(L, resolver_to_string, 0);
 	lua_setfield(L, -2, "__tostring");
-	lua_pushliteral(L, "");
-	lua_setfield(L, -2, "__metatable");
 	// avvo.xform-ctx
 	luaL_newmetatable(L, xform_ctx_typename);
 	lua_pushcclosure(L, xform_ctx_gc, 0);
 	lua_setfield(L, -2, "__gc");
+	lua_pushcclosure(L, xform_ctx_to_string, 0);
+	lua_setfield(L, -2, "__tostring");
 
 	lua_newtable(L);
 	luaL_register(L, NULL, lib);
