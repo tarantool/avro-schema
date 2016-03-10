@@ -4,7 +4,7 @@ for _, dir in pairs({ "..", ".", os.getenv("BINARY_DIR") }) do
 end
 
 local tap = require('tap')
-local avro = require('avro')
+local avro = require('avrotest')
 
 local create_schema = avro.create_schema
 local flatten       = avro.flatten

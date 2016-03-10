@@ -507,9 +507,6 @@ luaopen_avro(lua_State *L)
 		{"schema_is_compatible", schema_is_compatible},
 		{"flatten",              flatten},
 		{"unflatten",            unflatten},
-		{"_get_resolver_cache",  get_resolver_cache},
-		{"_create_resolver",     create_resolver},
-		{"_get_metatables",      get_metatables},
 		{NULL, NULL}
 	};
 	// avro.schema
@@ -536,6 +533,25 @@ luaopen_avro(lua_State *L)
 	lua_pushnil(L);
 	lua_pushcclosure(L, create_schema, 1);
 	lua_setfield(L, -2, "create_schema");
+	return 1;
+}
+
+LUA_API int
+luaopen_avrotest(lua_State *L)
+	__attribute__((__visibility__("default")));
+
+// Alt entry point, exposes internals
+LUA_API int
+luaopen_avrotest(lua_State *L)
+{
+	static const struct luaL_reg lib [] = {
+		{"_get_resolver_cache",  get_resolver_cache},
+		{"_create_resolver",     create_resolver},
+		{"_get_metatables",      get_metatables},
+		{NULL, NULL}
+	};
+	luaopen_avro(L);
+	luaL_register(L, NULL, lib);
 	return 1;
 }
 
