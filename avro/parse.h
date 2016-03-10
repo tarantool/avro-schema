@@ -392,7 +392,8 @@ public:
 	lua_parser_context& context() { return context_; }
 protected:
 	struct lua_State *L() { return L_; }
-	void check_table();
+	void note_table();
+	void forget_table();
 private:
 	lua_parser_context &context_;
 	struct lua_State   *L_;
@@ -406,11 +407,12 @@ public:
 	lua_array_parser(lua_parser_context &context)
 		: lua_parser(context), index_(1)
 	{
-		check_table();
+		note_table();
 	}
 	void kill()
 	{
 		// assert(at_end());
+		forget_table();
 		lua_pop(L(), 1);
 		lua_parser::kill();
 	}
@@ -437,12 +439,13 @@ public:
 	lua_map_parser(lua_parser_context &context)
 		: lua_parser(context), at_end_(false)
 	{
-		check_table();
+		note_table();
 		lua_pushnil(L());
 	}
 	void kill()
 	{
 		assert(at_end_);
+		forget_table();
 		lua_pop(L(), 1);
 		lua_parser::kill();
 	}
@@ -537,7 +540,7 @@ void stack_overflow()
 	throw std::runtime_error("stack overflow");
 }
 
-void lua_parser::check_table()
+void lua_parser::note_table()
 {
 	if (!lua_istable(L(), -1))
 		type_mismatch();
@@ -548,6 +551,13 @@ void lua_parser::check_table()
 	lua_pop(L(), 1);
 	lua_pushvalue(L(), -1);
 	lua_pushboolean(L(), 1);
+	lua_rawset(L(), context_.crct_index_);
+}
+
+void lua_parser::forget_table()
+{
+	lua_pushvalue(L(), -1);
+	lua_pushnil(L());
 	lua_rawset(L(), context_.crct_index_);
 }
 
