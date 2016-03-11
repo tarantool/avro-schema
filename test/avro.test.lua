@@ -1,10 +1,8 @@
 #!/usr/bin/env tarantool
-for _, dir in pairs({ "..", ".", os.getenv("BINARY_DIR") }) do
-    package.cpath = package.cpath .. ";" .. dir .. "/avro/?.so;" .. dir .. "/avro/?.dylib"
-end
-
 local tap = require('tap')
-local avro = require('avrotest')
+-- use alt entry point (exposes internals)
+local avro = package.loadlib(
+    os.getenv('BINARY_DIR')..'/avro/avro.so', 'luaopen_avrotest') ()
 
 local create_schema = avro.create_schema
 local flatten       = avro.flatten
