@@ -9,8 +9,8 @@ Source0: https://github.com/tarantool/%{name}/archive/%{version}/%{name}-%{versi
 BuildRequires: cmake >= 2.8
 BuildRequires: gcc >= 4.5
 BuildRequires: tarantool-devel >= 1.6.8.0
+BuildRequires: msgpuck-devel >= 1.0.0
 BuildRequires: jansson-devel >= 2.0.0
-BuildRequires: /usr/bin/prove
 Requires: tarantool >= 1.6.8.0
 Requires: jansson >= 2.0.0
 
