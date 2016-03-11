@@ -1,5 +1,6 @@
 #include <cassert>
 #include <stdexcept>
+#define MP_SOURCE
 #include <msgpuck.h>
 
 struct noncopyable
