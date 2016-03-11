@@ -4,6 +4,9 @@ extern "C" {
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+// missing parts of tarantool pub api
+struct tuple *lua_istuple(struct lua_State *, int)
+	__attribute__((__visibility__("default")));
 }
 
 #include <avro/errors.h>
@@ -402,6 +405,13 @@ const int lua_ir_v_options =
 	EMITTER_ENABLE_COLLAPSE_NESTED |
 	EMITTER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED;
 
+const int mpk_ir_b_options =
+	PARSER_ENABLE_FAST_SKIP |
+	PARSER_ENABLE_VERBOSE_RECORDS |
+	PARSER_ENABLE_TERSE_RECORDS |
+	PARSER_ENABLE_COLLAPSE_NESTED |
+	PARSER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED;
+
 static int
 flatten(struct lua_State *L)
 {
@@ -454,7 +464,27 @@ unflatten(struct lua_State *L)
 	}
 	try
 	{
-		{
+		box_tuple_t *t = NULL;
+		if ((t = lua_istuple(L, 1)) != NULL) {
+
+			// XXX no box_tuple_data()
+			mpk_fast_parsers::mpk_parser_context pc(Bytes(
+				reinterpret_cast<const uint8_t *>(t) + 12,
+				box_tuple_bsize(t)));
+			ir_builder<mpk_ir_b_options>builder;
+			builder.set_use_terse_records(true);
+			avro_type_t t =
+				avro_value_get_type(&xform_ctx->src);
+			if (t == AVRO_RECORD) {
+				mpk_fast_parsers::mpk_terse_record_parser parser(pc);
+				builder.build_terse_record_value(
+					parser, &xform_ctx->src);
+				// parser.kill() intentionally omited
+			} else {
+				mpk_fast_parsers::mpk_parser parser(pc);
+				builder.build_value(parser, &xform_ctx->src, t);
+			}
+		} else {
 			lua_parser_context          pc(L, 1);
 			lua_parser                  parser(pc);
 			ir_builder<lua_ir_b_options>builder;
