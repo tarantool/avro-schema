@@ -1,4 +1,7 @@
-/* A C submodule */
+#define __STDC_LIMIT_MACROS
+#define __STDC_CONSTANT_MACROS
+#define MP_SOURCE
+
 #include <tarantool/module.h>
 extern "C" {
 #include <lua.h>
@@ -15,8 +18,11 @@ struct tuple *lua_istuple(struct lua_State *, int)
 #include <avro/resolver.h>
 #include <avro/generic.h>
 
-#include <assert.h>
+#include <cassert>
+#include <stdexcept>
+#include <msgpuck.h>
 
+#include "util.h"
 #include "parse.h"
 #include "emit.h"
 
