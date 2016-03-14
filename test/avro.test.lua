@@ -10,7 +10,7 @@ local unflatten     = avro.unflatten
 local is_compatible = avro.schema_is_compatible
 
 local test = tap.test('Avro module')
-test:plan(8)
+test:plan(9)
 
 -- hook GC methods to produce log
 local gc_log
@@ -95,7 +95,8 @@ test:test('load-good-schema', function(test)
         {'load-frob-v2-schema',       frob_v2_schema_p,       'Avro schema (X.Frob)'},
         {'load-frob-v1-array-schema', frob_v1_array_schema_p, 'Avro schema (array)'},
         {'load-complex-schema',       complex_schema_p,       'Avro schema (X.Complex)'},
-        {'load-enum-schema',          enum_schema_p,          'Avro schema (Suit)'}
+        {'load-enum-schema',          enum_schema_p,          'Avro schema (Suit)'},
+        {'load-union-value',          {'int', 'string'},      'Avro schema (union)'}
     }
  
     test:plan(#tests)
@@ -368,6 +369,82 @@ test:test('enum', function(test)
         { unflatten(100, enum_schema) },
         { false, 'name unknown' },
         'unflatten-100')
+end)
+
+--
+-- union
+--
+test:test('union', function(test)
+    local _, simple_schema = create_schema({ 'int', 'string' })
+    local _, record_schema = create_schema({
+        type = 'record',
+        name = 'X.Union',
+        fields = {
+            { name = 'A', type = 'int' },
+            { name = 'B', type = { 'int', 'string' } },
+            { name = 'C', type = 'int' }
+        }
+    })
+    local simple1, simple2 = { 'int', 42 }, { 'string', 'Hello, world!'}
+    local simple1_flat, simple2_flat = { 0, 42 }, { 1, 'Hello, world!'}
+    local record1 = { A = 1, B = simple1, C = 3}
+    local record2 = { A = 1, B = simple2, C = 3}
+    local record1_flat = { 1, 0, 42, 3 }
+    local record2_flat = { 1, 1, 'Hello, world!', 3 }
+
+    local valid_cases = {
+        { simple_schema, simple1, simple1_flat },
+        { simple_schema, simple2, simple2_flat },
+        { record_schema, record1, record1_flat },
+        { record_schema, record2, record2_flat }
+    }
+
+    test:plan(2 * #valid_cases + 6)
+    for i, case in pairs(valid_cases) do
+        test:is_deeply(
+            { flatten(case[2], case[1]) },
+            { true, case[3] },
+            string.format('flatten-%d', i)
+        )
+    end
+    for i, case in pairs(valid_cases) do
+        test:is_deeply(
+            { unflatten(case[3], case[1]) },
+            { true, case[2] },
+            string.format('unflatten-%d', i)
+        )
+    end
+
+    test:is_deeply(
+        { flatten({ 'brokkoli', 42 }, simple_schema ) },
+        { false, "name unknown" },
+        'invalid-1')
+
+    test:is_deeply(
+        { flatten({ 'int', {} }, simple_schema ) },
+        { false, "type mismatch" },
+        'invalid-2')
+
+    test:is_deeply(
+        { flatten({ 'string', {} }, simple_schema ) },
+        { false, "type mismatch" },
+        'invalid-3')
+
+    test:is_deeply(
+        { unflatten({ -1, 42 }, simple_schema) },
+        { false, "name unknown"},
+        'invalid-4')
+
+    test:is_deeply(
+        { unflatten({ 2, 42 }, simple_schema) },
+        { false, "name unknown"},
+        'invalid-4')
+
+    test:is_deeply(
+        { unflatten({ 100, 42 }, simple_schema) },
+        { false, "name unknown"},
+        'invalid-4')
+
 end)
 
 test:check()

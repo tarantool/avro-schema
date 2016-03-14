@@ -65,7 +65,6 @@ private:
 	processing_mode mode_;
 };
 
-
 enum {
 	ASSUME_NUL_TERM_STRINGS         = 1,
 	ASSUME_NON_NUL_CHARS            = 2,

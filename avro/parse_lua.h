@@ -187,29 +187,6 @@ private:
 	bool  at_end_;
 };
 
-class lua_union_parser: public lua_array_parser
-{
-public:
-	lua_union_parser(lua_parser_context &context)
-		: lua_array_parser(context)
-	{
-		// expecting an array consisting of exactly 2 elements
-		if (!next() || !next() || next() || !lua_isstring(L(), -2))
-			type_mismatch();
-		size_t len;
-		const char *s = lua_tolstring(L(), -2, &len);
-		tag_ = Bytes(s, len);
-	}
-	void kill()
-	{
-		lua_pop(L(), 1); // pop tag
-		lua_array_parser::kill();
-	}
-	Bytes tag() { return tag_; }
-private:
-	Bytes tag_;
-};
-
 class lua_terse_record_parser: public lua_array_parser
 {
 public:
@@ -227,6 +204,21 @@ public:
 		if (!lua_array_parser::next())
 			type_mismatch();
 	}
+};
+
+class lua_union_parser: public lua_terse_record_parser
+{
+public:
+	lua_union_parser(lua_parser_context &context)
+		: lua_terse_record_parser(context)
+	{
+		next();
+		tag_ = consume_string();
+		next();
+	}
+	Bytes tag() { return tag_; }
+private:
+	Bytes tag_;
 };
 
 void lua_parser::note_table()

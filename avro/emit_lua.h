@@ -83,8 +83,8 @@ public:
 		lua_createtable(L(), length, 0);
 	}
 	void kill() {}
-	void begin_item(int) {}
-	void end_item(int)
+	void begin_item() {}
+	void end_item()
 	{
 		lua_rawseti(L(), -2, i++);
 	}

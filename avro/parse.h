@@ -131,6 +131,9 @@ public:
 	void build_union_value(Parser &, avro_value_t *);
 
 	template <typename Parser>
+	void build_alt_union_value(Parser &, avro_value_t *);
+
+	template <typename Parser>
 	void skip_value(Parser &, const avro_schema_t);
 
 private:
@@ -249,7 +252,14 @@ ir_builder<Flags, Options>::build_value(
 		}
 		return;
 	case AVRO_UNION:
-		{
+		if ((Flags & ASSUME_STRING_UNION_TAG_CODING) &&
+			options_.use_integer_union_tag_coding()) {
+
+			typename Parser::context_type::terse_record_parser up(
+				parser.context());
+			build_alt_union_value(up, dest);
+			up.kill();
+		} else {
 			typename Parser::context_type::union_parser up(
 				parser.context());
 			build_union_value(up, dest);
@@ -349,6 +359,8 @@ ir_builder<Flags, Options>::build_terse_record_value(Parser &parser, avro_value_
 			type = avro_value_get_type(&field);
 			if (collapse && type == AVRO_RECORD) {
 				build_terse_record_value(parser, &field);
+			} else if (collapse && type == AVRO_UNION) {
+				build_alt_union_value(parser, &field);
 			} else {
 				parser.next();
 				build_value(erase_type(parser), &field, type);
@@ -374,6 +386,26 @@ ir_builder<Flags, Options>::build_union_value(Parser &parser, avro_value_t *dest
 	avro_value_t  branch;
 	if (avro_value_set_branch(dest, tag, &branch) != 0)
 		union_tag_error(schema, tag);
+	build_value(erase_type(parser), &branch);
+}
+
+template <int Flags, typename Options>
+template <typename Parser>
+void
+ir_builder<Flags, Options>::build_alt_union_value(Parser &parser, avro_value_t *dest)
+{
+	avro_schema_t schema = avro_value_get_schema(dest);
+	int           tag;
+	avro_value_t  branch;
+
+	parser.next();
+	parser.on_before_consume();
+	tag = parser.consume_int();
+
+	if (avro_value_set_branch(dest, tag, &branch) != 0)
+		union_tag_error(schema, tag);
+
+	parser.next();
 	build_value(erase_type(parser), &branch);
 }
 

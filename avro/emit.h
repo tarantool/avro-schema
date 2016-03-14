@@ -43,6 +43,9 @@ public:
 	template <typename Emitter>
 	void visit_terse_record_value(Emitter &, avro_value_t *, size_t);
 
+	template <typename Emitter>
+	void visit_alt_union_value(Emitter &, avro_value_t *);
+
 private:
 	const Options options_;
 };
@@ -192,7 +195,14 @@ ir_visitor<Flags, Options>::visit_value(Emitter &emitter, avro_value_t *val, avr
 		}
 		return;
 	case AVRO_UNION:
-		{
+		if ((Flags && ASSUME_STRING_UNION_TAG_CODING) &&
+			options_.use_integer_union_tag_coding()) {
+
+			typename Emitter::context_type::terse_record_emitter ue(
+				emitter.context(), 2);
+			visit_alt_union_value(ue, val);
+			ue.kill();
+		} else {
 			int tag;
 			avro_value_t branch;
 			if (avro_value_get_discriminant(val, &tag) != 0)
@@ -223,9 +233,9 @@ ir_visitor<Flags, Options>::visit_array_value(
 		avro_value_t item;
 		if (avro_value_get_by_index(val, i, &item, NULL) != 0)
 			internal_error();
-		emitter.begin_item(static_cast<int>(i));
+		emitter.begin_item();
 		visit_value(erase_type(emitter), &item);
-		emitter.end_item(static_cast<int>(i));
+		emitter.end_item();
 	}
 }
 
@@ -266,10 +276,32 @@ ir_visitor<Flags, Options>::visit_terse_record_value(
 			if (avro_value_get_size(&item, &count) != 0)
 				internal_error();
 			visit_terse_record_value(emitter, &item, count);
+		} else if (collapse && type == AVRO_UNION) {
+			visit_alt_union_value(emitter, &item);
 		} else {
-			emitter.begin_item(static_cast<int>(i));
+			emitter.begin_item();
 			visit_value(erase_type(emitter), &item, type);
-			emitter.end_item(static_cast<int>(i));
+			emitter.end_item();
 		}
 	}
+}
+
+template <int Flags, typename Options>
+template <typename Emitter>
+void
+ir_visitor<Flags, Options>::visit_alt_union_value(
+	Emitter &emitter, avro_value_t *val)
+{
+	int tag;
+	avro_value_t branch;
+	if (avro_value_get_discriminant(val, &tag) != 0)
+		internal_error();
+	if (avro_value_get_current_branch(val, &branch) != 0)
+		internal_error();
+	emitter.begin_item();
+	emitter.emit_int(tag);
+	emitter.end_item();
+	emitter.begin_item();
+	visit_value(erase_type(emitter), &branch);
+	emitter.end_item();
 }

@@ -3346,6 +3346,11 @@ avro_generic_union_set_branch(const avro_value_iface_t *viface,
 	int  rval;
 	avro_generic_union_t  *self = (avro_generic_union_t *) vself;
 
+	if (discriminant < 0 || (unsigned)discriminant >= iface->branch_count) {
+		avro_set_error("Invalid branch in set_branch");
+		return EINVAL;
+	}
+
 #if DEBUG_BRANCHES
 	fprintf(stderr, "Selecting branch %d (was %d)\n",
 		discriminant, self->discriminant);
