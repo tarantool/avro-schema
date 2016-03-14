@@ -23,7 +23,10 @@ struct tuple *lua_istuple(struct lua_State *, int)
 #include <msgpuck.h>
 
 #include "util.h"
+#include "parse_error.h"
 #include "parse.h"
+#include "parse_lua.h"
+#include "parse_mpk.h"
 #include "emit.h"
 
 enum cache_mode {
