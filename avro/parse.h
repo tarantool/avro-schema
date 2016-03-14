@@ -1,4 +1,3 @@
-
 void check_utf8_string(int flags, const Bytes &b)
 {
 	if (flags & ASSUME_UTF8_STRINGS)

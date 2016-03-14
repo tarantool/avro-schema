@@ -195,7 +195,7 @@ ir_visitor<Flags, Options>::visit_value(Emitter &emitter, avro_value_t *val, avr
 		}
 		return;
 	case AVRO_UNION:
-		if ((Flags && ASSUME_STRING_UNION_TAG_CODING) &&
+		if ((Flags & ASSUME_STRING_UNION_TAG_CODING) &&
 			options_.use_integer_union_tag_coding()) {
 
 			typename Emitter::context_type::terse_record_emitter ue(
