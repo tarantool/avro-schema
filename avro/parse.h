@@ -1,18 +1,7 @@
-enum {
-	PARSER_ASSUME_NUL_TERM_STRINGS   = 1,
-	PARSER_ASSUME_NON_NUL_CHARS      = 2,
-	PARSER_ASSUME_UTF8_STRINGS       = 4,
-	PARSER_ASSUME_NO_DUP_MAP_KEYS    = 8,
-	PARSER_ENABLE_FAST_SKIP          = 16,
-	PARSER_ENABLE_VERBOSE_RECORDS    = 32,
-	PARSER_ENABLE_TERSE_RECORDS      = 64,
-	PARSER_ENABLE_COLLAPSE_NESTED    = 128,
-	PARSER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED = 256
-};
 
 void check_utf8_string(int flags, const Bytes &b)
 {
-	if (flags & PARSER_ASSUME_UTF8_STRINGS)
+	if (flags & ASSUME_UTF8_STRINGS)
 		return;
 	// XXX
 	(void)b;
@@ -28,7 +17,7 @@ int resolve_record_field(int flags, const avro_schema_t schema, int index)
 int resolve_record_field(int flags, const avro_schema_t schema, const Bytes &b)
 {
 	int index;
-	if (flags & PARSER_ASSUME_NUL_TERM_STRINGS) {
+	if (flags & ASSUME_NUL_TERM_STRINGS) {
 		// XXX embeded NULs
 		index = avro_schema_record_field_get_index(
 			schema, reinterpret_cast<const char*>(b.p));
@@ -51,7 +40,7 @@ int resolve_union_tag(int flags, const avro_schema_t schema, int index)
 int resolve_union_tag(int flags, const avro_schema_t schema, const Bytes &b)
 {
 	int index;
-	if (flags & PARSER_ASSUME_NUL_TERM_STRINGS) {
+	if (flags & ASSUME_NUL_TERM_STRINGS) {
 		// XXX embeded NULs
 		if (!avro_schema_union_branch_by_name(
 				schema, &index,
@@ -75,7 +64,7 @@ int resolve_enum_value(int flags, const avro_schema_t schema, int index)
 int resolve_enum_value(int flags, const avro_schema_t schema, const Bytes &b)
 {
 	int index;
-	if (flags & PARSER_ASSUME_NUL_TERM_STRINGS) {
+	if (flags & ASSUME_NUL_TERM_STRINGS) {
 		// XXX embeded NULs
 		index = avro_schema_enum_get_by_name(
 			schema, reinterpret_cast<const char*>(b.p));
@@ -108,15 +97,14 @@ avro_schema_t pure_schema_record_field_get_by_index(const avro_schema_t s, int i
 //
 // IR builder
 //
-template <int Flags>
+
+template <int Flags, typename Options = processing_options>
 class ir_builder
 {
 public:
-	ir_builder()
-		: use_terse_records_(false), collapse_nested_(false)
+	ir_builder(const Options &options)
+		: options_(options)
 	{}
-	void set_use_terse_records(bool yes_no) { use_terse_records_ = yes_no; }
-	void set_collapse_nested(bool yes_no) { collapse_nested_ = yes_no; }
 
 	template <typename Parser>
 	void build_value(Parser &p, avro_value_t *v)
@@ -145,39 +133,14 @@ public:
 	template <typename Parser>
 	void skip_value(Parser &, const avro_schema_t);
 
-	bool use_terse_records()
-	{
-		if (Flags & PARSER_ENABLE_TERSE_RECORDS) {
-			if (Flags & PARSER_ENABLE_VERBOSE_RECORDS)
-				return use_terse_records_;
-			else
-				return true;
-		} else {
-			return false;
-		}
-	}
-
-	bool collapse_nested()
-	{
-		if (Flags & PARSER_ENABLE_COLLAPSE_NESTED) {
-			if (Flags & PARSER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED)
-				return use_terse_records();
-			else
-				return use_terse_records() && collapse_nested_;
-		} else {
-			return false;
-		}
-	}
-
 private:
-	bool use_terse_records_;
-	bool collapse_nested_;
+	const Options options_;
 };
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::build_value(
+ir_builder<Flags, Options>::build_value(
 	Parser &parser, avro_value_t *dest, avro_type_t type)
 {
 	parser.on_before_consume();
@@ -234,10 +197,20 @@ ir_builder<Flags>::build_value(
 		return;
 	case AVRO_ENUM:
 		{
-			int val = resolve_enum_value(
-				Flags,
-				pure_value_get_schema(dest),
-				parser.consume_enum());
+			int val;
+			if ((Flags & ASSUME_STRING_ENUM_CODING) &&
+				options_.use_integer_enum_coding()) {
+
+				val = resolve_enum_value(
+					Flags,
+					pure_value_get_schema(dest),
+					parser.consume_int());
+			} else {
+				val = resolve_enum_value(
+					Flags,
+					pure_value_get_schema(dest),
+					parser.consume_enum());
+			}
 			if (avro_value_set_enum(dest, val) != 0)
 				enum_value_error(dest, val);
 		}
@@ -261,7 +234,9 @@ ir_builder<Flags>::build_value(
 		}
 		return;
 	case AVRO_RECORD:
-		if (use_terse_records()) {
+		if (!(Flags & ENABLE_VERBOSE_RECORDS) ||
+		     options_.use_terse_records()) {
+
 			typename Parser::context_type::terse_record_parser rp(
 				parser.context());
 			build_terse_record_value(rp, dest);
@@ -286,10 +261,10 @@ ir_builder<Flags>::build_value(
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::build_array_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags, Options>::build_array_value(Parser &parser, avro_value_t *dest)
 {
 	while (parser.next()) {
 		avro_value_t child;
@@ -299,16 +274,16 @@ ir_builder<Flags>::build_array_value(Parser &parser, avro_value_t *dest)
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::build_map_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags, Options>::build_map_value(Parser &parser, avro_value_t *dest)
 {
 	while (parser.next()) {
 		int rc;
 		avro_value_t child;
 		check_utf8_string(Flags, parser.key());
-		if (Flags & PARSER_ASSUME_NUL_TERM_STRINGS) {
+		if (Flags & ASSUME_NUL_TERM_STRINGS) {
 			rc = avro_value_add(
 				dest,
 				reinterpret_cast<const char*>(parser.key().p),
@@ -330,10 +305,10 @@ ir_builder<Flags>::build_map_value(Parser &parser, avro_value_t *dest)
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::build_verbose_record_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags, Options>::build_verbose_record_value(Parser &parser, avro_value_t *dest)
 {
 	avro_schema_t schema = avro_value_get_schema(dest);
 	while (parser.next()) {
@@ -357,12 +332,12 @@ ir_builder<Flags>::build_verbose_record_value(Parser &parser, avro_value_t *dest
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::build_terse_record_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags, Options>::build_terse_record_value(Parser &parser, avro_value_t *dest)
 {
-	const bool collapse = collapse_nested();
+	const bool collapse = options_.collapse_nested();
 	avro_schema_t schema = avro_value_get_schema(dest);
 	size_t i, field_count = avro_schema_record_size(schema);
 	for (i = 0; i < field_count; i++) {
@@ -389,10 +364,10 @@ ir_builder<Flags>::build_terse_record_value(Parser &parser, avro_value_t *dest)
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::build_union_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags, Options>::build_union_value(Parser &parser, avro_value_t *dest)
 {
 	avro_schema_t schema = avro_value_get_schema(dest);
 	int           tag    = resolve_union_tag(Flags, schema, parser.tag());
@@ -402,12 +377,12 @@ ir_builder<Flags>::build_union_value(Parser &parser, avro_value_t *dest)
 	build_value(erase_type(parser), &branch);
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags>::skip_value(Parser &parser, const avro_schema_t schema)
+ir_builder<Flags, Options>::skip_value(Parser &parser, const avro_schema_t schema)
 {
-	if (Flags & PARSER_ENABLE_FAST_SKIP) {
+	if (Flags & ENABLE_FAST_SKIP) {
 		parser.on_before_consume();
 		parser.consume_any();
 	} else {

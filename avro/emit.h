@@ -1,144 +1,6 @@
 enum {
-	EMITTER_ENABLE_VERBOSE_RECORDS = 32,
-	EMITTER_ENABLE_TERSE_RECORDS   = 64,
-	EMITTER_ENABLE_COLLAPSE_NESTED = 128,
-	EMITTER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED = 256
+	EMITTER_ENABLE_VERBOSE_RECORDS = 32
 };
-
-class lua_emitter;
-class lua_array_emitter;
-class lua_map_emitter;
-class lua_union_emitter;
-
-class lua_emitter_context: private noncopyable
-{
-public:
-	friend class lua_emitter;
-	typedef lua_emitter       emitter;
-	typedef lua_array_emitter array_emitter;
-	typedef lua_map_emitter   map_emitter;
-	typedef lua_union_emitter union_emitter;
-	typedef lua_map_emitter   verbose_record_emitter;
-	typedef lua_array_emitter terse_record_emitter;
-	lua_emitter_context(struct lua_State *L): L_(L)
-	{
-	}
-private:
-	struct lua_State *L_;
-};
-
-class lua_emitter: private noncopyable
-{
-public:
-	typedef lua_emitter_context context_type;
-
-	lua_emitter(lua_emitter_context &context)
-		: context_(context), L_(context.L_)
-	{
-		if (!lua_checkstack(L(), 4))
-			stack_overflow();
-	}
-	void emit_null()
-	{
-		// XXX
-		internal_error();
-	}
-	void emit_boolean(bool v)
-	{
-		lua_pushboolean(L(), v);
-	}
-	void emit_int(int32_t v) { emit_long(v); }
-	void emit_long(int64_t v)
-	{
-		lua_pushinteger(L(), v);
-	}
-	void emit_float(float v) { emit_double(v); }
-	void emit_double(double v)
-	{
-		lua_pushnumber(L(), v);
-	}
-	void emit_bytes(const Bytes &b)
-	{
-		lua_pushlstring(
-			L(),
-			reinterpret_cast<const char *>(b.p),
-			b.length);
-	}
-	void emit_fixed(const Bytes &b) { emit_bytes(b); }
-	void emit_string(const Bytes &b) { emit_bytes(b); }
-	void emit_enum(int iv, const char *v)
-	{
-		(void)iv;
-		lua_pushstring(L(), v);
-	}
-
-	lua_emitter_context &context() { return context_; }
-protected:
-	struct lua_State *L() { return L_; }
-private:
-	lua_emitter_context &context_;
-	struct lua_State    *L_;
-
-};
-
-class lua_array_emitter: public lua_emitter
-{
-public:
-	lua_array_emitter(lua_emitter_context &context, int length)
-		: lua_emitter(context), i(1)
-	{
-		lua_createtable(L(), length, 0);
-	}
-	void kill() {}
-	void begin_item(int) {}
-	void end_item(int)
-	{
-		lua_rawseti(L(), -2, i++);
-	}
-private:
-	lua_Integer i;
-};
-
-class lua_map_emitter: public lua_emitter
-{
-public:
-	lua_map_emitter(lua_emitter_context &context, int length)
-		: lua_emitter(context)
-	{
-		lua_createtable(L(), 0, length);
-	}
-	void kill() {}
-	void begin_item(int index, const char *name)
-	{
-		(void)index;
-		lua_pushstring(L(), name);
-	}
-	void end_item(int index, const char *name)
-	{
-		(void)index;
-		(void)name;
-		lua_rawset(L(), -3);
-	}
-};
-
-class lua_union_emitter: public lua_emitter
-{
-public:
-	lua_union_emitter(lua_emitter_context &context, int itag, const char *tag)
-		: lua_emitter(context)
-	{
-		(void)itag;
-		lua_createtable(L(), 2, 0);
-		lua_pushstring(L(), tag);
-		lua_rawseti(L(), -2, 1);
-	}
-	void kill()
-	{
-		lua_rawseti(L(), -2, 2);
-	}
-};
-
-lua_emitter &erase_type(lua_emitter &e) { return e; }
 
 const char *pure_union_branch_name(avro_value_t *val, int tag)
 	__attribute__((__pure__));
@@ -157,36 +19,11 @@ const char *pure_enum_value_name(avro_value_t *val, int v)
 	return avro_schema_enum_get(avro_value_get_schema(val), v);
 }
 
-template <int Flags>
+template <int Flags, typename Options = processing_options>
 class ir_visitor
 {
 public:
-	ir_visitor(): use_terse_records_(false), collapse_nested_(false) {}
-	void set_use_terse_records(bool yes_no) { use_terse_records_ = yes_no; }
-
-	bool use_terse_records()
-	{
-		if (Flags & EMITTER_ENABLE_TERSE_RECORDS) {
-			if (Flags & EMITTER_ENABLE_VERBOSE_RECORDS)
-				return use_terse_records_;
-			else
-				return true;
-		} else {
-			return false;
-		}
-	}
-
-	bool collapse_nested()
-	{
-		if (Flags & EMITTER_ENABLE_COLLAPSE_NESTED) {
-			if (Flags & EMITTER_TERSE_RECORDS_IMPLY_COLLAPSE_NESTED)
-				return use_terse_records();
-			else
-				return use_terse_records() && collapse_nested_;
-		} else {
-			return false;
-		}
-	}
+	ir_visitor(const Options &options): options_(options) {}
 
 	template <typename Emitter>
 	void visit_value(Emitter &e, avro_value_t *v)
@@ -207,14 +44,13 @@ public:
 	void visit_terse_record_value(Emitter &, avro_value_t *, size_t);
 
 private:
-	bool use_terse_records_;
-	bool collapse_nested_;
+	const Options options_;
 };
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Emitter>
 void
-ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val, avro_type_t type)
+ir_visitor<Flags, Options>::visit_value(Emitter &emitter, avro_value_t *val, avro_type_t type)
 {
 	switch (type) {
 	case AVRO_BOOLEAN:
@@ -299,7 +135,14 @@ ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val, avro_type_t 
 			int v;
 			if (avro_value_get_enum(val, &v) != 0)
 				internal_error();
-			emitter.emit_enum(v, pure_enum_value_name(val, v));
+
+			if ((Flags & ASSUME_STRING_ENUM_CODING) &&
+				options_.use_integer_enum_coding()) {
+
+				emitter.emit_int(v);
+			} else {
+				emitter.emit_enum(v, pure_enum_value_name(val, v));
+			}
 		}
 		return;
 	case AVRO_FIXED:
@@ -330,7 +173,8 @@ ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val, avro_type_t 
 			size_t count;
 			if (avro_value_get_size(val, &count) != 0)
 				internal_error();
-			if (use_terse_records()) {
+			if (!(Flags & EMITTER_ENABLE_VERBOSE_RECORDS) ||
+				options_.use_terse_records()) {
 				// XXX count is incorrect if collapse_nested is in
 				// effect
 				terse_record_emitter re(
@@ -368,10 +212,10 @@ ir_visitor<Flags>::visit_value(Emitter &emitter, avro_value_t *val, avro_type_t 
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Emitter>
 void
-ir_visitor<Flags>::visit_array_value(
+ir_visitor<Flags, Options>::visit_array_value(
 	Emitter &emitter, avro_value_t *val, size_t count)
 {
 	size_t i;
@@ -385,10 +229,10 @@ ir_visitor<Flags>::visit_array_value(
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Emitter>
 void
-ir_visitor<Flags>::visit_map_value(
+ir_visitor<Flags, Options>::visit_map_value(
 	Emitter &emitter, avro_value_t *val, size_t count)
 {
 	size_t i;
@@ -403,13 +247,13 @@ ir_visitor<Flags>::visit_map_value(
 	}
 }
 
-template <int Flags>
+template <int Flags, typename Options>
 template <typename Emitter>
 void
-ir_visitor<Flags>::visit_terse_record_value(
+ir_visitor<Flags, Options>::visit_terse_record_value(
 	Emitter &emitter, avro_value_t *val, size_t count)
 {
-	const bool collapse = collapse_nested();
+	const bool collapse = options_.collapse_nested();
 	size_t i;
 	for (i = 0; i < count; i++) {
 		avro_value_t item;

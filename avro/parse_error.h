@@ -64,8 +64,7 @@ void union_tag_error(const avro_schema_t schema, int tag)
 
 void enum_value_error(avro_value_t *e, int v)
 {
-	(void)e;
-	(void)v;
-	internal_error(); // XXX
+	if (v < 0 || v >= avro_schema_enum_size(avro_value_get_schema(e)))
+		name_unknown();
+	internal_error();
 }
-

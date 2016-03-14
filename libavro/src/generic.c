@@ -2159,6 +2159,7 @@ typedef struct avro_generic_enum_value_iface {
 	avro_generic_value_iface_t  parent;
 	volatile int  refcount;
 	avro_schema_t  schema;
+	long  size;
 } avro_generic_enum_value_iface_t;
 
 
@@ -2222,8 +2223,13 @@ static int
 avro_generic_enum_set(const avro_value_iface_t *viface,
 		      void *vself, int val)
 {
-	AVRO_UNUSED(viface);
+	const avro_generic_enum_value_iface_t  *iface =
+	    container_of(viface, avro_generic_enum_value_iface_t, parent);
 	int  *self = (int *) vself;
+	if (val < 0 || val >= iface->size) {
+		avro_set_error("Invalid value in set_enum");
+		return EINVAL;
+	}
 	*self = val;
 	return 0;
 }
@@ -2320,6 +2326,7 @@ avro_generic_enum_class(avro_schema_t schema)
 	iface->parent = AVRO_GENERIC_ENUM_CLASS;
 	iface->refcount = 1;
 	iface->schema = avro_schema_incref(schema);
+	iface->size = avro_schema_enum_size(schema);
 	return &iface->parent;
 }
 

@@ -10,8 +10,7 @@ local unflatten     = avro.unflatten
 local is_compatible = avro.schema_is_compatible
 
 local test = tap.test('Avro module')
-test:plan(7)
-
+test:plan(8)
 
 -- hook GC methods to produce log
 local gc_log
@@ -73,6 +72,11 @@ local complex_schema_p = {
         }}
     }
 }
+local enum_schema_p = {
+   type = "enum",
+   name = "Suit",
+   symbols = {"SPADES", "HEARTS", "DIAMONDS", "CLUBS"}
+}
 
 --
 -- load-good-schema
@@ -90,7 +94,8 @@ test:test('load-good-schema', function(test)
         {'load-frob-v1-schema',       frob_v1_schema_p,       'Avro schema (X.Frob)'},
         {'load-frob-v2-schema',       frob_v2_schema_p,       'Avro schema (X.Frob)'},
         {'load-frob-v1-array-schema', frob_v1_array_schema_p, 'Avro schema (array)'},
-        {'load-complex-schema',       complex_schema_p,       'Avro schema (X.Complex)'}
+        {'load-complex-schema',       complex_schema_p,       'Avro schema (X.Complex)'},
+        {'load-enum-schema',          enum_schema_p,          'Avro schema (Suit)'}
     }
  
     test:plan(#tests)
@@ -319,6 +324,50 @@ test:test('is-compatible', function(test)
         { true },
         'downgrade')
 
+end)
+
+--
+-- enum
+--
+test:test('enum', function(test)
+    local _, enum_schema = create_schema(enum_schema_p)
+    local symbols = enum_schema_p.symbols
+
+    test:plan(2 * #symbols + 4)
+
+    for i,k in pairs(symbols) do
+        test:is_deeply(
+            { flatten(k, enum_schema) },
+            { true, i - 1 },
+            'flatten-'..k)
+    end
+
+    for i,k in pairs(symbols) do
+        test:is_deeply(
+            { unflatten(i - 1, enum_schema) },
+            { true, k },
+            string.format('unflatten-%d', i - 1))
+    end
+
+    test:is_deeply(
+        { flatten('INVALID', enum_schema) },
+        { false, 'name unknown' },
+        'flatten-INVALID')
+
+    test:is_deeply(
+        { unflatten(-1, enum_schema) },
+        { false, 'name unknown' },
+        'unflatten-minus-1')
+
+    test:is_deeply(
+        { unflatten(4, enum_schema) },
+        { false, 'name unknown' },
+        'unflatten-4')
+
+    test:is_deeply(
+        { unflatten(100, enum_schema) },
+        { false, 'name unknown' },
+        'unflatten-100')
 end)
 
 test:check()
