@@ -46,6 +46,16 @@ public:
 	template <typename Emitter>
 	void visit_alt_union_value(Emitter &, avro_value_t *);
 
+	template <typename Emitter>
+	void visit_value_for_update(
+		Emitter &, avro_value_t *, const uint64_t *);
+
+	template <typename Emitter>
+	void visit_x_verbose_record_value(
+		Emitter &, avro_value_t *, const uint64_t *,
+		size_t base_index,
+		size_t bit_offset);
+
 private:
 	const Options options_;
 };
@@ -304,4 +314,134 @@ ir_visitor<Flags, Options>::visit_alt_union_value(
 	emitter.begin_item();
 	visit_value(erase_type(emitter), &branch);
 	emitter.end_item();
+}
+
+template <int Flags, typename Options>
+template <typename Emitter>
+void
+ir_visitor<Flags, Options>::visit_value_for_update(
+	Emitter &emitter, avro_value_t *val, const uint64_t *bitmap)
+{
+	typedef typename Emitter::context_type::array_emitter array_emitter;
+
+	if (avro_value_get_type(val) != AVRO_RECORD)
+		internal_error();
+
+	array_emitter ae(emitter.context(), 0 /* XXX */);
+
+	visit_x_verbose_record_value(ae, val, bitmap, 1, 0);
+
+	ae.kill();
+}
+
+template <int Flags, typename Options>
+template <typename Emitter>
+void
+ir_visitor<Flags, Options>::visit_x_verbose_record_value(
+	Emitter &emitter, avro_value_t *val,
+	const uint64_t *bitmap,
+	size_t base_index,
+	size_t bit_offset)
+{
+	typedef typename Emitter::context_type::array_emitter array_emitter;
+
+	avro_schema_t schema = avro_value_get_schema(val);
+
+	size_t count = avro_schema_record_size(schema);
+
+	annotation *a = static_cast<annotation *>(
+		avro_schema_record_annotation(schema));
+
+	size_t *iof =
+		get_flattened_item_offsets(a, count);
+
+	size_t *bof =
+		get_nested_bitmap_offsets(a, count);
+
+	const uint64_t *p = bitmap + bit_offset / 64;
+	size_t index_adjust = -(bit_offset & 63);
+	uint64_t v = *p & (UINT64_C(-1) << (bit_offset & 63));
+
+	// for each field if the corresponding bit is set
+repeat:
+	while (v) {
+		int pos = __builtin_ctzll(v);
+		size_t i = index_adjust + pos;
+		if (i >= count)
+			return;
+		v ^= UINT64_C(1) << pos;
+
+		avro_value_t item;
+		if (avro_value_get_by_index(val, i, &item, NULL) != 0)
+			internal_error();
+
+		avro_type_t type = avro_value_get_type(&item);
+		size_t update_item_index = base_index + iof[i];
+
+		switch (type) {
+		case AVRO_RECORD:
+			visit_x_verbose_record_value(
+				emitter, &item, bitmap,
+				update_item_index,
+				bit_offset + bof[i]);
+			break;
+		case AVRO_UNION:
+			{
+				emitter.begin_item();
+
+				array_emitter ae(emitter.context(), 3);
+				ae.begin_item();
+				ae.emit_string(Bytes("=", 1));
+				ae.end_item();
+				ae.begin_item();
+				ae.emit_int(update_item_index);
+				ae.end_item();
+				ae.begin_item();
+
+				int tag;
+				if (avro_value_get_discriminant(
+						val, &tag) != 0)
+					internal_error();
+
+				ae.emit_int(tag);
+				ae.end_item();
+				ae.kill();
+
+				emitter.end_item();
+
+				avro_value_t copy = item;
+				if (avro_value_get_current_branch(
+						&copy, &item) != 0)
+					internal_error();
+
+				update_item_index += 1;
+				type = avro_value_get_type(val);
+			}
+			/* fallthrough */
+		default:
+			{
+				emitter.begin_item();
+
+				array_emitter ae(emitter.context(), 3);
+				ae.begin_item();
+				ae.emit_string(Bytes("=", 1));
+				ae.end_item();
+				ae.begin_item();
+				ae.emit_int(update_item_index);
+				ae.end_item();
+				ae.begin_item();
+				visit_value(emitter, &item, type);
+				ae.end_item();
+				ae.kill();
+
+				emitter.end_item();
+			}
+			break;
+		}
+	}
+	index_adjust += 64;
+	if (index_adjust >= count)
+		return;
+	v = *++p;
+	goto repeat;
 }

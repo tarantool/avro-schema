@@ -101,8 +101,12 @@ template <int Flags, typename Options = processing_options>
 class ir_builder
 {
 public:
-	ir_builder(const Options &options)
-		: options_(options)
+	ir_builder(const Options &options, std::vector<uint64_t> *b)
+		: options_(options),
+		  bitmap_(0),
+		  bitmap_size_(0),
+		  bitmap_capacity_(0),
+		  bitmap_storage_(b)
 	{}
 
 	template <typename Parser>
@@ -110,6 +114,9 @@ public:
 	{
 		build_value(p, v, avro_value_get_type(v));
 	}
+
+	template <typename Parser>
+	void build_value_for_update(Parser &p, avro_value_t *v);
 
 	template <typename Parser>
 	void build_value(Parser &, avro_value_t *, avro_type_t);
@@ -122,6 +129,11 @@ public:
 
 	template <typename Parser>
 	void build_verbose_record_value(Parser &, avro_value_t *);
+
+	// a slightly modified flavour of build_verbose_record_value;
+	// for UPDATEs generation
+	template <typename Parser>
+	void build_x_verbose_record_value(Parser &, avro_value_t *, size_t);
 
 	template <typename Parser>
 	void build_terse_record_value(Parser &, avro_value_t *);
@@ -137,6 +149,77 @@ public:
 
 private:
 	const Options options_;
+
+	// THE BITMAP
+	uint64_t     *bitmap_;
+	size_t        bitmap_size_;
+	size_t        bitmap_capacity_;
+	std::vector<uint64_t>
+		     *bitmap_storage_;
+
+	// The bitmap tracks inited fields in verbose records.
+	// It powers the following features:
+	//  * ensure all mandatory fields are present (TBD);
+	//  * ensure no duplicate fields;
+	//  * create UPDATE statement.
+	//
+	// The bitmap is normally used in a stack-like fashion. Each
+	// active call to build_verbose_record_value claims a chunk
+	// sufficient to store N bits where N is the number of record
+	// fields. The chunk is released once the call completes.
+	//
+	// Please note that the underlying memory may get moved due to
+	// realloc when claiming a chunk. Do not cache pointers to
+	// bitmap elements.
+	//
+	// ### About UPDATEs
+	//
+	// Data undergoes a flattening process, consider the figure below:
+	//
+	//     A = 1
+	//     B = { X: 2, Y: 3 }  <----->  { 1, 2, 3, 4, { "fo", "ba"} }
+	//     C = 4
+	//     D = { 'fo', 'ba' }
+	//
+	// The flattening process applies to the root record.
+	// If record R undergoes flattening, record and union fields in
+	// R undergo flattening as well (the rule applies recursively).
+	//
+	// Collectively, an instance of schema subset affected by
+	// flattening is called the ROOT AMALGAMATION. Every 'leaf'
+	// field in root amalgamation is mapped to an item in the
+	// resulting array (or two items for a union). Array indexes are
+	// assigned in a depth-first walk order.
+	//
+	// When authoring UPDATEs we allow for missing fields within the
+	// root amalgamation (other parts undergo validation and if a
+	// part lacks a mandatory field validation error is reported.)
+	// The bitmap is used to remember presence info about fields in
+	// the root amalgamation. The encoding is as follows:
+	//
+	// [ 1 0 1 0 ]  [ 0 0 ]
+	//   A B C D      X Y
+	//
+	// A chunk sufficient to encode the presence info for the entire
+	// root amalgamation is claimed at once. The info remains after
+	// data loading completes; it is used to output the resulting
+	// UPDATE statement. Bitmap tail is still used in a stack-like
+	// fashion by records outside the root amalgamation.
+
+	// Extend the bitmap array by n 64-bit elements.
+	// Returns the starting index of the extension.
+	size_t extend_bitmap(size_t n)
+	{
+		size_t res = bitmap_size_;
+		if (res + n > bitmap_capacity_) {
+			bitmap_storage_->resize(res + n);
+			bitmap_capacity_ = bitmap_storage_->capacity();
+			bitmap_storage_->resize(bitmap_capacity_);
+			bitmap_ = &(*bitmap_storage_)[0];
+		}
+		bitmap_size_ = res + n;
+		return res;
+	}
 };
 
 template <int Flags, typename Options>
@@ -310,6 +393,7 @@ ir_builder<Flags, Options>::build_map_value(Parser &parser, avro_value_t *dest)
 		// XXX dup keys
 		if (rc != 0)
 			internal_error();
+
 		build_value(erase_type(parser), &child);
 	}
 }
@@ -317,17 +401,34 @@ ir_builder<Flags, Options>::build_map_value(Parser &parser, avro_value_t *dest)
 template <int Flags, typename Options>
 template <typename Parser>
 void
-ir_builder<Flags, Options>::build_verbose_record_value(Parser &parser, avro_value_t *dest)
+ir_builder<Flags, Options>::build_verbose_record_value(
+	Parser &parser, avro_value_t *dest)
 {
 	avro_schema_t schema = avro_value_get_schema(dest);
+	size_t field_count = avro_schema_record_size(schema);
+	size_t bitmap_size = bitmap_size_;
+	size_t n_bitmap_elts = (field_count + 63) / 64;
+	size_t origin = extend_bitmap(n_bitmap_elts);
+
+	for (size_t i = 0; i < n_bitmap_elts; i++) {
+		// XXX copy default mask
+		bitmap_[origin + i] = 0;
+	}
+
 	while (parser.next()) {
 		avro_value_t  field;
 		int index = resolve_record_field(Flags, schema, parser.key());
-		// XXX check no dup fields, all fields were set
-		// XXX maintain a bitmask and use it later to create
-		//     UPDATE statement
+
 		if (avro_value_get_by_index(dest, index, &field, NULL) != 0)
 			record_index_error(schema, index);
+
+		uint64_t &cell = bitmap_[origin + ((unsigned)index / 64)];
+		const uint64_t mask = index & 63;
+		if (cell & mask) {
+			// XXX dup field
+			internal_error();
+		}
+		cell &= mask;
 
 		if (field.iface) {
 			build_value(erase_type(parser), &field);
@@ -337,6 +438,77 @@ ir_builder<Flags, Options>::build_verbose_record_value(Parser &parser, avro_valu
 			skip_value(
 				erase_type(parser),
 				pure_schema_record_field_get_by_index(schema, index));
+		}
+	}
+
+	// XXX check all fields were set
+
+	// UNDO extend_bitmap
+	bitmap_size_ = bitmap_size;
+}
+
+template <int Flags, typename Options>
+template <typename Parser>
+void
+ir_builder<Flags, Options>::build_value_for_update(
+	Parser &p, avro_value_t *v)
+{
+	avro_schema_t schema = avro_value_get_schema(v);
+	if (avro_value_get_type(v) != AVRO_RECORD)
+		type_mismatch();
+
+	annotation *a = static_cast<annotation *>(
+		avro_schema_record_annotation(schema));
+
+	size_t origin = extend_bitmap((a->full_bitmap_size + 63) / 64);
+
+	typename Parser::context_type::verbose_record_parser rp(
+		p.context());
+
+	build_x_verbose_record_value(rp, v, origin * 64);
+
+	rp.kill();
+}
+
+template <int Flags, typename Options>
+template <typename Parser>
+void
+ir_builder<Flags, Options>::build_x_verbose_record_value(
+	Parser &parser, avro_value_t *dest, size_t bit_offset)
+{
+	avro_schema_t schema = avro_value_get_schema(dest);
+	size_t field_count = avro_schema_record_size(schema);
+
+	annotation *a = static_cast<annotation *>(
+		avro_schema_record_annotation(schema));
+
+	size_t *nbo =
+		get_nested_bitmap_offsets(a, field_count);
+
+	while (parser.next()) {
+		avro_value_t  field;
+		avro_type_t   type;
+		int index = resolve_record_field(Flags, schema, parser.key());
+
+		if (avro_value_get_by_index(dest, index, &field, NULL) != 0)
+			record_index_error(schema, index);
+
+		uint64_t &cell = bitmap_[(bit_offset + index) / 64];
+		const uint64_t mask = 1 << ((bit_offset + index) & 63);
+		if (cell & mask) {
+			// XXX dup field
+			internal_error();
+		}
+		cell |= mask;
+
+		type = avro_value_get_type(&field);
+		if (type == AVRO_RECORD) {
+			Parser rp(parser.context());
+			build_x_verbose_record_value(
+				rp, &field, bit_offset + nbo[index]);
+			rp.kill();
+		} else {
+			build_value(erase_type(parser), &field);
 		}
 	}
 }
@@ -385,6 +557,7 @@ ir_builder<Flags, Options>::build_union_value(Parser &parser, avro_value_t *dest
 	avro_value_t  branch;
 	if (avro_value_set_branch(dest, tag, &branch) != 0)
 		union_tag_error(schema, tag);
+
 	build_value(erase_type(parser), &branch);
 }
 
@@ -405,6 +578,7 @@ ir_builder<Flags, Options>::build_alt_union_value(Parser &parser, avro_value_t *
 		union_tag_error(schema, tag);
 
 	parser.next();
+
 	build_value(erase_type(parser), &branch);
 }
 

@@ -141,6 +141,7 @@ static void avro_schema_free(avro_schema_t schema)
 				st_free_table(record->fields_byname);
 				st_free_table(record->fields);
 				avro_freet(struct avro_record_schema_t, record);
+				free(record->annotation);
 			}
 			break;
 
@@ -662,6 +663,7 @@ avro_schema_t avro_schema_record(const char *name, const char *space)
 		avro_freet(struct avro_record_schema_t, record);
 		return NULL;
 	}
+	record->annotation = NULL;
 
 	avro_schema_init(&record->obj, AVRO_RECORD);
 	return &record->obj;
@@ -670,6 +672,19 @@ avro_schema_t avro_schema_record(const char *name, const char *space)
 size_t avro_schema_record_size(const avro_schema_t record)
 {
 	return avro_schema_to_record(record)->fields->num_entries;
+}
+
+void *avro_schema_record_annotation(const avro_schema_t record)
+{
+	return avro_schema_to_record(record)->annotation;
+}
+
+void avro_schema_record_annotation_set(const avro_schema_t p, void *a)
+{
+	struct avro_record_schema_t *record =
+		avro_schema_to_record(p);
+	free(record->annotation);
+	record->annotation = a;
 }
 
 avro_schema_t avro_schema_record_field_get(const avro_schema_t

@@ -18,11 +18,15 @@ struct tuple *lua_istuple(struct lua_State *, int)
 #include <avro/resolver.h>
 #include <avro/generic.h>
 
-#include <cassert>
-#include <stdexcept>
 #include <msgpuck.h>
 
+#include <cassert>
+#include <stdexcept>
+#include <type_traits>
+#include <vector>
+
 #include "util.h"
+#include "annotate.h"
 #include "parse_error.h"
 #include "parse.h"
 #include "parse_lua.h"
@@ -47,6 +51,7 @@ struct xform_ctx
 {
 	avro_value_t         src;
 	avro_value_t         dest;
+	std::vector<uint64_t>bitmap;
 };
 
 static void *resolver_cache_registry_key;
@@ -118,6 +123,7 @@ create_xform_ctx(struct lua_State *L)
 	xform_ctx->src.self = NULL;
 	xform_ctx->dest.iface = NULL;
 	xform_ctx->dest.self = NULL;
+	new (&xform_ctx->bitmap) std::vector<uint64_t>;
 	luaL_getmetatable(L, xform_ctx_typename);
 	lua_setmetatable(L, -2);
 	return xform_ctx;
@@ -133,6 +139,8 @@ finalize_xform_ctx(struct xform_ctx *xform_ctx)
 	if (xform_ctx->dest.iface != NULL) {
 		avro_value_decref(&xform_ctx->dest);
 	}
+	std::vector<uint64_t> empty;
+	xform_ctx->bitmap.swap(empty);
 }
 
 static int
@@ -188,6 +196,18 @@ create_schema(struct lua_State *L)
 		lua_pop(L, 1);
 		lua_pushboolean(L, 0);
 		lua_pushstring(L, avro_strerror());
+		return 2;
+	}
+	try
+	{
+		annotate(schema->schema);
+	}
+	catch (std::exception &e)
+	{
+		avro_schema_decref(schema->schema);
+		lua_pop(L, 1);
+		lua_pushboolean(L, 0);
+		lua_pushstring(L, e.what());
 		return 2;
 	}
 	schema->gclass = NULL;
@@ -433,14 +453,68 @@ flatten(struct lua_State *L)
 		{
 			lua_parser_context          pc(L, 1);
 			lua_parser                  parser(pc);
-			ir_builder<lua_ir_b_options>builder(CONSUME_REGULAR);
+
+			ir_builder<lua_ir_b_options>
+				builder (CONSUME_REGULAR, &xform_ctx->bitmap);
+
 			builder.build_value(parser, &xform_ctx->src);
 		}
 		{
 			lua_emitter_context         ec(L);
 			lua_emitter                 emitter(ec);
-			ir_visitor<lua_ir_v_options>visitor(EMIT_FLATTENED);
+
+			ir_visitor<lua_ir_v_options>
+				visitor (EMIT_FLATTENED);
+
 			visitor.visit_value(emitter, &xform_ctx->dest);
+		}
+		lua_pushboolean(L, 1);
+		lua_insert(L, -2);
+		st  = 2;
+		goto out;
+	}
+	catch (std::exception &e)
+	{
+		lua_pushboolean(L, 0);
+		lua_pushstring(L, e.what());
+		st = 2;
+		goto out;
+	}
+out:
+	finalize_xform_ctx(xform_ctx);
+	return st;
+}
+
+static int
+xflatten(struct lua_State *L)
+{
+	struct xform_ctx *xform_ctx;
+	int st;
+	st = prepare_xform(L, &xform_ctx);
+	if (st != 0) {
+		goto out;
+	}
+	try
+	{
+		{
+			lua_parser_context          pc(L, 1);
+			lua_parser                  parser(pc);
+
+			ir_builder<lua_ir_b_options>
+				builder (CONSUME_REGULAR, &xform_ctx->bitmap);
+
+			builder.build_value_for_update(parser, &xform_ctx->src);
+		}
+		{
+			lua_emitter_context         ec(L);
+			lua_emitter                 emitter(ec);
+
+			ir_visitor<lua_ir_v_options>
+				visitor (EMIT_FLATTENED);
+
+			visitor.visit_value_for_update(
+				emitter, &xform_ctx->dest,
+				&xform_ctx->bitmap[0]);
 		}
 		lua_pushboolean(L, 1);
 		lua_insert(L, -2);
@@ -474,25 +548,39 @@ unflatten(struct lua_State *L)
 		if ((t = lua_istuple(L, 1)) != NULL) {
 
 			// XXX no box_tuple_data()
-			mpk_fast_parsers::mpk_parser_context pc(Bytes(
-				reinterpret_cast<const uint8_t *>(t) + 12,
-				box_tuple_bsize(t)));
-			ir_builder<mpk_ir_b_options>builder(CONSUME_FLATTENED);
+			const uint8_t *p =
+				reinterpret_cast<const uint8_t *>(t) + 12;
+
+			mpk_fast_parsers::mpk_parser_context
+				pc(Bytes(p, box_tuple_bsize(t)));
+
+			ir_builder<mpk_ir_b_options>
+				builder(CONSUME_FLATTENED, &xform_ctx->bitmap);
+
 			avro_type_t t =
 				avro_value_get_type(&xform_ctx->src);
+
 			if (t == AVRO_RECORD) {
-				mpk_fast_parsers::mpk_terse_record_parser parser(pc);
+				mpk_fast_parsers::mpk_terse_record_parser
+					parser(pc);
+
 				builder.build_terse_record_value(
 					parser, &xform_ctx->src);
 				// parser.kill() intentionally omited
 			} else {
 				mpk_fast_parsers::mpk_parser parser(pc);
-				builder.build_value(parser, &xform_ctx->src, t);
+
+				builder.build_value(
+					parser, &xform_ctx->src, t);
 			}
 		} else {
 			lua_parser_context          pc(L, 1);
 			lua_parser                  parser(pc);
-			ir_builder<lua_ir_b_options>builder(CONSUME_FLATTENED);
+
+			ir_builder<lua_ir_b_options>
+				builder (CONSUME_FLATTENED,
+					 &xform_ctx->bitmap);
+
 			builder.build_value(parser, &xform_ctx->src);
 		}
 		{
@@ -541,6 +629,7 @@ luaopen_avro(lua_State *L)
 		{"schema_is_compatible", schema_is_compatible},
 		{"flatten",              flatten},
 		{"unflatten",            unflatten},
+		{"xflatten",             xflatten},
 		{NULL, NULL}
 	};
 	// avro.schema

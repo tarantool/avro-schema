@@ -38,6 +38,7 @@ struct avro_record_schema_t {
 	char *space;
 	st_table *fields;
 	st_table *fields_byname;
+	void *annotation;
 };
 
 struct avro_enum_schema_t {
