@@ -1,7 +1,3 @@
-enum {
-	EMITTER_ENABLE_VERBOSE_RECORDS = 32
-};
-
 const char *pure_union_branch_name(avro_value_t *val, int tag)
 	__attribute__((__pure__));
 
@@ -186,7 +182,7 @@ ir_visitor<Flags, Options>::visit_value(Emitter &emitter, avro_value_t *val, avr
 			size_t count;
 			if (avro_value_get_size(val, &count) != 0)
 				internal_error();
-			if (!(Flags & EMITTER_ENABLE_VERBOSE_RECORDS) ||
+			if (!(Flags & ENABLE_VERBOSE_RECORDS) ||
 				options_.use_terse_records()) {
 				// XXX count is incorrect if collapse_nested is in
 				// effect
