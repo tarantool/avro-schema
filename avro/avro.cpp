@@ -616,6 +616,103 @@ get_metatables(struct lua_State *L)
 	return 3;
 }
 
+static size_t
+register_schema_names(
+	struct lua_State *L, avro_schema_t rec,
+	size_t out_index, int tab_index)
+{
+	bool toplevel = (tab_index == lua_gettop(L));
+	size_t n = avro_schema_record_size(rec);
+	for (size_t i = 0; i < n; i++) {
+
+		const char *name = avro_schema_record_field_name(rec, i);
+		avro_schema_t field = avro_schema_record_field_get_by_index(
+			rec, i);
+
+		if (toplevel)
+			lua_pushstring(L, name);
+		else
+			lua_pushfstring(
+				L, "%s.%s", lua_tostring(L, -1), name);
+
+		switch (avro_typeof(field)) {
+		case AVRO_RECORD:
+			out_index = register_schema_names(
+				L, field, out_index, tab_index);
+			lua_pop(L, 1);
+			break;
+		case AVRO_UNION:
+			lua_pushfstring(
+				L, "%s.$type$", lua_tostring(L, -1), name);
+			lua_rawseti(L, tab_index, out_index++);
+			/* fallthrough */
+		default:
+			lua_rawseti(L, tab_index, out_index++);
+			break;
+		}
+	}
+	return out_index;
+}
+
+static int
+get_schema_names(struct lua_State *L)
+{
+	struct schema_plus *schema;
+	schema = (struct schema_plus *)
+		luaL_checkudata(L, 1, schema_typename);
+	lua_createtable(L, 0, 0);
+	int top = lua_gettop(L);
+	if (avro_typeof(schema->schema) == AVRO_RECORD)
+		register_schema_names(L, schema->schema, 1, top);
+	return 1;
+}
+
+static size_t
+register_schema_types(
+	struct lua_State *L, avro_schema_t rec, size_t out_index)
+{
+	size_t n = avro_schema_record_size(rec);
+	for (size_t i = 0; i < n; i++) {
+		avro_schema_t field = avro_schema_record_field_get_by_index(
+			rec, i);
+		switch (avro_typeof(field)) {
+		case AVRO_UNION:
+			out_index += 2;
+			break;
+		case AVRO_RECORD:
+			out_index = register_schema_types(L, field, out_index);
+			break;
+		default:
+			{
+				const char *ns;
+				const char *name;
+				ns = avro_schema_namespace(field);
+				name = avro_schema_type_name(field);
+				if (ns != NULL) {
+					lua_pushfstring(L, "%s.%s", ns, name);
+				} else {
+					lua_pushstring(L, name);
+				}
+				lua_rawseti(L, -2, out_index++);
+			}
+			break;
+		}
+	}
+	return out_index;
+}
+
+static int
+get_schema_types(struct lua_State *L)
+{
+	struct schema_plus *schema;
+	schema = (struct schema_plus *)
+		luaL_checkudata(L, 1, schema_typename);
+	lua_createtable(L, 0, 0);
+	if (avro_typeof(schema->schema) == AVRO_RECORD)
+		register_schema_types(L, schema->schema, 1);
+	return 1;
+}
+
 extern "C" {
 
 LUA_API int
@@ -630,6 +727,8 @@ luaopen_avro(lua_State *L)
 		{"flatten",              flatten},
 		{"unflatten",            unflatten},
 		{"xflatten",             xflatten},
+		{"get_schema_names",     get_schema_names},
+		{"get_schema_types",     get_schema_types},
 		{NULL, NULL}
 	};
 	// avro.schema
