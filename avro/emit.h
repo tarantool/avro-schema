@@ -396,7 +396,7 @@ repeat:
 
 				int tag;
 				if (avro_value_get_discriminant(
-						val, &tag) != 0)
+						&item, &tag) != 0)
 					internal_error();
 
 				ae.emit_int(tag);
@@ -411,7 +411,7 @@ repeat:
 					internal_error();
 
 				update_item_index += 1;
-				type = avro_value_get_type(val);
+				type = avro_value_get_type(&item);
 			}
 			/* fallthrough */
 		default:

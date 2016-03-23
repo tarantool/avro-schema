@@ -8,12 +8,13 @@ local create_schema = avro.create_schema
 local flatten       = avro.flatten
 local unflatten     = avro.unflatten
 local is_compatible = avro.schema_is_compatible
+local xflatten      = avro.xflatten
 local get_schema_names = avro.get_schema_names
 local get_schema_types = avro.get_schema_types
 
 local test = tap.test('Avro module')
 box.cfg{}
-test:plan(10)
+test:plan(11)
 
 -- hook GC methods to produce log
 local gc_log
@@ -80,6 +81,17 @@ local enum_schema_p = {
    name = "Suit",
    symbols = {"SPADES", "HEARTS", "DIAMONDS", "CLUBS"}
 }
+local complex_schema2_p = {
+    type = "record",
+    name = "X.Complex2",
+    fields = {
+        { name = "F1", type = "int" },
+        { name = "F2", type = frob_v2_schema_p },
+        { name = "F3", type = int_array_schema_p },
+        { name = "F4", type = { "int", "string", "X.Frob" } },
+        { name = "F5", type = enum_schema_p },
+    }
+}
 
 --
 -- load-good-schema
@@ -98,15 +110,17 @@ test:test('load-good-schema', function(test)
         {'load-frob-v2-schema',       frob_v2_schema_p,       'Avro schema (X.Frob)'},
         {'load-frob-v1-array-schema', frob_v1_array_schema_p, 'Avro schema (array)'},
         {'load-complex-schema',       complex_schema_p,       'Avro schema (X.Complex)'},
+        {'load-complex-schema2',      complex_schema2_p,      'Avro schema (X.Complex2)'},
         {'load-enum-schema',          enum_schema_p,          'Avro schema (Suit)'},
         {'load-union-value',          {'int', 'string'},      'Avro schema (union)'}
     }
  
-    test:plan(#tests)
+    test:plan(#tests * 2)
 
     for _,v in pairs(tests) do
         local ok, schema = create_schema(v[2])
-        test:is_deeply({ok, tostring(schema)}, {true, v[3]}, v[1])
+        test:is(ok, true, v[1])
+        test:is(tostring(schema), v[3], v[1] .. ' (res)')
     end
 end)
 
@@ -476,12 +490,185 @@ test:test('union', function(test)
 
 end)
 
+test:test('xflatten', function(test)
+    local _, int_schema = create_schema(int_schema_p)
+    local _, frob_schema = create_schema(frob_v2_schema_p)
+    local _, complex_schema = create_schema(complex_schema2_p)
+
+    test:plan(24)
+
+    test:is_deeply(
+        { xflatten(1, int_schema) },
+        { false, 'type mismatch' },
+        'xflatten-not-a-record')
+
+    -- no bits
+    test:is_deeply(
+        { xflatten({}, frob_schema) },
+        { true, {} },
+        'xflatten-frob-empty')
+
+    -- 1 bit
+    test:is_deeply(
+        { xflatten({ A = 42 }, frob_schema) },
+        { true, { { '=', 1, 42 } } },
+        'xflatten-frob-A')
+
+    test:is_deeply(
+        { xflatten({ B = 42 }, frob_schema) },
+        { true, { { '=', 2, 42 } } },
+        'xflatten-frob-B')
+
+    test:is_deeply(
+        { xflatten({ C = 42 }, frob_schema) },
+        { true, { { '=', 3, 42 } } },
+        'xflatten-frob-C')
+
+    test:is_deeply(
+        { xflatten({ D = 'Hello, world!' }, frob_schema) },
+        { true, { { '=', 4, 'Hello, world!' } } },
+        'xflatten-frob-D')
+
+    -- 2 bits
+    test:is_deeply(
+        { xflatten({ A = 42, B = 1 }, frob_schema) },
+        { true, {
+            { '=', 1, 42 },
+            { '=', 2, 1 }
+        }},
+        'xflatten-frob-A-B')
+
+    test:is_deeply(
+        { xflatten({ A = 42, C = 1 }, frob_schema) },
+        { true, {
+            { '=', 1, 42 },
+            { '=', 3, 1 }
+        }},
+        'xflatten-frob-A-C')
+
+    test:is_deeply(
+        { xflatten({ B = 42, D = 'Hello, world!' }, frob_schema) },
+        { true, {
+            { '=', 2, 42 },
+            { '=', 4, 'Hello, world!' }
+        }},
+        'xflatten-frob-B-D')
+
+    -- 3 bits
+    test:is_deeply(
+        { xflatten({ A = 10, B = 20, C = 30 }, frob_schema) },
+        { true, {
+            { '=', 1, 10 },
+            { '=', 2, 20 },
+            { '=', 3, 30 }
+        }},
+        'xflatten-frob-A-B-C')
+
+    test:is_deeply(
+        { xflatten({ B = 20, C = 30, D = 'Hello' }, frob_schema) },
+        { true, {
+            { '=', 2, 20 },
+            { '=', 3, 30 },
+            { '=', 4, 'Hello' }
+        }},
+        'xflatten-frob-B-C-D')
+
+    -- 4 bits
+    test:is_deeply(
+        { xflatten({ A = 10, B = 20, C = 30, D = 'Hello' }, frob_schema) },
+        { true, {
+            { '=', 1, 10 },
+            { '=', 2, 20 },
+            { '=', 3, 30 },
+            { '=', 4, 'Hello' }
+        }},
+        'xflatten-frob-A-B-C-D')
+
+    -- complex
+    test:is_deeply(
+        { xflatten({ F1 = 42 }, complex_schema) },
+        { true, { { '=', 1, 42 } } },
+        'xflatten-complex-F1')
+
+    test:is_deeply(
+        { xflatten({ F2 = {} }, complex_schema) },
+        { true, {} },
+        'xflatten-complex-F2')
+
+    test:is_deeply(
+        { xflatten({ F2 = { A = 199 } }, complex_schema) },
+        { true, { { '=', 2, 199 } } },
+        'xflatten-complex-F2-A')
+
+    test:is_deeply(
+        { xflatten({ F2 = { B = 299 } }, complex_schema) },
+        { true, { { '=', 3, 299 } } },
+        'xflatten-complex-F2-B')
+
+    test:is_deeply(
+        { xflatten({ F2 = { C = 399} }, complex_schema) },
+        { true, { { '=', 4, 399 } } },
+        'xflatten-complex-F2-C')
+
+    test:is_deeply(
+        { xflatten({ F2 = { D = 'Hello' } }, complex_schema) },
+        { true, { { '=', 5, 'Hello' } } },
+        'xflatten-complex-F2-D')
+
+    test:is_deeply(
+        { xflatten({ F3 = { 1, 2, 3, 4, 5, 6 } }, complex_schema) },
+        { true, { { '=', 6, { 1, 2, 3, 4, 5, 6 } } } },
+        'xflatten-complex-F3')
+
+    test:is_deeply(
+        { xflatten({ F4 = {'int', 42} }, complex_schema) },
+        { true, {
+            { '=', 7, 0 },
+            { '=', 8, 42 },
+        }},
+        'xflatten-complex-F4-int')
+
+    test:is_deeply(
+        { xflatten({ F4 = {'string', 'Hello'} }, complex_schema) },
+        { true, {
+            { '=', 7, 1 },
+            { '=', 8, 'Hello' },
+        }},
+        'xflatten-complex-F4-string')
+
+    test:is_deeply(
+        { xflatten({ F4 = {'Frob', { A = 1, B = 2, C = 3, D = 'Hello' }}}, complex_schema) },
+        { true, {
+            { '=', 7, 2 },
+            { '=', 8, { 1, 2, 3, 'Hello' } },
+        }},
+        'xflatten-complex-F4-Frob')
+
+    test:is_deeply(
+        { xflatten({ F5 = 'HEARTS' }, complex_schema) },
+        { true, { { '=', 9, 1 } } },
+        'xflatten-complex-F5')
+
+    -- bitmap (possible) interference
+    test:is_deeply(
+        { xflatten({ F1 = 42, F2 = { B = 100, D = 'Hello'}, F3 = {} }, complex_schema) },
+        { true, {
+            { '=', 1, 42 },
+            { '=', 3, 100 },
+            { '=', 5, 'Hello' },
+            { '=', 6, {} }
+        }},
+        'xflatten-complex-interference')
+
+end)
+
 test:test('schema-query', function(test)
     local _, int_schema = create_schema(int_schema_p)
     local _, frob_schema = create_schema(frob_v2_schema_p)
     local _, complex_schema = create_schema(complex_schema_p)
+    local _, complex_schema2 = create_schema(complex_schema2_p)
 
-    test:plan(6)
+    test:plan(8)
 
     test:is_deeply(
         get_schema_names(int_schema),
@@ -512,6 +699,16 @@ test:test('schema-query', function(test)
         get_schema_types(complex_schema),
         { 'int', 'int', 'int', 'int', 'int', 'int' },
         'complex-types')
+
+    test:is_deeply(
+        get_schema_names(complex_schema2),
+        { 'F1', 'F2.A', 'F2.B', 'F2.C', 'F2.D', 'F3', 'F4.$type$', 'F4', 'F5' },
+        'complex2-names')
+
+    test:is_deeply(
+        get_schema_types(complex_schema2),
+        { 'int', 'int', 'int', 'int', 'string', 'array', nil, nil, 'X.Suit' },
+        'complex2-types')
 
 end)
 

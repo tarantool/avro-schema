@@ -278,6 +278,7 @@ ir_builder<Flags, Options>::build_value(
 			 typename Parser::context_type::array_parser ap(
 				 parser.context());
 			 build_array_value(ap, dest);
+			 ap.kill();
 		}
 		return;
 	case AVRO_ENUM:
@@ -508,7 +509,7 @@ ir_builder<Flags, Options>::build_x_verbose_record_value(
 				rp, &field, bit_offset + nbo[index]);
 			rp.kill();
 		} else {
-			build_value(erase_type(parser), &field);
+			build_value(erase_type(parser), &field, type);
 		}
 	}
 }
