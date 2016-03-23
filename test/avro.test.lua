@@ -8,10 +8,12 @@ local create_schema = avro.create_schema
 local flatten       = avro.flatten
 local unflatten     = avro.unflatten
 local is_compatible = avro.schema_is_compatible
+local get_schema_names = avro.get_schema_names
+local get_schema_types = avro.get_schema_types
 
 local test = tap.test('Avro module')
 box.cfg{}
-test:plan(9)
+test:plan(10)
 
 -- hook GC methods to produce log
 local gc_log
@@ -471,6 +473,45 @@ test:test('union', function(test)
         { unflatten({ 100, 42 }, simple_schema) },
         { false, "name unknown"},
         'invalid-4')
+
+end)
+
+test:test('schema-query', function(test)
+    local _, int_schema = create_schema(int_schema_p)
+    local _, frob_schema = create_schema(frob_v2_schema_p)
+    local _, complex_schema = create_schema(complex_schema_p)
+
+    test:plan(6)
+
+    test:is_deeply(
+        get_schema_names(int_schema),
+        {},
+        'not-a-record-names')
+
+    test:is_deeply(
+        get_schema_types(int_schema),
+        {},
+        'not-a-record-types')
+
+    test:is_deeply(
+        get_schema_names(frob_schema),
+        { 'A', 'B', 'C', 'D' },
+        'frob-names')
+
+    test:is_deeply(
+        get_schema_types(frob_schema),
+        { 'int', 'int', 'int', 'string' },
+        'frob-types')
+
+    test:is_deeply(
+        get_schema_names(complex_schema),
+        { 'A', 'B', 'C', 'D.E', 'D.F', 'D.G' },
+        'complex-names')
+
+    test:is_deeply(
+        get_schema_types(complex_schema),
+        { 'int', 'int', 'int', 'int', 'int', 'int' },
+        'complex-types')
 
 end)
 
