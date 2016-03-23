@@ -10,6 +10,7 @@ local unflatten     = avro.unflatten
 local is_compatible = avro.schema_is_compatible
 
 local test = tap.test('Avro module')
+box.cfg{}
 test:plan(9)
 
 -- hook GC methods to produce log
@@ -265,8 +266,9 @@ test:test('unflatten', function(test)
     local flat_ABCD = { 1, 2, 3, 'test' }
     local ABCDEFG = { A = 1, B = 2, C = 3, D = { E = 4, F = 5, G = 6 } }
     local flat_ABCDEFG = { 1, 2, 3, 4, 5, 6 }
+    local tnew = box.tuple.new
 
-    test:plan(7)
+    test:plan(12)
 
     test:is_deeply(
         { unflatten(flat_ABC, frob_v1_schema) },
@@ -292,6 +294,31 @@ test:test('unflatten', function(test)
         { unflatten(flat_ABCDEFG, complex_schema) },
         { true, ABCDEFG },
         'unflatten-complex')
+
+    test:is_deeply(
+        { unflatten(tnew(flat_ABC), frob_v1_schema) },
+        { true, ABC },
+        'unflatten-frob-v1 (tuple)')
+
+    test:is_deeply(
+        { unflatten(tnew({ flat_ABC, flat_ABC, flat_ABC }), frob_v1_array_schema) },
+        { true, { ABC, ABC, ABC } },
+        'unflatten-frob-v1-array (tuple)')
+
+    test:is_deeply(
+        { unflatten(tnew(flat_ABCD), frob_v2_schema) },
+        { true, ABCD },
+        'unflatten-frob-v2 (tuple)')
+
+    test:is_deeply(
+        { unflatten(tnew(flat_ABCD), frob_v2_schema, frob_v1_schema) },
+        { true, ABC },
+        'unflatten-frob-v2-as-frob-v1 (tuple)')
+
+    test:is_deeply(
+        { unflatten(tnew(flat_ABCDEFG), complex_schema) },
+        { true, ABCDEFG },
+        'unflatten-complex (tuple)')
 
     test:is_deeply(
         { unflatten({ '', 2, 3 }, frob_v1_schema) },
