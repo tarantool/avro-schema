@@ -1,0 +1,5 @@
+tarantool-avro (1.0.0-1) unstable; urgency=low
+
+  * Initial release
+
+ -- Roman Tsisyk <roman@tarantool.org>  Wed, 16 Sep 2015 11:30:00 +0300
