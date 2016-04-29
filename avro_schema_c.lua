@@ -332,7 +332,7 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
 			local ddata
 			dcells, ddata = prepare_flat_defaults_vec(context.lir, ds, dv)
 			for i = 1, dcells do
-				defaults[ (curcell + i)*2 - 3 ] = ddata[ i * 2 - 1]
+				defaults[ (curcell + i)*2 - 3 ] = ddata[ i * 2 - 1 ]
 				defaults[ (curcell + i)*2 - 2 ] = ddata[ i * 2 ]
 			end
 		end
@@ -437,7 +437,99 @@ emit_rec_flatten_pass2 = function(context, ir, tree)
 end
 
 emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
-	return {}, context.vlocell
+    local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
+	local bc = ir_record_bc(ir)
+	local defaults = context.defaults
+    local vlocell = context.vlocell
+    local lir, opo = context.lir, context.opo
+    local code = {}
+	for o = 1, #onames do
+		local ds, dv = ir_record_odefault(ir, o)
+        local dcells
+        local fieldvar = tree[o]
+        if type(fieldvar) == 'table' then
+            fieldvar = fieldvar[0]
+        end
+        -- if not set action
+        if not ds then -- it's mandatory
+            assert(fieldvar)
+            insert(code, lir.isset(fieldvar))
+        else
+            local ifnotset = { lir.ifnotset(fieldvar) }
+			local ddata
+			dcells, ddata = prepare_flat_defaults_vec(context.lir, ds, dv)
+
+            local dsplit -- a spliting point (before/after vlocell)
+            if     curcell >= vlocell then
+                dsplit = 0
+            elseif curcell + dcells <= vlocell then
+                dsplit = dcells
+            else
+                dsplit = vlocell - curcell
+            end
+
+			for i = 1, dsplit do -- before vlocell; patch (unless it's a NOP)
+                local dcurcell = curcell + i - 1
+                local lirfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
+
+                if lirfunc ~= defaults[ dcurcell * 2 - 1 ] or
+                       arg ~= defaults[ dcurcell * 2 ] then
+
+                    insert(ifnotset, lirfunc(opo + dcurcell - vlocell, arg))
+                end
+			end
+
+            if dsplit ~= dcells then -- after vlocell; append
+                insert(ifnotset, lir.checkobuf(opo + dcells - dsplit))
+                for i = dsplit + 1, dcells do
+                    local lirfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
+                    insert(ifnotset, lirfunc(opo + i - dsplit - 1, arg))
+                end
+                insert(ifnotset, lir.move(0, 0, opo + dcells - dsplit))
+            end
+
+            if next(ifnotset, 1) then
+                insert(code, ifnotset)
+            end
+        end
+        -- if set action
+		local fieldir = bc[o2i[o]]
+        if not fieldir then
+            curcell = curcell + dcells
+        else
+            local ifset = { ds and lir.ifset(fieldvar) or lir.nop() }
+			local fieldirt
+			fieldirt = ir_type(fieldir)
+            if fieldirt == 'RECORD' then
+                local rcode
+                rcode, curcell = emit_rec_flatten_pass3(context, fieldir,
+                                                        tree[o], curcell)
+                if next(rcode) then
+                    insert(ifset, rcode)
+                    insert(code, ifset)
+                end
+            elseif fieldrt == 'UNION' then
+                assert(false, 'NYI: union')
+            else
+                if curcell >= vlocell then -- append
+                    local ccode, _
+                    ccode, _, opo = emit_convert_unchecked(lir, fieldir,
+                                                           fieldvar, 0, opo)
+                    insert(ifset, ccode)
+                    if opo ~= 0 then
+                        insert(ifset, lir.move(0, 0, opo))
+                    end
+                    insert(code, ifset)
+                end
+                curcell = curcell + 1
+            end
+        end
+        if curcell > vlocell then
+            context.opo = 0
+            opo = 0
+        end
+    end
+	return code, curcell
 end
 
 -----------------------------------------------------------------------

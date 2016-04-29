@@ -320,14 +320,14 @@ if r.t[%s] ~= 4 or r.v[%s].uval + 0x80000000 > 0xffffffff then error() end]],
 			return function(body)
 				body[1] = format('if v%03d then', vname)
 				insert(body, 'end')
-				return bidy
+				return body
 			end
 		end,
 		ifnotset = function(vname)
 			return function(body)
 				body[1] = format('if not v%03d then', vname)
 				insert(body, 'end')
-				return bidy
+				return body
 			end
 		end,
 		---------------------------------------------------------------
