@@ -132,12 +132,22 @@ linker = function(decode_proc, encode_proc)
         r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
         return encode_proc(r, f002(r, 0, 0))
     end
+    local function xflatten(data)
+        local _ = linker
+        local r = regs
+        decode_proc(r, data)
+        r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
+        return encode_proc(r, f003(r, 0, 0))
+    end
     return {
         flatten  = function(data)
             return xpcall(flatten, eh_handler, data)
         end,
         unflatten  = function(data, path)
             return xpcall(unflatten, eh_handler, data, path)
+        end,
+        xflatten  = function(data, path)
+            return xpcall(xflatten, eh_handler, data, path)
         end
     }
 end
@@ -190,8 +200,10 @@ local function compile(...)
         return true, {
             flatten           = lua.flatten,
             unflatten         = lua.unflatten,
+            xflatten          = lua.xflatten,
             flatten_msgpack   = msgpack.flatten,
-            unflatten_msgpack = msgpack.unflatten
+            unflatten_msgpack = msgpack.unflatten,
+            xflatten_msgpack  = msgpack.xflatten
         }
     end
 end

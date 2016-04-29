@@ -72,7 +72,10 @@ local function lua_lir()
 			return format('local v%03d', name)
 		end,
 		opvar = function(name)
-			return format('local v03%d', name)
+			return format('local v%03d', name)
+		end,
+		countervar = function(name)
+			return format('local v%03d', name)
 		end,
 		---------------------------------------------------------------
 		checkobuf = function(offset)
@@ -219,13 +222,21 @@ local function lua_lir()
 			}
 		end,
 		---------------------------------------------------------------
+		fixlen = function(v, ofs, counter)
+			return(format('r.ov[%s].xlen = v%03d', lea(v, ofs), counter))
+		end,
+		fixoff = function(v, ofs)
+			local dest = lea(v, ofs)
+			return(format('r.ov[%s].xoff = v000 - (%s)', dest, dest))
+		end,
+		---------------------------------------------------------------
 		mapforeach = function(vname, offset)
 			return function(body)
 				local src = lea(vname, offset)
 				body[1] = {}
 				return {
 					format('local tmp = %s+r.v[%s].xoff', src, src),
-					format('v%03d = v%03d+1', vname, vname),
+					format('v%03d = %s', vname, lea(vname, offset + 1)),
 					format('while v%03d ~= tmp do', vname),
 					body,
 					'end'

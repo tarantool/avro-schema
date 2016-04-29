@@ -633,6 +633,121 @@ emit_rec_unflatten_pass2 = function(context, ir, tree)
 end
 
 -----------------------------------------------------------------------
+local emit_rec_xflatten_pass1
+local emit_rec_xflatten_pass2
+
+local function emit_rec_xflatten(lir, ir, ipv)
+	assert(ir_type(ir) == 'RECORD')
+    local headpos, counter = lir.new_var(), lir.new_var()
+    local context = {
+        lir = lir,
+        ipv = ipv,
+        var_block = {},
+        counter = counter
+    }
+    local tree = {}
+    emit_rec_xflatten_pass1(context, ir, tree, 1)
+    local generator_block = emit_rec_xflatten_pass2(context, ir, tree, 0)
+    return {
+        lir.opvar(headpos),
+        lir.countervar(counter),
+        context.var_block,
+        lir.move(headpos, 0, 0),
+        lir.move(counter, nil, 0),
+        lir.checkobuf(0),
+        lir.putarrayc(0, 0),
+        lir.move(0, 0, 1),
+        generator_block,
+        lir.fixlen(headpos, 0, counter)
+    }
+end
+
+emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
+	local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
+	local bc = ir_record_bc(ir)
+    for o = 1, #onames do
+		local fieldir = bc[o2i[o]]
+        if not fieldir then
+            local ds, dv = ir_record_odefault(ir, o)
+            curcell = curcell + prepare_flat_defaults_vec(context.lir, ds, dv)
+        else
+			local fieldirt
+			tree[o] = curcell
+			fieldirt = ir_type(fieldir)
+            if     fieldirt == 'RECORD' then
+                local ctree = {}
+                tree[o] = ctree
+                curcell = emit_rec_xflatten_pass1(context, fieldir,
+                                                  ctree, curcell)
+            elseif fieldirt == 'UNION' then
+                assert(false, 'NYI: union')
+            else
+                curcell = curcell + 1
+            end
+        end
+    end
+    return curcell
+end
+
+emit_rec_xflatten_pass2 = function(context, ir, tree, ipo)
+	local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
+	local i2o = ir_record_i2o(ir)
+	local lir, ipv = context.lir, context.ipv
+	local var_block = context.var_block
+    counter = context.counter
+	local switch = { lir.strswitch(ipv, 0, inames) }
+	for i = 1, #inames do
+		local fieldir = bc[i]
+		local fieldirt = ir_type(fieldir)
+		local o = i2o[i]
+		local fieldvar = lir.new_var()
+		local targetcell = tree[o]
+		insert(var_block, lir.ipvar(fieldvar))
+		local branch = {
+			lir.isnotset(fieldvar),
+			lir.move(fieldvar, ipv, 1)
+		}
+		switch[i + 1] = branch
+		if fieldirt == 'RECORD' then
+			insert(branch, emit_rec_xflatten_pass2(context, fieldir, tree and tree[o], 1))
+		elseif fieldirt == 'UNION' then
+			assert(false, 'NYI')
+		else
+			local code_block, nipo
+            local nopo = 0
+			if o then
+                insert(branch, {
+                    lir.checkobuf(2),
+                    lir.putarrayc(0, 3),
+                    lir.putstrc(1, '='),
+                    lir.putintc(2, tree[o]),
+                    lir.move(counter, counter, 1)
+                })
+				code_block, nipo, nopo = emit_convert(lir, fieldir, ipv, 1, 3)
+			else
+				code_block, nipo = emit_validate(lir, fieldir, ipv, 1)
+			end
+			insert(branch, code_block)
+			if nipo ~= 0 then
+				insert(branch, lir.move(ipv, ipv, nipo))
+			end
+			if nopo ~= 0 then
+				insert(branch, lir.move(0, 0, nopo))
+			end
+		end
+	end
+	local res = {
+		lir.ismap(ipv, ipo),
+		{
+			lir.mapforeach(ipv, ipo),
+			lir.isstr(ipv, 0),
+			switch
+		}
+	}
+	return res
+end
+
+-----------------------------------------------------------------------
 local function emit_code(lir, ir)
 	-- reserve f001, f002, f003
 	lir.new_func()
@@ -642,9 +757,11 @@ local function emit_code(lir, ir)
 	local fbody, fipo, fopo = emit_rec_flatten(lir, ir, fipv, 0, 0)
 	local uipv = lir.new_var()
 	local ubody, uipo, uopo = emit_rec_unflatten(lir, ir, uipv, 0, 0)
+	local xipv = lir.new_var()
 	return {
 		{ lir.cvtfunc(1, fipv, fipo, fopo), fbody },
-		{ lir.cvtfunc(2, uipv, uipo, uopo), ubody }
+		{ lir.cvtfunc(2, uipv, uipo, uopo), ubody },
+		{ lir.cvtfunc(3, xipv, 0, 0), emit_rec_xflatten(lir, ir, xipv, 0, 0) }
 	}
 end
 
@@ -652,5 +769,6 @@ end
 return {
 	emit_code          = emit_code, 
 	emit_rec_flatten   = emit_rec_flatten,
-	emit_rec_unflatten = emit_rec_unflatten
+	emit_rec_unflatten = emit_rec_unflatten,
+	emit_rec_xflatten  = emit_rec_xflatten
 }
