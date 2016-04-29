@@ -81,7 +81,7 @@ avro_schema.compile({schema1, schema2, downgrade = true})
 
 Dumping generated code for inspection:
 ```lua
-avro_schema.compile({schema1, schema2, dump_src='output.lua'})
+avro_schema.compile({schema1, schema2, dump_src = "output.lua"})
 ```
 
 ##Generated Routines
