@@ -208,14 +208,6 @@ local function compile(...)
     end
 end
 
-local function do_record(record, v, handler)
-    local fields = record.fields
-    for i = 1, #fields do
-        v = handler(v, fields[i])
-    end
-    return v
-end
-
 local get_names_helper
 get_names_helper = function(res, pos, names, rec)
     local fields = rec.fields

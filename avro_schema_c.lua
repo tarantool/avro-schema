@@ -177,7 +177,8 @@ emit_patch = function(lir, ir, ipv, ipo, opo)
 	elseif irt == 'FIXED' then
 		return {
 			lir.isbin(ipv, ipo),
-			lir.lenis(ipv, ipo, ir_fixed_size(ir))
+			lir.lenis(ipv, ipo, ir_fixed_size(ir)),
+			lir.putbin(opo, ipv, ipo)
 		}, ipo + 1
 	elseif irt == 'ENUM' then
 		assert(false, 'NYI: enum')
