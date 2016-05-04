@@ -183,7 +183,7 @@ emit_patch = function(lir, ir, ipv, ipo, opo)
 	elseif irt == 'ENUM' then
 		assert(false, 'NYI: enum')
 	else
-		assert(false) -- VLO, can't patch
+		assert(false, 'VLO') -- VLO, can't patch
 	end
 end
 
@@ -245,9 +245,46 @@ emit_convert = function(lir, ir, ipv, ipo, opo)
 			lir.putbin(opo, ipv, ipo)
 		}, ipo + 1, opo + 1
 	elseif irt == 'ARRAY' then
-		assert(false, 'NYI: array')
+		local body, nipo, nopo = emit_convert(lir, ir[2], ipv, 0, 0)
+		local loop = {
+			lir.arrayforeach(ipv, ipo),
+			body
+		}
+		if nipo ~= 0 then
+			insert(loop, lir.move(ipv, ipv, nipo))
+		end
+		if nopo ~= 0 then
+			insert(loop, lir.move(0, 0, nopo))
+		end
+		return {
+			lir.isarray(ipv, ipo),
+			lir.checkobuf(opo),
+			lir.putarray(opo, ipv, ipo),
+			lir.move(0, 0, opo + 1),
+			loop
+		}, 0, 0
 	elseif irt == 'MAP' then
-		assert(false, 'NYI: map')
+		local body, nipo, nopo = emit_convert(lir, ir[2], ipv, 1, 1)
+		local loop = {
+			lir.mapforeach(ipv, ipo),
+			lir.isstr(ipv, 0),
+			lir.checkobuf(0),
+			lir.putstr(0, ipv, 0),
+			body
+		}
+		if nipo ~= 0 then
+			insert(loop, lir.move(ipv, ipv, nipo))
+		end
+		if nopo ~= 0 then
+			insert(loop, lir.move(0, 0, nopo))
+		end
+		return {
+			lir.ismap(ipv, ipo),
+			lir.checkobuf(opo),
+			lir.putmap(opo, ipv, ipo),
+			lir.move(0, 0, opo + 1),
+			loop
+		}, 0, 0
 	elseif irt == 'UNION' then
 		assert(false, 'NYI: union')
 	elseif irt == 'RECORD' then
@@ -367,7 +404,7 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
 					return curcell, true
 				end
 			else
-				-- ARRAY or tree, it's a VLO
+				-- ARRAY or MAP, it's a VLO
 				return curcell, true
 			end
 		end
