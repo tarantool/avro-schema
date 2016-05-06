@@ -380,10 +380,10 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
 			curcell = curcell + dcells
 		else
 			local fieldirt
-			tree[o] = curcell
 ::restart::
 			fieldirt = ir_type(fieldir)
 			if type(fieldir) ~= 'table' or fieldirt == 'FIXED' or fieldirt == 'ENUM' then
+			tree[o] = curcell
 				curcell = curcell + 1
 			elseif fieldirt == 'RECORD' then
 				local childtree, vlofound = {}
@@ -425,7 +425,7 @@ emit_rec_flatten_pass2 = function(context, ir, tree)
 		local o = i2o[i]
 		local fieldvar = lir.new_var()
 		local targetcell = tree[o]
-		insert(var_block, lir.ipvar(fieldvar))
+		insert(var_block, lir.variable(fieldvar))
 		local branch = {
 			lir.isnotset(fieldvar),
 			lir.move(fieldvar, ipv, 1)
@@ -613,7 +613,7 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell)
 		elseif i2o[i] and not ir_record_ohidden(ir, i2o[i]) then
 			local var = lir.new_var()
 			tree[i] = var
-			insert(context.var_block, lir.ipvar(var))
+			insert(context.var_block, lir.variable(var))
 			insert(code, lir.move(var, context.ipv, context.ipo))
 			fieldcode, context.ipo = emit_check(context.lir, fieldir,
 												context.ipv, context.ipo)
@@ -687,8 +687,8 @@ local function emit_rec_xflatten(lir, ir, ipv)
     emit_rec_xflatten_pass1(context, ir, tree, 1)
     local generator_block = emit_rec_xflatten_pass2(context, ir, tree, 0)
     return {
-        lir.opvar(headpos),
-        lir.countervar(counter),
+        lir.variable(headpos),
+        lir.variable(counter),
         context.var_block,
         lir.move(headpos, 0, 0),
         lir.move(counter, nil, 0),
@@ -740,7 +740,7 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ipo)
 		local o = i2o[i]
 		local fieldvar = lir.new_var()
 		local targetcell = tree[o]
-		insert(var_block, lir.ipvar(fieldvar))
+		insert(var_block, lir.variable(fieldvar))
 		local branch = {
 			lir.isnotset(fieldvar),
 			lir.move(fieldvar, ipv, 1)

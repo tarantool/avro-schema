@@ -68,13 +68,7 @@ local function lua_lir()
 			return format('%03d = f%03d(r, %s)', vname, name, lea(vname, offset))
 		end,
 		---------------------------------------------------------------
-		ipvar = function(name)
-			return format('local v%03d', name)
-		end,
-		opvar = function(name)
-			return format('local v%03d', name)
-		end,
-		countervar = function(name)
+		variable = function(name)
 			return format('local v%03d', name)
 		end,
 		---------------------------------------------------------------
