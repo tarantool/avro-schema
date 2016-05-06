@@ -27,7 +27,7 @@ end
 -- weird-looking strings are the IR bytecode
 local primitive_type = {
     null  = 'NUL', boolean = 'BOOL', int   = 'INT', long   = 'LONG',
-    float = 'FLT', double  = 'DBL',  bytes = 'BIN', string = 'STR'
+    float = 'FLT', double  = 'DBL',  bytes = 'BIN', string = 'STR', any = 'XXX'
 }
 
 -- permitted type promotions, more IR bytecode featured
@@ -573,49 +573,48 @@ local copy_data
 copy_data = function(schema, data, visited)
     -- error handler peeks into ptr using debug.getlocal();
     local ptr
-    if type(schema) == 'string' then
-        -- primitives
-        -- Note: sometimes we don't check the type explicitly, but instead
-        -- rely on an operation to fail on a wrong type. Done with integer
-        -- and fp types, also with tables.
-        -- Due to this technique, a error message is often misleading,
-        -- e.x. "attempt to perform arithmetic on a string value". Unless
-        -- a message starts with '@', we replace it (see copy_data_eh).
-        if     schema == 'null' then
-            if data ~= null then
-                error()
-            end
-            return null
-        elseif schema == 'boolean' then
-            if type(data) ~= 'boolean' then
-                error()
-            end 
-            return data
-        elseif schema == 'int' then
-            if data < -0x80000000 or data > 0x7fffffff or floor(tonumber(data)) ~= data then
-                error()
-            end
-            return data
-        elseif schema == 'long' then
-            if data > 0x7fffffffffffffffLL or (
-                    floor(tonumber(data)) ~= data and tonumber(data) == data) then
-                error()
-            end
-            return data
-        elseif schema == 'double' or schema == 'float' then
-            return 0 + tonumber(data)
-        else -- bytes, string
-            if type(data) ~= 'string' then
-                error()
-            end
-            return data
+    local schematype = type(schema) == 'string' and schema or schema.type
+    -- primitives
+    -- Note: sometimes we don't check the type explicitly, but instead
+    -- rely on an operation to fail on a wrong type. Done with integer
+    -- and fp types, also with tables.
+    -- Due to this technique, a error message is often misleading,
+    -- e.x. "attempt to perform arithmetic on a string value". Unless
+    -- a message starts with '@', we replace it (see copy_data_eh).
+    if     schematype == 'null' then
+        if data ~= null then
+            error()
         end
-    elseif schema.type == 'enum' then
+        return null
+    elseif schematype == 'boolean' then
+        if type(data) ~= 'boolean' then
+            error()
+        end
+        return data
+    elseif schematype == 'int' then
+        if data < -0x80000000 or data > 0x7fffffff or floor(tonumber(data)) ~= data then
+            error()
+        end
+        return data
+    elseif schematype == 'long' then
+        if data > 0x7fffffffffffffffLL or (
+                floor(tonumber(data)) ~= data and tonumber(data) == data) then
+            error()
+        end
+        return data
+    elseif schematype == 'double' or schema == 'float' then
+        return 0 + tonumber(data)
+    elseif schematype == 'bytes' or schematype == 'string' then
+        if type(data) ~= 'string' then
+            error()
+        end
+        return data
+    elseif schematype == 'enum' then
         if not create_enum_symbol_map(schema)[data] then
             error()
         end
         return data
-    elseif schema.type == 'fixed' then
+    elseif schematype == 'fixed' then
         if type(data) ~= 'string' or #data ~= schema.size then
             error()
         end
@@ -627,7 +626,7 @@ copy_data = function(schema, data, visited)
         local res = {}
         visited[data] = true
         -- record, enum, array, map, fixed
-        if     schema.type == 'record' then
+        if     schematype == 'record' then
             local fieldmap = create_record_field_map(schema)
             for k,v in pairs(data) do
                 ptr = k
@@ -646,12 +645,12 @@ copy_data = function(schema, data, visited)
                     error(format('@Field %s mising', field.name), 0)
                 end
             end
-        elseif schema.type == 'array'  then
+        elseif schematype == 'array'  then
             for i, v in ipairs(data) do
                 ptr = i
                 res[i] = copy_data(schema.items, v, visited)
             end
-        elseif schema.type == 'map'    then
+        elseif schematype == 'map'    then
             for k, v in pairs(data) do
                 ptr = k
                 if type(k) ~= 'string' then
@@ -659,8 +658,7 @@ copy_data = function(schema, data, visited)
                 end
                 res[k] = copy_data(schema.values, v, visited)
             end
-        else
-            -- union
+        elseif not schematype then -- union
             local tagmap = create_union_tag_map(schema)
             if data == null then
                 if not tagmap['null'] then
@@ -681,6 +679,20 @@ copy_data = function(schema, data, visited)
                     error('@Unexpected key in union', 0)
                 end
             end
+        elseif schematype == 'any' then
+            if type(data) == 'table' then
+                for k, v in pairs(data) do
+                    ptr = k
+                    if type(k) == 'table' then
+                        error('@Invalid key', 0)
+                    end
+                    res[k] = copy_data('any', v, visited)
+                end
+            else
+                res = data
+            end
+        else
+            assert(false)
         end
         visited[data] = nil
         return res
@@ -755,6 +767,10 @@ build_ir = function(from, to, mem, imatch)
         for fbi, fb in ipairs(from) do
             for tbi, tb in ipairs(to) do
                 if type(fb) == 'string' then
+                    if fb == 'any' then
+                        err = build_ir_error(1, 'NYI: any')
+                        break
+                    end
                     if     fb == tb then
                         bc[fbi] = primitive_type[fb]
                         mm[fbi] = tbi
@@ -783,7 +799,7 @@ build_ir = function(from, to, mem, imatch)
             havecommon = havecommon or mm[fbi]
         end
         if not havecommon then
-            return nil, (err or build_ir_error('No common types'))
+            return nil, (err or build_ir_error(nil, 'No common types'))
         end
         return {
             'UNION',
@@ -793,16 +809,19 @@ build_ir = function(from, to, mem, imatch)
             to_union and create_union_tag_list(to) or nil
         }
     elseif type(from) == 'string' then
+        if from == 'any' then
+            return nil, build_ir_error(1, 'NYI: any')
+        end
         if from == to then
             return primitive_type[from]
         elseif promotions[from] and promotions[from][to] then
             return promotions[from][to]
         else
-            return nil, build_ir_error('Types incompatible: %s and %s', from,
+            return nil, build_ir_error(1, 'Types incompatible: %s and %s', from,
                                        type(to) == 'string' and to or to.name or to.type)
         end
     elseif type(to) ~= 'table' or from.type ~= to.type then
-        return nil, build_ir_error('Types incompatible: %s and %s',
+        return nil, build_ir_error(1, 'Types incompatible: %s and %s',
                                    from.name or from.type,
                                    type(to) == 'string' and to or to.name or to.type)
     elseif from.type == 'array' then
@@ -819,15 +838,15 @@ build_ir = function(from, to, mem, imatch)
         return { 'MAP', bc }
     elseif from.name ~= to.name and imatch and (
            not from.aliases or not from.aliases[to.name]) then
-        return nil, build_ir_error('Types incompatible: %s and %s',
+        return nil, build_ir_error(1, 'Types incompatible: %s and %s',
                                    from.name, to.name)
     elseif from.name ~= to.name and not imatch and (
            not to.aliases or not to.aliases[from.name]) then
-        return nil, build_ir_error('Types incompatible: %s and %s',
+        return nil, build_ir_error(1, 'Types incompatible: %s and %s',
                                    from.name, to.name)
     elseif from.type == 'fixed' then
         if from.size ~= to.size then
-            return nil, build_ir_error('Size mismatch: %d vs %d',
+            return nil, build_ir_error(nil, 'Size mismatch: %d vs %d',
                                        from.size, to.size)
         end
         return { 'FIXED', from.size }
@@ -898,7 +917,7 @@ build_ir = function(from, to, mem, imatch)
                         -- makes sense as well, but the implementation
                         -- was way too complex.
                         -- Caveat: works funny if defaults are different.
-                        err = build_ir_error('Default value defined in source schema but missing in target schema')
+                        err = build_ir_error(nil, 'Default value defined in source schema but missing in target schema')
                         goto done
                     end
                 else
@@ -921,7 +940,7 @@ build_ir = function(from, to, mem, imatch)
                 elseif not bc[fi] then
                     ptrfrom = nil
                     ptrto = nil
-                    err = build_ir_error('Field %s is missing in source schema, and no default value was provided',
+                    err = build_ir_error(nil, 'Field %s is missing in source schema, and no default value was provided',
                                          f.name)
                     goto done
                 end
@@ -950,7 +969,7 @@ build_ir = function(from, to, mem, imatch)
                 havecommon = havecommon or mi
             end
             if not havecommon then
-                err = build_ir_error('No common symbols')
+                err = build_ir_error(nil, 'No common symbols')
             else
                 clear(res)
                 res[1] = 'ENUM'
@@ -973,19 +992,19 @@ build_ir = function(from, to, mem, imatch)
     end
 end
 
-build_ir_error = function(fmt, ...)
+build_ir_error = function(offset, fmt, ...)
     local msg = format(fmt, ...)
     local top, bottom = find_frames(build_ir)
     local res = {}
-    if find(fmt, '^Types incompatible') then
-        top = top + 1
-    end
+    top = top + (offset or 0)
     for i = bottom, top, -1 do
         local _, from    = debug.getlocal(i, 1)
         local _, to      = debug.getlocal(i, 2)
         local _, ptrfrom = debug.getlocal(i, 5)
         local _, ptrto   = debug.getlocal(i, 6)
-        if     type(from) == 'table' and not from.type then
+        assert(type(from) == 'table')
+        assert(type(to) == 'table')
+        if     not from.type then
             insert(res, '<union>')
         elseif not from.name then
             insert(res, format('<%s>', from.type))
