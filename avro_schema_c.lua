@@ -165,21 +165,23 @@ local ir2lirfuncs = {
 }
 
 local emit_patch
-emit_patch = function(lir, ir, ipv, ipo, opo)
+emit_patch = function(lir, ir, ripv, ipv, ipo, opo)
     local irt = ir_type(ir)
     local lirfuncs = ir2lirfuncs[irt]
     if lirfuncs then
         local isfunc, putfunc = unpack(lirfuncs)
         return {
             lir[isfunc]  (ipv, ipo),
-            lir[putfunc] (opo, ipv, ipo)
-        }, ipo + 1
+            lir[putfunc] (opo, ipv, ipo),
+            lir.move(ripv, ipv, ipo + 1)
+        }
     elseif irt == 'FIXED' then
         return {
             lir.isbin(ipv, ipo),
             lir.lenis(ipv, ipo, ir_fixed_size(ir)),
-            lir.putbin(opo, ipv, ipo)
-        }, ipo + 1
+            lir.putbin(opo, ipv, ipo),
+            lir.move(ripv, ipv, ipo + 1)
+        }
     elseif irt == 'ENUM' then
         assert(false, 'NYI: enum')
     else
@@ -188,29 +190,31 @@ emit_patch = function(lir, ir, ipv, ipo, opo)
 end
 
 local emit_check
-emit_check = function(lir, ir, ipv, ipo)
+emit_check = function(lir, ir, ripv, ipv, ipo)
     local irt = ir_type(ir)
     local lirfuncs = ir2lirfuncs[irt]
     if lirfuncs then
         local isfunc = unpack(lirfuncs)
         return {
             lir[isfunc]  (ipv, ipo),
-        }, ipo + 1
+            lir.move(ripv, ipv, ipo + 1)
+        }
     elseif irt == 'FIXED' then
         return {
             lir.isbin(ipv, ipo),
-            lir.lenis(ipv, ipo, ir_fixed_size(ir))
-        }, ipo + 1
+            lir.lenis(ipv, ipo, ir_fixed_size(ir)),
+            lir.move(ripv, ipv, ipo + 1)
+        }
     elseif irt == 'ARRAY' then
         return {
             lir.isarray(ipv, ipo),
-            lir.skip(ipv, ipv, ipo)
-        }, 0
+            lir.skip(ripv, ipv, ipo)
+        }
     elseif irt == 'MAP' then
         return {
             lir.ismap(ipv, ipo),
-            lir.skip(ipv, ipv, ipo)
-        }, 0
+            lir.skip(ripv, ipv, ipo)
+        }
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
     elseif irt == 'RECORD' then
@@ -223,68 +227,87 @@ emit_check = function(lir, ir, ipv, ipo)
 end
 
 local emit_validate
-emit_validate = function(lir, ir, ipv, ipo)
-    return emit_check(lir, ir, ipv, ipo) -- XXX
+emit_validate = function(lir, ir, ripv, ipv, ipo)
+    return emit_check(lir, ir, ripv, ipv, ipo) -- XXX
+end
+
+local function objforeach(lir, ripv, ipv, ipo, handler)
+    if ripv == ipv then
+        local ptr = lir.new_var()
+        return {
+            lir.beginvar(ptr),
+            lir.move(ptr, ipv, ipo),
+            {
+                lir.objforeach(ripv, ptr, 0),
+                handler(ripv)
+            },
+            lir.endvar(ptr)
+        }
+    elseif not ripv then
+        local lipv = lir.new_var()
+        return {
+            lir.beginvar(lipv),
+            {
+                lir.objforeach(lipv, ipv, ipo),
+                handler(lipv)
+            },
+            lir.endvar(lipv)
+        }
+    else
+        return {
+            lir.objforeach(ripv, ipv, ipo),
+            handler(ripv)
+        }
+    end
 end
 
 local emit_convert
-emit_convert = function(lir, ir, ipv, ipo, opo)
+emit_convert = function(lir, ir, ripv, ipv, ipo)
     local irt = ir_type(ir)
     local lirfuncs = ir2lirfuncs[irt]
     if lirfuncs then
         local isfunc, putfunc = unpack(lirfuncs)
         return {
             lir[isfunc]  (ipv, ipo),
-            lir.checkobuf(opo),
-            lir[putfunc] (opo, ipv, ipo)
-        }, ipo + 1, opo + 1
+            lir.checkobuf(0),
+            lir[putfunc] (0, ipv, ipo),
+            lir.move(0, 0, 1),
+            lir.move(ripv, ipv, ipo + 1)
+        }
     elseif irt == 'FIXED' then
         return {
             { lir.isbin(ipv, ipo), lir.lenis(ipv, ipo, ir_fixed_size(ir)) },
-            lir.checkobuf(opo),
-            lir.putbin(opo, ipv, ipo)
-        }, ipo + 1, opo + 1
-    elseif irt == 'ARRAY' then
-        local body, nipo, nopo = emit_convert(lir, ir[2], ipv, 0, 0)
-        local loop = {
-            lir.arrayforeach(ipv, ipo),
-            body
+            lir.checkobuf(0),
+            lir.putbin(0, ipv, ipo),
+            lir.move(0, 0, 1),
+            lir.move(ripv, ipv, ipo + 1)
         }
-        if nipo ~= 0 then
-            insert(loop, lir.move(ipv, ipv, nipo))
-        end
-        if nopo ~= 0 then
-            insert(loop, lir.move(0, 0, nopo))
-        end
+    elseif irt == 'ARRAY' then
         return {
             lir.isarray(ipv, ipo),
-            lir.checkobuf(opo),
-            lir.putarray(opo, ipv, ipo),
-            lir.move(0, 0, opo + 1),
-            loop
-        }, 0, 0
-    elseif irt == 'MAP' then
-        local body, nipo, nopo = emit_convert(lir, ir[2], ipv, 1, 1)
-        local loop = {
-            lir.mapforeach(ipv, ipo),
-            lir.isstr(ipv, 0),
             lir.checkobuf(0),
-            lir.putstr(0, ipv, 0),
-            body
+            lir.putarray(0, ipv, ipo),
+            lir.move(0, 0, 1),
+            objforeach(lir, ripv, ipv, ipo, function(xipv)
+                return emit_convert(lir, ir[2], xipv, xipv, 0)
+            end)
         }
-        if nipo ~= 0 then
-            insert(loop, lir.move(ipv, ipv, nipo))
-        end
-        if nopo ~= 0 then
-            insert(loop, lir.move(0, 0, nopo))
-        end
+    elseif irt == 'MAP' then
         return {
             lir.ismap(ipv, ipo),
-            lir.checkobuf(opo),
-            lir.putmap(opo, ipv, ipo),
-            lir.move(0, 0, opo + 1),
-            loop
-        }, 0, 0
+            lir.checkobuf(0),
+            lir.putmap(0, ipv, ipo),
+            lir.move(0, 0, 1),
+            objforeach(lir, ripv, ipv, ipo, function(xipv)
+                return {
+                    lir.isstr(xipv, 0),
+                    lir.checkobuf(0),
+                    lir.putstr(0, xipv, 0),
+                    lir.move(0, 0, 1),
+                    emit_convert(lir, ir[2], xipv, xipv, 1)
+                }
+            end)
+        }
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
     elseif irt == 'RECORD' then
@@ -297,30 +320,27 @@ emit_convert = function(lir, ir, ipv, ipo, opo)
 end
 
 local emit_convert_unchecked
-emit_convert_unchecked = function(lir, ir, ipv, ipo, opo)
-    local res
-    res, ipo, opo = emit_convert(lir, ir, ipv, ipo, opo)
+emit_convert_unchecked = function(lir, ir, ripv, ipv, ipo)
+    local res = emit_convert(lir, ir, ripv, ipv, ipo)
     -- get rid of checks - emit_convert must cooperate
     res[1] = lir.nop()
-    return res, ipo, opo
+    return res
 end
 
 -----------------------------------------------------------------------
--- emit_rec_flatten(lir, ir, ipv, ipo, opo) -> lir_code, ipo', opo'
+-- emit_rec_flatten(lir, ir, ripv, ipv, ipo) -> code
 local emit_rec_flatten_pass1
 local emit_rec_flatten_pass2
 local emit_rec_flatten_pass3
-local function emit_rec_flatten(lir, ir, ipv, ipo, opo)
+local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
     assert(ir_type(ir) == 'RECORD')
+    local var_block, aux_block, defaults = {}, {}, {}
     local context = {
         lir = lir,
-        ipv = ipv,
-        ipo = ipo,
-        opo = opo,
-        defaults = {},  -- [celli * 2 - 1] lir_put* func,
+        defaults = defaults,  -- [celli * 2 - 1] lir_put* func,
                         -- [celli * 2]     argument
-        var_block = {}, -- variable declarations
-        aux_block = {}, -- certain field checks 
+        var_block = var_block, -- variable declarations
+        aux_block = aux_block, -- certain field checks 
         vlocell = nil   -- first cell with a VLO
     }
     -- a shadow tree (keyed by o)
@@ -329,26 +349,26 @@ local function emit_rec_flatten(lir, ir, ipv, ipo, opo)
     -- after 2nd - stores input vars
     -- (either directly or in [0] of a nested table)
     local tree = {}
-    context.vlocell = emit_rec_flatten_pass1(context, ir, tree, 1)
-    local parser_block = emit_rec_flatten_pass2(context, ir, tree)
-    context.opo = opo + context.vlocell
-    local generator_block, maxcell = emit_rec_flatten_pass3(context, ir, tree, 1)
-    local init_block, defaults = {}, context.defaults
+    emit_rec_flatten_pass1(context, ir, tree, 1)
+    local init_block = {}
     for i = 1, context.vlocell - 1 do
         local lirfunc = defaults[i * 2 - 1]
         if lirfunc then
-            insert(init_block, lirfunc(opo + i, defaults[i * 2]))
+            insert(init_block, lirfunc(i, defaults[i * 2]))
         end
     end
+    local parser_block = emit_rec_flatten_pass2(context, ir, tree,
+                                                ripv, ipv, ipo)
+    local generator_block = emit_rec_flatten_pass3(context, ir, tree, 1)
     return {
-        context.var_block,
-        lir.checkobuf(opo + context.vlocell - 1),
-        lir.putarrayc(opo, maxcell - 1),
+        var_block,
+        lir.checkobuf(context.vlocell - 1),
+        lir.putarrayc(0, context.maxcell - 1),
         init_block,
         parser_block,
-        context.aux_block,
+        aux_block,
         generator_block
-    }, 0, context.opo
+    }
 end
 
 emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
@@ -386,13 +406,13 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
             tree[o] = curcell
                 curcell = curcell + 1
             elseif fieldirt == 'RECORD' then
-                local childtree, vlofound = {}
+                local childtree = {}
                 tree[o] = childtree
-                curcell, vlofound = emit_rec_flatten_pass1(context, fieldir,
-                                                       childtree, curcell)
-                if vlofound then
-                    return curcell, true
+                if emit_rec_flatten_pass1(context, fieldir,
+                                          childtree, curcell) then
+                    return true
                 end
+                curcell = context.vlocell
             elseif fieldirt == 'UNION' then
                 assert(false, 'NYI')
                 if ir_union_osimple(fieldir) then
@@ -401,77 +421,76 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
                     goto restart
                 else
                     -- consider it VLO for simplicity (XXX simple optional fields?)
-                    return curcell, true
+                    context.vlocell = curcell
+                    return true
                 end
             else
                 -- ARRAY or MAP, it's a VLO
-                return curcell, true
+                context.vlocell = curcell
+                return true
             end
         end
     end
-    return curcell, false
+    context.vlocell = curcell
+    return false
 end
 
-emit_rec_flatten_pass2 = function(context, ir, tree)
-    local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
-    local i2o = ir_record_i2o(ir)
-    local lir, ipv, opo = context.lir, context.ipv, context.opo
-    local var_block = context.var_block
-    local aux_block = context.aux_block
-    local switch = { lir.strswitch(ipv, 0, inames) }
-    for i = 1, #inames do
-        local fieldir = bc[i]
-        local fieldirt = ir_type(fieldir)
-        local o = i2o[i]
-        local fieldvar = lir.new_var()
-        local targetcell = tree[o]
-        insert(var_block, lir.variable(fieldvar))
-        local branch = {
-            lir.isnotset(fieldvar),
-            lir.move(fieldvar, ipv, 1)
-        }
-        switch[i + 1] = branch
-        -- we aren't going to see this var during pass3
-        if not o and not ir_record_ioptional(ir, i) then
-            insert(aux_block, lir.isset(fieldvar))
-        end
-        if fieldirt == 'RECORD' then
-            if o then
-                if not tree[o] then
-                    tree[o] = {}
+emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
+    local lir = context.lir
+    return {
+        lir.ismap(ipv, ipo),
+        objforeach(lir, ripv, ipv, ipo, function(xipv)
+            local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
+            local i2o = ir_record_i2o(ir)
+            local var_block = context.var_block
+            local aux_block = context.aux_block
+            local switch = { lir.strswitch(xipv, 0) }
+            for i = 1, #inames do
+                local fieldir = bc[i]
+                local fieldirt = ir_type(fieldir)
+                local o = i2o[i]
+                local fieldvar = lir.new_var()
+                local targetcell = tree[o]
+                insert(var_block, lir.beginvar(fieldvar))
+                local branch = {
+                    lir.sbranch(inames[i]),
+                    lir.isnotset(fieldvar),
+                    lir.move(fieldvar, xipv, 1)
+                }
+                switch[i + 1] = branch
+                -- we aren't going to see this var during pass3
+                if not o and not ir_record_ioptional(ir, i) then
+                    insert(aux_block, {
+                        lir.isset(fieldvar),
+                        lir.endvar(fieldvar)
+                })
                 end
-                tree[o][0] = fieldvar
+                if fieldirt == 'RECORD' then
+                    if o then
+                        if not tree[o] then
+                            tree[o] = {}
+                        end
+                        tree[o][0] = fieldvar
+                    end
+                    insert(branch, emit_rec_flatten_pass2(context, fieldir, tree[o],
+                                                          xipv, fieldvar, 0))
+                elseif fieldirt == 'UNION' then
+                    assert(false, 'NYI')
+                else
+                    tree[o] = fieldvar
+                    if targetcell then
+                        insert(branch, emit_patch(lir, fieldir, xipv, xipv, 1,
+                                                  targetcell))
+                    elseif o then
+                        insert(branch, emit_check(lir, fieldir, xipv, xipv, 1))
+                    else
+                        insert(branch, emit_validate(lir, fieldir, xipv, xipv, 1))
+                    end
+                end
             end
-            insert(branch, emit_rec_flatten_pass2(context, fieldir, tree[o]))
-        elseif fieldirt == 'UNION' then
-            assert(false, 'NYI')
-        else
-            tree[o] = fieldvar
-            local code_block, nipo
-            if targetcell then
-                code_block, nipo = emit_patch(lir, fieldir, ipv, 1,
-                                              opo + targetcell)
-            elseif o then
-                code_block, nipo = emit_check(lir, fieldir, ipv, 1)
-            else
-                code_block, nipo = emit_validate(lir, fieldir, ipv, 1)
-            end
-            insert(branch, code_block)
-            if nipo ~= 0 then
-                insert(branch, lir.move(ipv, ipv, nipo))
-            end
-        end
-    end
-    local res = {
-        lir.ismap(ipv, context.ipo),
-        {
-            lir.mapforeach(ipv, context.ipo),
-            lir.isstr(ipv, 0),
-            switch
-        }
+            return { lir.isstr(xipv, 0), switch }
+        end)
     }
-    context.ipo = 0
-    return res
 end
 
 emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
@@ -479,7 +498,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
     local bc = ir_record_bc(ir)
     local defaults = context.defaults
     local vlocell = context.vlocell
-    local lir, opo = context.lir, context.opo
+    local lir = context.lir
     local code = {}
     for o = 1, #onames do
         local ds, dv = ir_record_odefault(ir, o)
@@ -488,22 +507,35 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
         if type(fieldvar) == 'table' then
             fieldvar = fieldvar[0]
         end
-        -- if not set action
-        if not ds then -- it's mandatory
-            assert(fieldvar)
-            insert(code, lir.isset(fieldvar))
+        local tbranch, fbranch
+        if not fieldvar then
+            fbranch = code
+        elseif not ds then -- it's mandatory
+            tbranch = {}
+            insert(code, {
+                lir.isset(fieldvar),
+                tbranch,
+                lir.endvar(fieldvar)
+            })
         else
-            local ifnotset = { lir.ifnotset(fieldvar) }
-            local ddata
+            tbranch = { lir.ibranch(1) }
+            fbranch = { lir.ibranch(0) }
+            insert(code, { lir.ifset(fieldvar), tbranch, fbranch })
+            insert(code, lir.endvar(fieldvar))
+        end
+        -- if not set action
+        if ds then
+            local ddata, didcross
             dcells, ddata = prepare_flat_defaults_vec(context.lir, ds, dv)
 
             local dsplit -- a spliting point (before/after vlocell)
-            if     curcell >= vlocell then
+            if     curcell > vlocell then
                 dsplit = 0
             elseif curcell + dcells <= vlocell then
                 dsplit = dcells
             else
                 dsplit = vlocell - curcell
+                didcross = true
             end
 
             for i = 1, dsplit do -- before vlocell; patch (unless it's a NOP)
@@ -513,21 +545,20 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
                 if lirfunc ~= defaults[ dcurcell * 2 - 1 ] or
                        arg ~= defaults[ dcurcell * 2 ] then
 
-                    insert(ifnotset, lirfunc(opo + dcurcell - vlocell, arg))
+                    insert(fbranch, lirfunc(dcurcell - 1, arg))
                 end
             end
 
             if dsplit ~= dcells then -- after vlocell; append
-                insert(ifnotset, lir.checkobuf(opo + dcells - dsplit))
+                if didcross then
+                    insert(fbranch, lir.move(0, 0, vlocell))
+                end
+                insert(fbranch, lir.checkobuf(dcells - dsplit - 1))
                 for i = dsplit + 1, dcells do
                     local lirfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
-                    insert(ifnotset, lirfunc(opo + i - dsplit - 1, arg))
+                    insert(fbranch, lirfunc(i - dsplit - 1, arg))
                 end
-                insert(ifnotset, lir.move(0, 0, opo + dcells - dsplit))
-            end
-
-            if next(ifnotset, 1) then
-                insert(code, ifnotset)
+                insert(fbranch, lir.move(0, 0, dcells - dsplit))
             end
         end
         -- if set action
@@ -535,138 +566,198 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
         if not fieldir then
             curcell = curcell + dcells
         else
-            local ifset = { ds and lir.ifset(fieldvar) or lir.nop() }
             local fieldirt
             fieldirt = ir_type(fieldir)
             if fieldirt == 'RECORD' then
-                local rcode
-                rcode, curcell = emit_rec_flatten_pass3(context, fieldir,
-                                                        tree[o], curcell)
-                if next(rcode) then
-                    insert(ifset, rcode)
-                    insert(code, ifset)
-                end
+                insert(tbranch, emit_rec_flatten_pass3(context, fieldir,
+                                                       tree[o], curcell))
+                curcell = context.maxcell
             elseif fieldrt == 'UNION' then
                 assert(false, 'NYI: union')
-            else
-                if curcell >= vlocell then -- append
-                    local ccode, _
-                    ccode, _, opo = emit_convert_unchecked(lir, fieldir,
-                                                           fieldvar, 0, opo)
-                    insert(ifset, ccode)
-                    if opo ~= 0 then
-                        insert(ifset, lir.move(0, 0, opo))
-                    end
-                    insert(code, ifset)
+            elseif curcell >= vlocell then -- append
+                if curcell == vlocell then
+                    insert(tbranch, lir.move(0, 0, vlocell))
                 end
+                insert(tbranch, emit_convert_unchecked(lir, fieldir,
+                                                       nil, fieldvar, 0))
+                curcell = curcell + 1
+            else
                 curcell = curcell + 1
             end
         end
-        if curcell > vlocell then
-            context.opo = 0
-            opo = 0
-        end
     end
-    return code, curcell
+    context.maxcell = curcell
+    return code
 end
 
 -----------------------------------------------------------------------
 local emit_rec_unflatten_pass1
 local emit_rec_unflatten_pass2
-local function emit_rec_unflatten(lir, ir, ipv, ipo, opo)
+local emit_rec_unflatten_pass3
+local function emit_rec_unflatten(lir, ir, ripv, ipv, ipo)
     assert(ir_type(ir) == 'RECORD')
+    if not ripv then
+        ripv = lir.new_var()
+        return {
+            lir.beginvar(ripv),
+            emit_rec_unflatten(lir, ir, ripv, ipv, ipo),
+            lir.endvar(ripv)
+        }
+    end
+    local var_block = {}
     local context = {
         lir = lir,
-        ipv = ipv,
-        ipo = ipo + 1,
-        opo = opo,
-        var_block = {} -- variable declarations
+        ipv = ripv,
+        fieldv = {},
+        fieldo = {},
+        lastref = {},
+        var_block = var_block -- variable declarations
     }
     local tree = {}
-    local parser_block, maxcell = emit_rec_unflatten_pass1(context, ir, tree, 1)
-    local generator_block = emit_rec_unflatten_pass2(context, ir, tree)
+    local parser_block = emit_rec_unflatten_pass1(context, ir, tree, 1, false)
     return {
-        context.var_block,
+        var_block,
         lir.isarray(ipv, ipo),
-        lir.lenis(ipv, ipo, maxcell - 1),
+        lir.lenis(ipv, ipo, context.maxcell - 1),
+        lir.move(ripv, ipv, ipo + 1),
         parser_block,
-        generator_block
-    }, context.ipo, context.opo
+        emit_rec_unflatten_pass2(context, ir, tree, 1) and
+        emit_rec_unflatten_pass3(context, ir, tree, 1)
+    }
 end
 
-emit_rec_unflatten_pass1 = function(context, ir, tree, curcell)
+emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
     local bc, inames = ir_record_bc(ir), ir_record_inames(ir)
     local i2o = ir_record_i2o(ir)
-    local lir = context.lir
+    local lir, ipv = context.lir, context.ipv
+    local fieldv, fieldo = context.fieldv, context.fieldo
     local code = {}
     for i = 1, #inames do
         local fieldir = bc[i]
         local fieldirt = ir_type(fieldir)
-        local fieldcode
         if fieldirt == 'RECORD' then
             local childtree = {}
             tree[i] = childtree
-            fieldcode, curcell = emit_rec_unflatten_pass1(context, fieldir,
-                                                      childtree, curcell)
+            insert(code, emit_rec_unflatten_pass1(context, fieldir,
+                                                  childtree, curcell,
+                                                  hidden or ir_record_ohidden(ir, i2o[i])))
+            curcell = context.maxcell
         elseif fieldrt == 'UNION' then
             assert(false, 'NYI: union')
-        elseif i2o[i] and not ir_record_ohidden(ir, i2o[i]) then
-            local var = lir.new_var()
-            tree[i] = var
-            insert(context.var_block, lir.variable(var))
-            insert(code, lir.move(var, context.ipv, context.ipo))
-            fieldcode, context.ipo = emit_check(context.lir, fieldir,
-                                                context.ipv, context.ipo)
+        elseif i2o[i] and not ir_record_ohidden(ir, i2o[i]) and not hidden then
+            tree[i] = curcell
+            local lastcell = context.lastcell
+            if lastcell then
+                fieldv[curcell] = fieldv[lastcell]
+                fieldo[curcell] = curcell - lastcell
+            else
+                local fieldvar = lir.new_var()
+                insert(context.var_block, lir.beginvar(fieldvar))
+                insert(code, lir.move(fieldvar, ipv))
+                fieldv[curcell] = fieldvar
+                fieldo[curcell] = 0
+                context.lastcell = curcell
+            end
+            insert(code, emit_check(context.lir, fieldir,
+                                    ipv, ipv, 0))
             curcell = curcell + 1
+            if not ir2lirfuncs[fieldirt] then
+                context.lastcell = nil -- VLO
+            end
         else
-            fieldcode, context.ipo = emit_validate(context.lir, fieldir,
-                                                   context.ipv, context.ipo)
+            insert(code, emit_validate(context.lir, fieldir,
+                                       ipv, ipv, 0))
             curcell = curcell + 1
+            if not ir2lirfuncs[fieldirt] then
+                context.lastcell = nil -- VLO
+            end
         end
-        insert(code, fieldcode)
     end
-    return code, curcell
+    context.maxcell = curcell
+    return code
 end
 
-emit_rec_unflatten_pass2 = function(context, ir, tree)
+emit_rec_unflatten_pass2 = function(context, ir, tree, curfield)
     local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
     local o2i = ir_record_o2i(ir)
-    local lir, opo = context.lir, context.opo
-    local code, maplen = { lir.checkobuf(opo), lir.nop() }, 0
-    context.opo = opo + 1
+    local fieldv = context.fieldv
+    local lastref = context.lastref
+    for o = 1, #onames do
+        local i = o2i[o]
+        if ir_record_ohidden(ir, o) or not i then
+            curfield = curfield + 1
+        else
+            local fieldir = bc[i]
+            local fieldirt = ir_type(fieldir)
+            if fieldirt == 'RECORD' then
+                curfield = emit_rec_unflatten_pass2(context, fieldir, tree[i],
+                                                    curfield)
+            elseif fieldirt == 'UNION' then
+                assert(false, 'NYI: union')
+            else
+                local curcell = tree[i]
+                local fieldvar = fieldv[curcell]
+                lastref[fieldvar] = curfield
+                curfield = curfield + 1
+            end
+        end
+    end
+    return curfield
+end
+
+emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
+    local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
+    local o2i = ir_record_o2i(ir)
+    local lir, fieldv, fieldo = context.lir, context.fieldv, context.fieldo
+    local lastref = context.lastref
+    local maplen = 0
+    local code = { lir.checkobuf(opo), lir.nop(), lir.move(0, 0, 1) }
     for o = 1, #onames do
         local i = o2i[o]
         if ir_record_ohidden(ir, o) then
-            -- do nothing
+            curfield = curfield + 1
         elseif not i then
             -- put defaults
             local schema, val = ir_record_odefault(ir, o)
             local lirfunc, arg = prepare_default(lir, schema, val)
-            insert(code, lir.checkobuf(context.opo + 1))
-            insert(code, lir.putstrc(context.opo, onames[o]))
-            insert(code, lirfunc(context.opo + 1, arg))
-            context.opo = context.opo + 2
+            insert(code, {
+                lir.checkobuf(1),
+                lir.putstrc(0, onames[o]),
+                lirfunc(1, arg),
+                lir.move(0, 0, 2)
+            })
             maplen = maplen + 1
+            curfield = curfield + 1
         else
             local fieldir = bc[i]
             local fieldirt = ir_type(fieldir)
-            insert(code, lir.checkobuf(context.opo))
-            insert(code, lir.putstrc(context.opo, onames[o]))
-            context.opo = context.opo + 1
+            insert(code, {
+                lir.checkobuf(0),
+                lir.putstrc(0, onames[o]),
+                lir.move(0, 0, 1)
+            })
             if fieldirt == 'RECORD' then
-                insert(code, emit_rec_unflatten_pass2(context, fieldir, tree[i]))
+                insert(code, emit_rec_unflatten_pass3(context, fieldir, tree[i],
+                                                      curfield))
+                curfield = context.maxfield
             elseif fieldirt == 'UNION' then
                 assert(false, 'NYI: union')
             else
-                local fieldcode, _
-                fieldcode, _, context.opo = emit_convert_unchecked(
-                    lir, fieldir, tree[i], 0, context.opo)
-                insert(code, fieldcode)
+                local curcell = tree[i]
+                local fieldvar = fieldv[curcell]
+                insert(code, emit_convert_unchecked(lir, fieldir, nil,
+                                                    fieldvar,
+                                                    fieldo[curcell]))
+                if lastref[fieldvar] == curfield then
+                    insert(code, lir.endvar(fieldvar))
+                end
+                curfield = curfield + 1
             end
             maplen = maplen + 1
         end
     end
-    code[2] = lir.putmapc(opo, maplen)
+    context.maxfield = curfield
+    code[2] = lir.putmapc(0, maplen)
     return code
 end
 
@@ -674,35 +765,36 @@ end
 local emit_rec_xflatten_pass1
 local emit_rec_xflatten_pass2
 
-local function emit_rec_xflatten(lir, ir, ipv)
+local function emit_rec_xflatten(lir, ir, internal, ipv)
     assert(ir_type(ir) == 'RECORD')
     local headpos, counter = lir.new_var(), lir.new_var()
+    local var_block = {}
     local context = {
         lir = lir,
-        ipv = ipv,
-        var_block = {},
+        internal = internal,
+        var_block = var_block,
         counter = counter
     }
     local tree = {}
     emit_rec_xflatten_pass1(context, ir, tree, 1)
-    local generator_block = emit_rec_xflatten_pass2(context, ir, tree, 0)
     return {
-        lir.variable(headpos),
-        lir.variable(counter),
-        context.var_block,
+        lir.beginvar(headpos),
+        lir.beginvar(counter),
+        var_block,
         lir.move(headpos, 0, 0),
         lir.move(counter, nil, 0),
         lir.checkobuf(0),
         lir.putarrayc(0, 0),
         lir.move(0, 0, 1),
-        generator_block,
-        lir.fixlen(headpos, 0, counter)
+        emit_rec_xflatten_pass2(context, ir, tree, ipv, ipv, 0),
+        lir.setlen(headpos, 0, counter)
     }
 end
 
 emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
+    local internal = context.internal
     for o = 1, #onames do
         local fieldir = bc[o2i[o]]
         if not fieldir then
@@ -710,7 +802,7 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
             curcell = curcell + prepare_flat_defaults_vec(context.lir, ds, dv)
         else
             local fieldirt
-            tree[o] = curcell
+            tree[o] = curcell + internal
             fieldirt = ir_type(fieldir)
             if     fieldirt == 'RECORD' then
                 local ctree = {}
@@ -727,79 +819,66 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
     return curcell
 end
 
-emit_rec_xflatten_pass2 = function(context, ir, tree, ipo)
-    local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
-    local i2o = ir_record_i2o(ir)
-    local lir, ipv = context.lir, context.ipv
-    local var_block = context.var_block
-    counter = context.counter
-    local switch = { lir.strswitch(ipv, 0, inames) }
-    for i = 1, #inames do
-        local fieldir = bc[i]
-        local fieldirt = ir_type(fieldir)
-        local o = i2o[i]
-        local fieldvar = lir.new_var()
-        local targetcell = tree[o]
-        insert(var_block, lir.variable(fieldvar))
-        local branch = {
-            lir.isnotset(fieldvar),
-            lir.move(fieldvar, ipv, 1)
-        }
-        switch[i + 1] = branch
-        if fieldirt == 'RECORD' then
-            insert(branch, emit_rec_xflatten_pass2(context, fieldir, tree and tree[o], 1))
-        elseif fieldirt == 'UNION' then
-            assert(false, 'NYI')
-        else
-            local code_block, nipo
-            local nopo = 0
-            if o then
-                insert(branch, {
-                    lir.checkobuf(2),
-                    lir.putarrayc(0, 3),
-                    lir.putstrc(1, '='),
-                    lir.putintc(2, tree[o]),
-                    lir.move(counter, counter, 1)
-                })
-                code_block, nipo, nopo = emit_convert(lir, fieldir, ipv, 1, 3)
-            else
-                code_block, nipo = emit_validate(lir, fieldir, ipv, 1)
-            end
-            insert(branch, code_block)
-            if nipo ~= 0 then
-                insert(branch, lir.move(ipv, ipv, nipo))
-            end
-            if nopo ~= 0 then
-                insert(branch, lir.move(0, 0, nopo))
-            end
-        end
-    end
-    local res = {
+emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
+    local lir = context.lir
+    return {
         lir.ismap(ipv, ipo),
-        {
-            lir.mapforeach(ipv, ipo),
-            lir.isstr(ipv, 0),
-            switch
-        }
+        objforeach(lir, ripv, ipv, ipo, function(xipv)
+            local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
+            local i2o = ir_record_i2o(ir)
+            local var_block = context.var_block
+            counter = context.counter
+            local switch = { lir.strswitch(xipv, 0) }
+            for i = 1, #inames do
+                local fieldir = bc[i]
+                local fieldirt = ir_type(fieldir)
+                local o = i2o[i]
+                local fieldvar = lir.new_var()
+                local targetcell = tree[o]
+                insert(var_block, lir.beginvar(fieldvar))
+                local branch = {
+                    lir.sbranch(inames[i]),
+                    lir.isnotset(fieldvar),
+                    lir.move(fieldvar, xipv, 1)
+                }
+                switch[i + 1] = branch
+                if fieldirt == 'RECORD' then
+                    insert(branch, emit_rec_xflatten_pass2(context, fieldir,
+                                                           tree and tree[o],
+                                                           xipv, fieldvar, 0))
+                elseif fieldirt == 'UNION' then
+                    assert(false, 'NYI')
+                else
+                    if o then
+                        insert(branch, {
+                            lir.checkobuf(2),
+                            lir.putarrayc(0, 3),
+                            lir.putstrc(1, '='),
+                            lir.putintc(2, tree[o]),
+                            lir.move(counter, counter, 1),
+                            lir.move(0, 0, 3),
+                            emit_convert(lir, fieldir, xipv, fieldvar, 0)
+                        })
+                    else
+                        insert(branch, emit_validate(lir, fieldir, xipv, fieldvar, 0))
+                    end
+                end
+            end
+            return { lir.isstr(xipv, 0), switch }
+        end)
     }
-    return res
 end
 
 -----------------------------------------------------------------------
 local function emit_code(lir, ir)
     -- reserve f001, f002, f003
-    lir.new_func()
-    lir.new_func()
-    lir.new_func()
-    local fipv = lir.new_var()
-    local fbody, fipo, fopo = emit_rec_flatten(lir, ir, fipv, 0, 0)
-    local uipv = lir.new_var()
-    local ubody, uipo, uopo = emit_rec_unflatten(lir, ir, uipv, 0, 0)
-    local xipv = lir.new_var()
+    lir.new_func(); lir.new_func(); lir.new_func()
+    -- reserve v001, v002, v003
+    lir.new_var(); lir.new_var(); lir.new_var()
     return {
-        { lir.cvtfunc(1, fipv, fipo, fopo), fbody },
-        { lir.cvtfunc(2, uipv, uipo, uopo), ubody },
-        { lir.cvtfunc(3, xipv, 0, 0), emit_rec_xflatten(lir, ir, xipv, 0, 0) }
+        { lir.cvtfunc(1, 1), emit_rec_flatten(lir, ir, 1, 1, 0) },
+        { lir.cvtfunc(2, 2), emit_rec_unflatten(lir, ir, 2, 2, 0) },
+        { lir.cvtfunc(3, 3), emit_rec_xflatten(lir, ir, 0, 3) }
     }
 end
 

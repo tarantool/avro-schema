@@ -42,34 +42,37 @@ local function lua_lir()
         new_func = function() func = func + 1; return func end,
         func_count = function() return func end,
         -- LIR
-        cvtfunc = function(name, ipname, iadd, oadd)
+        cvtfunc = function(name, ipname)
             local decl = format('f%03d = function(r, v000, v%03d)', name, ipname)
             return function(body)
                 body[1] = decl
-                insert(body, format('return %s, %s', lea(0, oadd), lea(ipname, iadd)))
+                insert(body, format('return v000, v%03d', ipname))
                 insert(body, 'end')
                 return body
             end
         end,
-        vfunc = function(name, ipname, iadd)
+        vfunc = function(name, ipname)
             local decl = format('f%03d = function(r, v%03d)', name, ipname)
             return function(body)
                 body[1] = decl
-                insert(body, format('return %s', lea(ipname, iadd)))
+                insert(body, format('return %v03d', ipname))
                 insert(body, 'end')
                 return body
             end
         end,
         ---------------------------------------------------------------
-        callcvtfunc = function(name, vname, offset)
-            return format('v000, %03d = f%03d(r, v000, %s)', vname, name, lea(vname, offset))
+        callcvtfunc = function(name, ripv, ipv, ipo)
+            return format('v000, %03d = f%03d(r, v000, %s)', ripv, name, lea(ipv, ipo))
         end,
-        callvfunc = function(name, vname, offset)
-            return format('%03d = f%03d(r, %s)', vname, name, lea(vname, offset))
+        callvfunc = function(name, ripv, ipv, ipo)
+            return format('%03d = f%03d(r, %s)', ripv, name, lea(ipv, ipo))
         end,
         ---------------------------------------------------------------
-        variable = function(name)
+        beginvar = function(name)
             return format('local v%03d', name)
+        end,
+        endvar = function(name)
+            return format('-- endvar v%03d', name)
         end,
         ---------------------------------------------------------------
         checkobuf = function(offset)
@@ -216,43 +219,24 @@ local function lua_lir()
             }
         end,
         ---------------------------------------------------------------
-        fixlen = function(v, ofs, counter)
+        setlen = function(v, ofs, counter)
             return(format('r.ov[%s].xlen = v%03d', lea(v, ofs), counter))
         end,
-        fixoff = function(v, ofs)
+        setoff = function(v, ofs)
             local dest = lea(v, ofs)
             return(format('r.ov[%s].xoff = v000 - (%s)', dest, dest))
         end,
         ---------------------------------------------------------------
-        mapforeach = function(vname, offset)
+        objforeach = function(ripv, ipv, ipo)
             return function(body)
-                local src = lea(vname, offset)
+                local src = lea(ipv, ipo)
                 body[1] = {}
                 return {
-                    format('local tmp = %s+r.v[%s].xoff', src, src),
-                    format('v%03d = %s', vname, lea(vname, offset + 1)),
-                    format('while v%03d ~= tmp do', vname),
+                    format('v%03d = %s', ripv, lea(ipv, ipo + 1)),
+                    format('while v%03d ~= %s+r.v[%s].xoff do', ripv, src, src),
                     body,
                     'end'
                 }
-            end
-        end,
-        ---------------------------------------------------------------
-        strswitch = function(vname, offset, map)
-            return function(body)
-                local src = lea(vname, offset)
-                local ifelse = [[
-%s r.v[%s].xlen == %d and ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) == 0 then]]
-                local res = {}
-                for i = 1, #map do
-                    local str = map[i]
-                    res[i * 2 - 1] = format(ifelse,
-                                            i == 1 and 'if' or 'elseif',
-                                            src, #str, src, cstring(str), #str)
-                    res[i * 2] = body[i + 1]
-                end
-                insert(res, { 'else', 'error()', 'end' })
-                return res
             end
         end,
         ---------------------------------------------------------------
@@ -296,6 +280,9 @@ if r.t[%s] ~= 4 or r.v[%s].uval + 0x80000000 > 0xffffffff then error() end]],
         end,
         ---------------------------------------------------------------
         move = function(vname, srcvname, srcoffset)
+            if not vname or (vname == srcvname and srcoffset == 0) then
+                return {}
+            end
             return format('v%03d = %s', vname, lea(srcvname, srcoffset))
         end,
         ---------------------------------------------------------------
@@ -314,6 +301,60 @@ if r.t[%s] ~= 4 or r.v[%s].uval + 0x80000000 > 0xffffffff then error() end]],
             }
         end,
         ---------------------------------------------------------------
+        ifset = function(vname)
+            return function(body)
+                local tbranch, fbranch
+                for i = 2, #body do
+                    local branch = body[i]
+                    if branch[1] == 0 then
+                        assert(not fbranch)
+                        fbranch = branch
+                    else
+                        assert(not tbranch)
+                        tbranch = branch
+                    end
+                    branch[1] = {}
+                end
+                if tbranch and not next(tbranch, 1) then tbranch = nil end
+                if fbranch and not next(fbranch, 1) then fbranch = nil end
+                if not tbranch then
+                    if not fbranch then return {} end
+                    return { format('if not v%03d then', vname), fbranch, 'end' }
+                elseif not fbranch then
+                    return { format('if v%03d then', vname), tbranch, 'end' }
+                else
+                    return { format('if v%03d then', vname), tbranch, 'else', fbranch, 'end' }
+                end
+            end
+        end,
+        ibranch = function(i)
+            return i
+        end,
+        ---------------------------------------------------------------
+        strswitch = function(vname, offset)
+            local src = lea(vname, offset)
+            return function(body)
+                local ifelse = [[
+%s r.v[%s].xlen == %d and ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) == 0 then]]
+                local res = {}
+                for i = 1, #body - 1 do
+                    local branch = body[i + 1]
+                    local str = branch[1]
+                    branch[1] = '-- '.. str
+
+                    res[i * 2 - 1] = format(ifelse,
+                                            i == 1 and 'if' or 'elseif',
+                                            src, #str, src, cstring(str), #str)
+                    res[i * 2] = branch
+                end
+                insert(res, { 'else', 'error()', 'end' })
+                return res
+            end
+        end,
+        sbranch = function(s)
+            return s
+        end,
+        ---------------------------------------------------------------
         isset = function(vname)
             return format('if not v%03d then error() end', vname)
         end,
@@ -321,43 +362,10 @@ if r.t[%s] ~= 4 or r.v[%s].uval + 0x80000000 > 0xffffffff then error() end]],
             return format('if v%03d then error() end', vname)
         end,
         ---------------------------------------------------------------
-        ifset = function(vname)
-            return function(body)
-                body[1] = format('if v%03d then', vname)
-                insert(body, 'end')
-                return body
-            end
-        end,
-        ifnotset = function(vname)
-            return function(body)
-                body[1] = format('if not v%03d then', vname)
-                insert(body, 'end')
-                return body
-            end
-        end,
-        ---------------------------------------------------------------
-        ifnul = function(vname, offset)
-            local dest = lea(vname, offset)
-            return function(body)
-                body[1] = format('if r.t[%s] == 1 then')
-                insert(body, 'end')
-                return body
-            end
-        end,
-        ifnotnul = function(vname, offset)
-            local dest = lea(vname, offset)
-            return function(body)
-                body[1] = format('if r.t[%s] ~= 1 then')
-                insert(body, 'end')
-                return body
-            end
-        end,
-        ---------------------------------------------------------------
         nop = function()
             return {}
         end
     }
-    lir.arrayforeach = lir.mapforeach
     lir.putint = lir.putlong
     lir.putint2long = lir.putlong
     lir.putint2flt = lir.putlong2flt
