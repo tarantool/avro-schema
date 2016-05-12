@@ -337,11 +337,11 @@ local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
     local var_block, aux_block, defaults = {}, {}, {}
     local context = {
         lir = lir,
-        defaults = defaults,  -- [celli * 2 - 1] lir_put* func,
-                        -- [celli * 2]     argument
+        defaults = defaults,   -- [celli * 2 - 1] lir_put* func,
+                               -- [celli * 2]     argument
         var_block = var_block, -- variable declarations
         aux_block = aux_block, -- certain field checks 
-        vlocell = nil   -- first cell with a VLO
+        vlocell = nil          -- first cell with a VLO
     }
     -- a shadow tree (keyed by o)
     -- used for inter-pass sharing
@@ -371,6 +371,15 @@ local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
     }
 end
 
+-- A subset of cells in the resulting flattened record
+-- are at fixed offsets. Compute offsets allowing the parser
+-- to store a value immediately instead of postponing until
+-- the generation phase (important for optional fields -
+-- eliminates one IF). Stop once we hit a VLO, like array.
+--
+-- Also compute default values to store in cells beforehand.
+-- Computes context.vlocell - the index of the first cell hosting
+-- a VLO.
 emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
@@ -435,6 +444,9 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
     return false
 end
 
+-- Emit a parser code, uses offsets computed during pass1.
+-- Allocates a variable to store position of each input field value.
+-- Puts variable names in tree, replacing offsets (which are no longer needed).
 emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     local lir = context.lir
     return {
@@ -479,12 +491,12 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                 else
                     tree[o] = fieldvar
                     if targetcell then
-                        insert(branch, emit_patch(lir, fieldir, xipv, xipv, 1,
+                        insert(branch, emit_patch(lir, fieldir, xipv, fieldvar, 0,
                                                   targetcell))
                     elseif o then
-                        insert(branch, emit_check(lir, fieldir, xipv, xipv, 1))
+                        insert(branch, emit_check(lir, fieldir, xipv, fieldvar, 0))
                     else
-                        insert(branch, emit_validate(lir, fieldir, xipv, xipv, 1))
+                        insert(branch, emit_validate(lir, fieldir, xipv, fieldvar, 0))
                     end
                 end
             end
@@ -493,6 +505,11 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     }
 end
 
+-- Emit code generating the (flattened) output record.
+-- Note: a subset of cells until the first VLO are already
+-- filled at this point (defaults and/or values stored by the parser),
+-- however $0 wasn't incremented yet.
+-- Computes context.maxcell - total number of cells, plus 1.
 emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
@@ -523,7 +540,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
             insert(code, { lir.ifset(fieldvar), tbranch, fbranch })
             insert(code, lir.endvar(fieldvar))
         end
-        -- if not set action
+        -- fbranch - if field was missing from the input
         if ds then
             local ddata, didcross
             dcells, ddata = prepare_flat_defaults_vec(context.lir, ds, dv)
@@ -538,7 +555,8 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
                 didcross = true
             end
 
-            for i = 1, dsplit do -- before vlocell; patch (unless it's a NOP)
+            -- before vlocell; patch (unless the same value already stored)
+            for i = 1, dsplit do
                 local dcurcell = curcell + i - 1
                 local lirfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
 
@@ -550,7 +568,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
             end
 
             if dsplit ~= dcells then -- after vlocell; append
-                if didcross then
+                if didcross then -- update $0
                     insert(fbranch, lir.move(0, 0, vlocell))
                 end
                 insert(fbranch, lir.checkobuf(dcells - dsplit - 1))
@@ -561,7 +579,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
                 insert(fbranch, lir.move(0, 0, dcells - dsplit))
             end
         end
-        -- if set action
+        -- tbranch - if field was present in the input
         local fieldir = bc[o2i[o]]
         if not fieldir then
             curcell = curcell + dcells
@@ -575,7 +593,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
             elseif fieldrt == 'UNION' then
                 assert(false, 'NYI: union')
             elseif curcell >= vlocell then -- append
-                if curcell == vlocell then
+                if curcell == vlocell then -- update $0
                     insert(tbranch, lir.move(0, 0, vlocell))
                 end
                 insert(tbranch, emit_convert_unchecked(lir, fieldir,
@@ -622,7 +640,7 @@ local function emit_rec_unflatten(lir, ir, ripv, ipv, ipo)
         lir.move(ripv, ipv, ipo + 1),
         parser_block,
         emit_rec_unflatten_pass2(context, ir, tree, 1) and
-        emit_rec_unflatten_pass3(context, ir, tree, 1)
+            emit_rec_unflatten_pass3(context, ir, tree, 1)
     }
 end
 
