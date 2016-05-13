@@ -360,10 +360,15 @@ local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
     local parser_block = emit_rec_flatten_pass2(context, ir, tree,
                                                 ripv, ipv, ipo)
     local generator_block = emit_rec_flatten_pass3(context, ir, tree, 1)
+    local vlocell = context.vlocell
+    local maxcell = context.maxcell
+    if vlocell == maxcell then -- update $0
+        insert(generator_block, lir.move(0, 0, vlocell))
+    end
     return {
         var_block,
-        lir.checkobuf(context.vlocell - 1),
-        lir.putarrayc(0, context.maxcell - 1),
+        lir.checkobuf(vlocell - 1),
+        lir.putarrayc(0, maxcell - 1),
         init_block,
         parser_block,
         aux_block,
