@@ -1,7 +1,7 @@
 local digest = require('digest')
 local front  = require('avro_schema_front')
 local c      = require('avro_schema_c')
-local lir    = require('avro_schema_lir')
+local il     = require('avro_schema_il')
 local rt     = require('avro_schema_rt')
 
 local format, find, gsub = string.format, string.find, string.gsub
@@ -12,8 +12,7 @@ local f_create_schema     = front.create_schema
 local f_validate_data     = front.validate_data
 local f_create_ir         = front.create_ir
 local c_emit_code         = c.emit_code
-local lir_lua_lir         = lir.lua_lir
-local lir_lua_lir_to_code = lir.lua_lir_to_code
+local il_create           = il.il_create
 local rt_msgpack_encode   = rt.msgpack_encode
 local rt_msgpack_decode   = rt.msgpack_decode
 local rt_lua_encode       = rt.lua_encode
@@ -95,49 +94,58 @@ local function are_compatible(schema_h1, schema_h2, opt_mode)
     end
 end
 
-local function gen_lua_code(ir)
-    local lir = lir_lua_lir()
-    local code = lir_lua_lir_to_code(lir, c_emit_code(lir, ir))
-    local cpool = lir.cpool_data()
-    return concat({[[
+local function gen_lua_code(il, il_code)
+    local res = {[[
+-- v2.1
 local ffi        = require('ffi')
 local digest     = require('digest')
-local bit        = require('bit')
-local schema_rt  = require('avro_schema_rt')
+local rt         = require('avro_schema_rt')
 local type       = type
+local error      = error
 local xpcall     = xpcall
 local ffi_C      = ffi.C
 local ffi_cast   = ffi.cast
-local regs       = schema_rt.regs
-local eh_handler = schema_rt.eh_handler
+local regs       = rt.regs
+local eh_handler = rt.eh_handler
 local linker
 local cpool     = digest.base64_decode([[]],
-            base64_encode(cpool),
+        '', -- @cpool_pos
         ']])',
-        code, [[
+    }
+    local cpool_pos = #res - 1
+    for i = 1, #il_code do
+        insert(res, format('local f%d', il_code[i][1].name))
+    end
+    for i = 1, #il_code do
+        il.emit_lua_func(il_code[i], res)
+    end
+    insert(res, [[
 linker = function(decode_proc, encode_proc)
-    decode_proc = decode_proc or schema_rt.msgpack_decode
-    encode_proc = encode_proc or schema_rt.msgpack_encode
+    decode_proc = decode_proc or rt.msgpack_decode
+    encode_proc = encode_proc or rt.msgpack_encode
     local function flatten(data)
         local _ = linker
         local r = regs
         decode_proc(r, data)
         r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
-        return encode_proc(r, f001(r, 0, 0))
+        return encode_proc(r, f1(r, 0, 0))
     end
     local function unflatten(data)
         local _ = linker
         local r = regs
         decode_proc(r, data)
         r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
-        return encode_proc(r, f002(r, 0, 0))
+        return encode_proc(r, f2(r, 0, 0))
     end
     local function xflatten(data)
         local _ = linker
         local r = regs
         decode_proc(r, data)
         r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
-        return encode_proc(r, f003(r, 0, 0))
+        r.ot[0] = 11
+        local v000, v001 = f3(r, 1, 0)
+        r.ov[0].xlen = v001
+        return encode_proc(r, v000)
     end
     return {
         flatten  = function(data)
@@ -152,8 +160,9 @@ linker = function(decode_proc, encode_proc)
     }
 end
 return linker
-]]
-    }, '\n')
+]])
+    res[cpool_pos] = base64_encode(il.cpool_get_data())
+    return concat(res, '\n')
 end
 
 -- compile(schema)
@@ -187,23 +196,37 @@ local function compile(...)
     if not ok then
         return false, ir
     else
-        local dump_src = args.dump_src
-        local code = gen_lua_code(ir)
-        if dump_src then
-            local file = io.open(dump_src, 'w+')
-            file:write(code)
+        local il = il_create()
+        local debug = args.debug
+        local il_code
+        if debug then
+            il_code = c_emit_code(il, ir)
+        else
+            il_code = il.optimize(c_emit_code(il, ir))
+        end
+        local dump_il = args.dump_il
+        if dump_il then
+            local file = io.open(dump_il, 'w+')
+            file:write(il.vis(il_code))
             file:close()
         end
-        local linker  = loadstring(code, '@<schema-jit>') ()
-        local msgpack = linker(rt_universal_decode, rt_msgpack_encode)
-        local lua     = linker(rt_universal_decode, rt_lua_encode)
+        local lua_code = gen_lua_code(il, il_code)
+        local dump_src = args.dump_src
+        if dump_src then
+            local file = io.open(dump_src, 'w+')
+            file:write(lua_code)
+            file:close()
+        end
+        local linker          = loadstring(lua_code, '@<schema-jit>') ()
+        local process_msgpack = linker(rt_universal_decode, rt_msgpack_encode)
+        local process_lua     = linker(rt_universal_decode, rt_lua_encode)
         return true, {
-            flatten           = lua.flatten,
-            unflatten         = lua.unflatten,
-            xflatten          = lua.xflatten,
-            flatten_msgpack   = msgpack.flatten,
-            unflatten_msgpack = msgpack.unflatten,
-            xflatten_msgpack  = msgpack.xflatten
+            flatten           = process_lua.flatten,
+            unflatten         = process_lua.unflatten,
+            xflatten          = process_lua.xflatten,
+            flatten_msgpack   = process_msgpack.flatten,
+            unflatten_msgpack = process_msgpack.unflatten,
+            xflatten_msgpack  = process_msgpack.xflatten
         }
     end
 end

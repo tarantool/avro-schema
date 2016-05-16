@@ -102,51 +102,51 @@ local function ir_fixed_size(ir)
 end
 
 -----------------------------------------------------------------------
-local schema2lirfunc = {
-    null = 'putnul', boolean = 'putboolc', int = 'putintc',
+local schema2ilfunc = {
+    null = 'putnulc', boolean = 'putboolc', int = 'putintc',
     long = 'putlongc', float = 'putfloatc', double = 'putdoublec',
     bytes = 'putbinc', string = 'putstrc'
 }
 
-local function prepare_default(lir, schema, val)
-    local lirfunc = schema2lirfunc[schema]
-    if lirfunc then
-        return lir[lirfunc], val
+local function prepare_default(il, schema, val)
+    local ilfunc = schema2ilfunc[schema]
+    if ilfunc then
+        return il[ilfunc], val
     else
         assert(false, 'NYI: complex default')
     end
 end
 
-local function prepare_flat_default(lir, schema, val)
-    return prepare_default(lir, schema, val) -- XXX
+local function prepare_flat_default(il, schema, val)
+    return prepare_default(il, schema, val) -- XXX
 end
 
 local prepare_flat_defaults_vec_helper
-prepare_flat_defaults_vec_helper = function(lir, schema, val, res, curcell)
+prepare_flat_defaults_vec_helper = function(il, schema, val, res, curcell)
     if     type(schema) == 'table' and schema.type == 'record' then
         local fields = schema.fields
         for i = 1, #fields do
             local field = fields[i]
             curcell = prepare_flat_defaults_vec_helper(
-                lir, field.type, val[field.name], res, curcell)
+                il, field.type, val[field.name], res, curcell)
         end
         return curcell
     elseif type(schema) == 'table' and not schema.type then
         assert(false, 'NYI: union')
     else
         res[curcell * 2 - 1], res[curcell * 2] = prepare_flat_default(
-            lir, schema, val)
+            il, schema, val)
         return curcell + 1
     end
 end
-local function prepare_flat_defaults_vec(lir, schema, val)
+local function prepare_flat_defaults_vec(il, schema, val)
     res = {}
-    return prepare_flat_defaults_vec_helper(lir, schema, val, res, 1) - 1, res
+    return prepare_flat_defaults_vec_helper(il, schema, val, res, 1) - 1, res
 end
 
 -----------------------------------------------------------------------
-local ir2lirfuncs = {
-    NUL      = { 'isnul',    'putnul' },
+local ir2ilfuncs = {
+    NUL      = { 'isnul',    'putnulc' },
     BOOL     = { 'isbool',   'putbool' },
     INT      = { 'isint',    'putint' },
     LONG     = { 'islong',   'putlong' },
@@ -165,22 +165,22 @@ local ir2lirfuncs = {
 }
 
 local emit_patch
-emit_patch = function(lir, ir, ripv, ipv, ipo, opo)
+emit_patch = function(il, ir, ripv, ipv, ipo, opo)
     local irt = ir_type(ir)
-    local lirfuncs = ir2lirfuncs[irt]
-    if lirfuncs then
-        local isfunc, putfunc = unpack(lirfuncs)
+    local ilfuncs = ir2ilfuncs[irt]
+    if ilfuncs then
+        local isfunc, putfunc = unpack(ilfuncs)
         return {
-            lir[isfunc]  (ipv, ipo),
-            lir[putfunc] (opo, ipv, ipo),
-            lir.move(ripv, ipv, ipo + 1)
+            il[isfunc]  (ipv, ipo),
+            il[putfunc] (opo, ipv, ipo),
+            il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'FIXED' then
         return {
-            lir.isbin(ipv, ipo),
-            lir.lenis(ipv, ipo, ir_fixed_size(ir)),
-            lir.putbin(opo, ipv, ipo),
-            lir.move(ripv, ipv, ipo + 1)
+            il.isbin(ipv, ipo),
+            il.lenis(ipv, ipo, ir_fixed_size(ir)),
+            il.putbin(opo, ipv, ipo),
+            il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'ENUM' then
         assert(false, 'NYI: enum')
@@ -190,30 +190,30 @@ emit_patch = function(lir, ir, ripv, ipv, ipo, opo)
 end
 
 local emit_check
-emit_check = function(lir, ir, ripv, ipv, ipo)
+emit_check = function(il, ir, ripv, ipv, ipo)
     local irt = ir_type(ir)
-    local lirfuncs = ir2lirfuncs[irt]
-    if lirfuncs then
-        local isfunc = unpack(lirfuncs)
+    local ilfuncs = ir2ilfuncs[irt]
+    if ilfuncs then
+        local isfunc = unpack(ilfuncs)
         return {
-            lir[isfunc]  (ipv, ipo),
-            lir.move(ripv, ipv, ipo + 1)
+            il[isfunc]  (ipv, ipo),
+            il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'FIXED' then
         return {
-            lir.isbin(ipv, ipo),
-            lir.lenis(ipv, ipo, ir_fixed_size(ir)),
-            lir.move(ripv, ipv, ipo + 1)
+            il.isbin(ipv, ipo),
+            il.lenis(ipv, ipo, ir_fixed_size(ir)),
+            il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'ARRAY' then
         return {
-            lir.isarray(ipv, ipo),
-            lir.skip(ripv, ipv, ipo)
+            il.isarray(ipv, ipo),
+            il.skip(ripv, ipv, ipo)
         }
     elseif irt == 'MAP' then
         return {
-            lir.ismap(ipv, ipo),
-            lir.skip(ripv, ipv, ipo)
+            il.ismap(ipv, ipo),
+            il.skip(ripv, ipv, ipo)
         }
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
@@ -227,84 +227,77 @@ emit_check = function(lir, ir, ripv, ipv, ipo)
 end
 
 local emit_validate
-emit_validate = function(lir, ir, ripv, ipv, ipo)
-    return emit_check(lir, ir, ripv, ipv, ipo) -- XXX
+emit_validate = function(il, ir, ripv, ipv, ipo)
+    return emit_check(il, ir, ripv, ipv, ipo) -- XXX
 end
 
-local function objforeach(lir, ripv, ipv, ipo, handler)
-    if ripv == ipv then
-        local ptr = lir.new_var()
+local function objforeach(il, ripv, ipv, ipo, handler)
+    if ripv and ripv ~= ipv then
         return {
-            lir.beginvar(ptr),
-            lir.move(ptr, ipv, ipo),
-            {
-                lir.objforeach(ripv, ptr, 0),
-                handler(ripv)
-            },
-            lir.endvar(ptr)
-        }
-    elseif not ripv then
-        local lipv = lir.new_var()
-        return {
-            lir.beginvar(lipv),
-            {
-                lir.objforeach(lipv, ipv, ipo),
-                handler(lipv)
-            },
-            lir.endvar(lipv)
+            il.objforeach(ripv, ipv, ipo),
+            handler(ripv)
         }
     else
+        -- note: it's possible to avoid trailing
+        -- MOVE in the case of ripv==ipv with a different
+        -- codegen. DON'T do that, harms CHECKOBUF optimisation.
+        local lipv = il.id()
         return {
-            lir.objforeach(ripv, ipv, ipo),
-            handler(ripv)
+            il.beginvar(lipv),
+            {
+                il.objforeach(lipv, ipv, ipo),
+                handler(lipv)
+            },
+            il.move(ripv, lipv, 0),
+            il.endvar(lipv)
         }
     end
 end
 
 local emit_convert
-emit_convert = function(lir, ir, ripv, ipv, ipo)
+emit_convert = function(il, ir, ripv, ipv, ipo)
     local irt = ir_type(ir)
-    local lirfuncs = ir2lirfuncs[irt]
-    if lirfuncs then
-        local isfunc, putfunc = unpack(lirfuncs)
+    local ilfuncs = ir2ilfuncs[irt]
+    if ilfuncs then
+        local isfunc, putfunc = unpack(ilfuncs)
         return {
-            lir[isfunc]  (ipv, ipo),
-            lir.checkobuf(0),
-            lir[putfunc] (0, ipv, ipo),
-            lir.move(0, 0, 1),
-            lir.move(ripv, ipv, ipo + 1)
+            il[isfunc]  (ipv, ipo),
+            il.checkobuf(1),
+            il[putfunc] (0, ipv, ipo),
+            il.move(0, 0, 1),
+            il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'FIXED' then
         return {
-            { lir.isbin(ipv, ipo), lir.lenis(ipv, ipo, ir_fixed_size(ir)) },
-            lir.checkobuf(0),
-            lir.putbin(0, ipv, ipo),
-            lir.move(0, 0, 1),
-            lir.move(ripv, ipv, ipo + 1)
+            { il.isbin(ipv, ipo), il.lenis(ipv, ipo, ir_fixed_size(ir)) },
+            il.checkobuf(1),
+            il.putbin(0, ipv, ipo),
+            il.move(0, 0, 1),
+            il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'ARRAY' then
         return {
-            lir.isarray(ipv, ipo),
-            lir.checkobuf(0),
-            lir.putarray(0, ipv, ipo),
-            lir.move(0, 0, 1),
-            objforeach(lir, ripv, ipv, ipo, function(xipv)
-                return emit_convert(lir, ir[2], xipv, xipv, 0)
+            il.isarray(ipv, ipo),
+            il.checkobuf(1),
+            il.putarray(0, ipv, ipo),
+            il.move(0, 0, 1),
+            objforeach(il, ripv, ipv, ipo, function(xipv)
+                return emit_convert(il, ir[2], xipv, xipv, 0)
             end)
         }
     elseif irt == 'MAP' then
         return {
-            lir.ismap(ipv, ipo),
-            lir.checkobuf(0),
-            lir.putmap(0, ipv, ipo),
-            lir.move(0, 0, 1),
-            objforeach(lir, ripv, ipv, ipo, function(xipv)
+            il.ismap(ipv, ipo),
+            il.checkobuf(1),
+            il.putmap(0, ipv, ipo),
+            il.move(0, 0, 1),
+            objforeach(il, ripv, ipv, ipo, function(xipv)
                 return {
-                    lir.isstr(xipv, 0),
-                    lir.checkobuf(0),
-                    lir.putstr(0, xipv, 0),
-                    lir.move(0, 0, 1),
-                    emit_convert(lir, ir[2], xipv, xipv, 1)
+                    il.isstr(xipv, 0),
+                    il.checkobuf(1),
+                    il.putstr(0, xipv, 0),
+                    il.move(0, 0, 1),
+                    emit_convert(il, ir[2], xipv, xipv, 1)
                 }
             end)
         }
@@ -320,24 +313,25 @@ emit_convert = function(lir, ir, ripv, ipv, ipo)
 end
 
 local emit_convert_unchecked
-emit_convert_unchecked = function(lir, ir, ripv, ipv, ipo)
-    local res = emit_convert(lir, ir, ripv, ipv, ipo)
+emit_convert_unchecked = function(il, ir, ripv, ipv, ipo)
+    local res = emit_convert(il, ir, ripv, ipv, ipo)
     -- get rid of checks - emit_convert must cooperate
-    res[1] = lir.nop()
+    -- also exploited by emit_rec_xflatten_pass2
+    res[1] = il.nop()
     return res
 end
 
 -----------------------------------------------------------------------
--- emit_rec_flatten(lir, ir, ripv, ipv, ipo) -> code
+-- emit_rec_flatten(il, ir, ripv, ipv, ipo) -> code
 local emit_rec_flatten_pass1
 local emit_rec_flatten_pass2
 local emit_rec_flatten_pass3
-local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
+local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
     assert(ir_type(ir) == 'RECORD')
     local var_block, aux_block, defaults = {}, {}, {}
     local context = {
-        lir = lir,
-        defaults = defaults,   -- [celli * 2 - 1] lir_put* func,
+        il = il,
+        defaults = defaults,   -- [celli * 2 - 1] il_put* func,
                                -- [celli * 2]     argument
         var_block = var_block, -- variable declarations
         aux_block = aux_block, -- certain field checks 
@@ -352,9 +346,9 @@ local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
     emit_rec_flatten_pass1(context, ir, tree, 1)
     local init_block = {}
     for i = 1, context.vlocell - 1 do
-        local lirfunc = defaults[i * 2 - 1]
-        if lirfunc then
-            insert(init_block, lirfunc(i, defaults[i * 2]))
+        local ilfunc = defaults[i * 2 - 1]
+        if ilfunc then
+            insert(init_block, ilfunc(i, defaults[i * 2]))
         end
     end
     local parser_block = emit_rec_flatten_pass2(context, ir, tree,
@@ -363,12 +357,12 @@ local function emit_rec_flatten(lir, ir, ripv, ipv, ipo)
     local vlocell = context.vlocell
     local maxcell = context.maxcell
     if vlocell == maxcell then -- update $0
-        insert(generator_block, lir.move(0, 0, vlocell))
+        insert(generator_block, il.move(0, 0, vlocell))
     end
     return {
         var_block,
-        lir.checkobuf(vlocell - 1),
-        lir.putarrayc(0, maxcell - 1),
+        il.checkobuf(vlocell),
+        il.putarrayc(0, maxcell - 1),
         init_block,
         parser_block,
         aux_block,
@@ -402,7 +396,7 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
             -- a different default value, overriding defaults
             -- we're preparing now
             local ddata
-            dcells, ddata = prepare_flat_defaults_vec(context.lir, ds, dv)
+            dcells, ddata = prepare_flat_defaults_vec(context.il, ds, dv)
             for i = 1, dcells do
                 defaults[ (curcell + i)*2 - 3 ] = ddata[ i * 2 - 1 ]
                 defaults[ (curcell + i)*2 - 2 ] = ddata[ i * 2 ]
@@ -453,33 +447,33 @@ end
 -- Allocates a variable to store position of each input field value.
 -- Puts variable names in tree, replacing offsets (which are no longer needed).
 emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
-    local lir = context.lir
+    local il = context.il
     return {
-        lir.ismap(ipv, ipo),
-        objforeach(lir, ripv, ipv, ipo, function(xipv)
+        il.ismap(ipv, ipo),
+        objforeach(il, ripv, ipv, ipo, function(xipv)
             local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
             local i2o = ir_record_i2o(ir)
             local var_block = context.var_block
             local aux_block = context.aux_block
-            local switch = { lir.strswitch(xipv, 0) }
+            local switch = { il.strswitch(xipv, 0) }
             for i = 1, #inames do
                 local fieldir = bc[i]
                 local fieldirt = ir_type(fieldir)
                 local o = i2o[i]
-                local fieldvar = lir.new_var()
+                local fieldvar = il.id()
                 local targetcell = tree[o]
-                insert(var_block, lir.beginvar(fieldvar))
+                insert(var_block, il.beginvar(fieldvar))
                 local branch = {
-                    lir.sbranch(inames[i]),
-                    lir.isnotset(fieldvar),
-                    lir.move(fieldvar, xipv, 1)
+                    il.sbranch(inames[i]),
+                    il.isnotset(fieldvar),
+                    il.move(fieldvar, xipv, 1)
                 }
                 switch[i + 1] = branch
                 -- we aren't going to see this var during pass3
                 if not o and not ir_record_ioptional(ir, i) then
                     insert(aux_block, {
-                        lir.isset(fieldvar),
-                        lir.endvar(fieldvar)
+                        il.isset(fieldvar),
+                        il.endvar(fieldvar)
                 })
                 end
                 if fieldirt == 'RECORD' then
@@ -490,22 +484,22 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                         tree[o][0] = fieldvar
                     end
                     insert(branch, emit_rec_flatten_pass2(context, fieldir, tree[o],
-                                                          xipv, fieldvar, 0))
+                                                          xipv, xipv, 1))
                 elseif fieldirt == 'UNION' then
                     assert(false, 'NYI')
                 else
                     tree[o] = fieldvar
                     if targetcell then
-                        insert(branch, emit_patch(lir, fieldir, xipv, fieldvar, 0,
+                        insert(branch, emit_patch(il, fieldir, xipv, xipv, 1,
                                                   targetcell))
                     elseif o then
-                        insert(branch, emit_check(lir, fieldir, xipv, fieldvar, 0))
+                        insert(branch, emit_check(il, fieldir, xipv, xipv, 1))
                     else
-                        insert(branch, emit_validate(lir, fieldir, xipv, fieldvar, 0))
+                        insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
                     end
                 end
             end
-            return { lir.isstr(xipv, 0), switch }
+            return { il.isstr(xipv, 0), switch }
         end)
     }
 end
@@ -520,7 +514,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
     local bc = ir_record_bc(ir)
     local defaults = context.defaults
     local vlocell = context.vlocell
-    local lir = context.lir
+    local il = context.il
     local code = {}
     for o = 1, #onames do
         local ds, dv = ir_record_odefault(ir, o)
@@ -535,20 +529,20 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
         elseif not ds then -- it's mandatory
             tbranch = {}
             insert(code, {
-                lir.isset(fieldvar),
+                il.isset(fieldvar),
                 tbranch,
-                lir.endvar(fieldvar)
+                il.endvar(fieldvar)
             })
         else
-            tbranch = { lir.ibranch(1) }
-            fbranch = { lir.ibranch(0) }
-            insert(code, { lir.ifset(fieldvar), tbranch, fbranch })
-            insert(code, lir.endvar(fieldvar))
+            tbranch = { il.ibranch(1) }
+            fbranch = { il.ibranch(0) }
+            insert(code, { il.ifset(fieldvar), tbranch, fbranch })
+            insert(code, il.endvar(fieldvar))
         end
         -- fbranch - if field was missing from the input
         if ds then
             local ddata, didcross
-            dcells, ddata = prepare_flat_defaults_vec(context.lir, ds, dv)
+            dcells, ddata = prepare_flat_defaults_vec(context.il, ds, dv)
 
             local dsplit -- a spliting point (before/after vlocell)
             if     curcell > vlocell then
@@ -563,25 +557,25 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
             -- before vlocell; patch (unless the same value already stored)
             for i = 1, dsplit do
                 local dcurcell = curcell + i - 1
-                local lirfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
+                local ilfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
 
-                if lirfunc ~= defaults[ dcurcell * 2 - 1 ] or
+                if ilfunc ~= defaults[ dcurcell * 2 - 1 ] or
                        arg ~= defaults[ dcurcell * 2 ] then
 
-                    insert(fbranch, lirfunc(dcurcell - 1, arg))
+                    insert(fbranch, ilfunc(dcurcell - 1, arg))
                 end
             end
 
             if dsplit ~= dcells then -- after vlocell; append
                 if didcross then -- update $0
-                    insert(fbranch, lir.move(0, 0, vlocell))
+                    insert(fbranch, il.move(0, 0, vlocell))
                 end
-                insert(fbranch, lir.checkobuf(dcells - dsplit - 1))
+                insert(fbranch, il.checkobuf(dcells - dsplit))
                 for i = dsplit + 1, dcells do
-                    local lirfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
-                    insert(fbranch, lirfunc(i - dsplit - 1, arg))
+                    local ilfunc, arg = ddata[ i * 2 - 1 ], ddata[ i * 2 ]
+                    insert(fbranch, ilfunc(i - dsplit - 1, arg))
                 end
-                insert(fbranch, lir.move(0, 0, dcells - dsplit))
+                insert(fbranch, il.move(0, 0, dcells - dsplit))
             end
         end
         -- tbranch - if field was present in the input
@@ -599,9 +593,9 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
                 assert(false, 'NYI: union')
             elseif curcell >= vlocell then -- append
                 if curcell == vlocell then -- update $0
-                    insert(tbranch, lir.move(0, 0, vlocell))
+                    insert(tbranch, il.move(0, 0, vlocell))
                 end
-                insert(tbranch, emit_convert_unchecked(lir, fieldir,
+                insert(tbranch, emit_convert_unchecked(il, fieldir,
                                                        nil, fieldvar, 0))
                 curcell = curcell + 1
             else
@@ -617,18 +611,18 @@ end
 local emit_rec_unflatten_pass1
 local emit_rec_unflatten_pass2
 local emit_rec_unflatten_pass3
-local function emit_rec_unflatten(lir, ir, ripv, ipv, ipo)
+local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
     assert(ir_type(ir) == 'RECORD')
     if not ripv then
-        ripv = lir.new_var()
+        ripv = il.id()
         return {
-            lir.beginvar(ripv),
-            emit_rec_unflatten(lir, ir, ripv, ipv, ipo),
-            lir.endvar(ripv)
+            il.beginvar(ripv),
+            emit_rec_unflatten(il, ir, ripv, ipv, ipo),
+            il.endvar(ripv)
         }
     end
     local context = {
-        lir = lir,
+        il = il,
         ipv = ripv,
         fieldv = {},
         fieldo = {},
@@ -637,9 +631,9 @@ local function emit_rec_unflatten(lir, ir, ripv, ipv, ipo)
     local tree = {}
     local parser_block = emit_rec_unflatten_pass1(context, ir, tree, 1, false)
     return {
-        lir.isarray(ipv, ipo),
-        lir.lenis(ipv, ipo, context.maxcell - 1),
-        lir.move(ripv, ipv, ipo + 1),
+        il.isarray(ipv, ipo),
+        il.lenis(ipv, ipo, context.maxcell - 1),
+        il.move(ripv, ipv, ipo + 1),
         parser_block,
         emit_rec_unflatten_pass2(context, ir, tree, 1) and
             emit_rec_unflatten_pass3(context, ir, tree, 1)
@@ -649,7 +643,7 @@ end
 emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
     local bc, inames = ir_record_bc(ir), ir_record_inames(ir)
     local i2o = ir_record_i2o(ir)
-    local lir, ipv = context.lir, context.ipv
+    local il, ipv = context.il, context.ipv
     local fieldv, fieldo = context.fieldv, context.fieldo
     local code = {}
     for i = 1, #inames do
@@ -671,24 +665,24 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
                 fieldv[curcell] = fieldv[lastcell]
                 fieldo[curcell] = curcell - lastcell
             else
-                local fieldvar = lir.new_var()
-                insert(code, lir.beginvar(fieldvar))
-                insert(code, lir.move(fieldvar, ipv))
+                local fieldvar = il.id()
+                insert(code, il.beginvar(fieldvar))
+                insert(code, il.move(fieldvar, ipv, 0))
                 fieldv[curcell] = fieldvar
                 fieldo[curcell] = 0
                 context.lastcell = curcell
             end
-            insert(code, emit_check(context.lir, fieldir,
+            insert(code, emit_check(context.il, fieldir,
                                     ipv, ipv, 0))
             curcell = curcell + 1
-            if not ir2lirfuncs[fieldirt] then
+            if not ir2ilfuncs[fieldirt] then
                 context.lastcell = nil -- VLO
             end
         else
-            insert(code, emit_validate(context.lir, fieldir,
+            insert(code, emit_validate(context.il, fieldir,
                                        ipv, ipv, 0))
             curcell = curcell + 1
-            if not ir2lirfuncs[fieldirt] then
+            if not ir2ilfuncs[fieldirt] then
                 context.lastcell = nil -- VLO
             end
         end
@@ -728,10 +722,10 @@ end
 emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
     local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
     local o2i = ir_record_o2i(ir)
-    local lir, fieldv, fieldo = context.lir, context.fieldv, context.fieldo
+    local il, fieldv, fieldo = context.il, context.fieldv, context.fieldo
     local lastref = context.lastref
     local maplen = 0
-    local code = { lir.checkobuf(opo), lir.nop(), lir.move(0, 0, 1) }
+    local code = { il.checkobuf(1), il.nop(), il.move(0, 0, 1) }
     for o = 1, #onames do
         local i = o2i[o]
         if ir_record_ohidden(ir, o) then
@@ -739,12 +733,12 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
         elseif not i then
             -- put defaults
             local schema, val = ir_record_odefault(ir, o)
-            local lirfunc, arg = prepare_default(lir, schema, val)
+            local ilfunc, arg = prepare_default(il, schema, val)
             insert(code, {
-                lir.checkobuf(1),
-                lir.putstrc(0, onames[o]),
-                lirfunc(1, arg),
-                lir.move(0, 0, 2)
+                il.checkobuf(2),
+                il.putstrc(0, onames[o]),
+                ilfunc(1, arg),
+                il.move(0, 0, 2)
             })
             maplen = maplen + 1
             curfield = curfield + 1
@@ -752,9 +746,9 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
             local fieldir = bc[i]
             local fieldirt = ir_type(fieldir)
             insert(code, {
-                lir.checkobuf(0),
-                lir.putstrc(0, onames[o]),
-                lir.move(0, 0, 1)
+                il.checkobuf(1),
+                il.putstrc(0, onames[o]),
+                il.move(0, 0, 1)
             })
             if fieldirt == 'RECORD' then
                 insert(code, emit_rec_unflatten_pass3(context, fieldir, tree[i],
@@ -765,11 +759,11 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
             else
                 local curcell = tree[i]
                 local fieldvar = fieldv[curcell]
-                insert(code, emit_convert_unchecked(lir, fieldir, nil,
+                insert(code, emit_convert_unchecked(il, fieldir, nil,
                                                     fieldvar,
                                                     fieldo[curcell]))
                 if lastref[fieldvar] == curfield then
-                    insert(code, lir.endvar(fieldvar))
+                    insert(code, il.endvar(fieldvar))
                 end
                 curfield = curfield + 1
             end
@@ -777,7 +771,7 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
         end
     end
     context.maxfield = curfield
-    code[2] = lir.putmapc(0, maplen)
+    code[2] = il.putmapc(0, maplen)
     return code
 end
 
@@ -785,12 +779,12 @@ end
 local emit_rec_xflatten_pass1
 local emit_rec_xflatten_pass2
 
-local function emit_rec_xflatten(lir, ir, internal, ipv)
+local function emit_rec_xflatten(il, ir, internal, ipv)
     assert(ir_type(ir) == 'RECORD')
-    local headpos, counter = lir.new_var(), lir.new_var()
+    local counter = il.id()
     local var_block = {}
     local context = {
-        lir = lir,
+        il = il,
         internal = internal,
         var_block = var_block,
         counter = counter
@@ -798,16 +792,10 @@ local function emit_rec_xflatten(lir, ir, internal, ipv)
     local tree = {}
     emit_rec_xflatten_pass1(context, ir, tree, 1)
     return {
-        lir.beginvar(headpos),
-        lir.beginvar(counter),
+        il.beginvar(counter),
         var_block,
-        lir.move(headpos, 0, 0),
-        lir.move(counter, nil, 0),
-        lir.checkobuf(0),
-        lir.putarrayc(0, 0),
-        lir.move(0, 0, 1),
-        emit_rec_xflatten_pass2(context, ir, tree, ipv, ipv, 0),
-        lir.setlen(headpos, 0, counter)
+        emit_rec_xflatten_pass2(context, ir, tree, nil, ipv, 0),
+        il.move(ipv, counter, 0)
     }
 end
 
@@ -819,7 +807,7 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
         local fieldir = bc[o2i[o]]
         if not fieldir then
             local ds, dv = ir_record_odefault(ir, o)
-            curcell = curcell + prepare_flat_defaults_vec(context.lir, ds, dv)
+            curcell = curcell + prepare_flat_defaults_vec(context.il, ds, dv)
         else
             local fieldirt
             tree[o] = curcell + internal
@@ -840,26 +828,26 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
 end
 
 emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
-    local lir = context.lir
+    local il = context.il
     return {
-        lir.ismap(ipv, ipo),
-        objforeach(lir, ripv, ipv, ipo, function(xipv)
+        il.ismap(ipv, ipo),
+        objforeach(il, ripv, ipv, ipo, function(xipv)
             local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
             local i2o = ir_record_i2o(ir)
             local var_block = context.var_block
             counter = context.counter
-            local switch = { lir.strswitch(xipv, 0) }
+            local switch = { il.strswitch(xipv, 0) }
             for i = 1, #inames do
                 local fieldir = bc[i]
                 local fieldirt = ir_type(fieldir)
                 local o = i2o[i]
-                local fieldvar = lir.new_var()
+                local fieldvar = il.id()
                 local targetcell = tree[o]
-                insert(var_block, lir.beginvar(fieldvar))
+                insert(var_block, il.beginvar(fieldvar))
                 local branch = {
-                    lir.sbranch(inames[i]),
-                    lir.isnotset(fieldvar),
-                    lir.move(fieldvar, xipv, 1)
+                    il.sbranch(inames[i]),
+                    il.isnotset(fieldvar),
+                    il.move(fieldvar, xipv, 1)
                 }
                 switch[i + 1] = branch
                 if fieldirt == 'RECORD' then
@@ -870,36 +858,40 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     assert(false, 'NYI')
                 else
                     if o then
+                        -- Note: this code motion is harmless
+                        -- (see emit_conver/emit_convert_unchecked);
+                        -- allows to keep CHECKOBUF optimiser simple.
+                        local convert = emit_convert(il, fieldir, xipv, xipv, 1)
+                        local typecheck = convert[1]
+                        convert[1] = il.nop()
                         insert(branch, {
-                            lir.checkobuf(2),
-                            lir.putarrayc(0, 3),
-                            lir.putstrc(1, '='),
-                            lir.putintc(2, tree[o]),
-                            lir.move(counter, counter, 1),
-                            lir.move(0, 0, 3),
-                            emit_convert(lir, fieldir, xipv, fieldvar, 0)
+                            typecheck,
+                            il.checkobuf(3),
+                            il.putarrayc(0, 3),
+                            il.putstrc(1, '='),
+                            il.putintc(2, tree[o]),
+                            il.move(counter, counter, 1),
+                            il.move(0, 0, 3),
+                            convert
                         })
                     else
-                        insert(branch, emit_validate(lir, fieldir, xipv, fieldvar, 0))
+                        insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
                     end
                 end
             end
-            return { lir.isstr(xipv, 0), switch }
+            return { il.isstr(xipv, 0), switch }
         end)
     }
 end
 
 -----------------------------------------------------------------------
-local function emit_code(lir, ir)
-    -- reserve f001, f002, f003
-    lir.new_func(); lir.new_func(); lir.new_func()
-    -- reserve v001, v002, v003
-    lir.new_var(); lir.new_var(); lir.new_var()
-    return {
-        { lir.cvtfunc(1, 1), emit_rec_flatten(lir, ir, 1, 1, 0) },
-        { lir.cvtfunc(2, 2), emit_rec_unflatten(lir, ir, 2, 2, 0) },
-        { lir.cvtfunc(3, 3), emit_rec_xflatten(lir, ir, 0, 3) }
-    }
+local function emit_code(il, ir)
+    local p1, p2, p3 = il.id(), il.id(), il.id()
+    return il.cleanup({
+        { il.declfunc(1, p1), emit_rec_flatten  (il, ir, nil, p1, 0) },
+        { il.declfunc(2, p2), emit_rec_unflatten(il, ir, nil, p2, 0) },
+        { il.declfunc(3, p3), emit_rec_xflatten (il, ir, 0, p3) }
+    })
 end
 
 -----------------------------------------------------------------------

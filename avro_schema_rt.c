@@ -9,7 +9,7 @@ enum TypeId {
     FalseValue       = 2,
     TrueValue        = 3,
     LongValue        = 4,
-    UlongValue       = 5, /* parseor prefers LongValue */
+    UlongValue       = 5, /* parser prefers LongValue */
     FloatValue       = 6,
     DoubleValue      = 7,
     StringValue      = 8,

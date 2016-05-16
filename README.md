@@ -84,6 +84,11 @@ Dumping generated code for inspection:
 avro_schema.compile({schema1, schema2, dump_src = "output.lua"})
 ```
 
+Troubleshooting codegen issues:
+```lua
+avro_schema.compile({schema1, schema2, debug = true, dump_il = "output.il"})
+```
+
 ##Generated Routines
 `Compile` produces the following routines (returned in a Lua table):
   * `flatten`
