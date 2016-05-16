@@ -627,19 +627,16 @@ local function emit_rec_unflatten(lir, ir, ripv, ipv, ipo)
             lir.endvar(ripv)
         }
     end
-    local var_block = {}
     local context = {
         lir = lir,
         ipv = ripv,
         fieldv = {},
         fieldo = {},
-        lastref = {},
-        var_block = var_block -- variable declarations
+        lastref = {}
     }
     local tree = {}
     local parser_block = emit_rec_unflatten_pass1(context, ir, tree, 1, false)
     return {
-        var_block,
         lir.isarray(ipv, ipo),
         lir.lenis(ipv, ipo, context.maxcell - 1),
         lir.move(ripv, ipv, ipo + 1),
@@ -675,7 +672,7 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
                 fieldo[curcell] = curcell - lastcell
             else
                 local fieldvar = lir.new_var()
-                insert(context.var_block, lir.beginvar(fieldvar))
+                insert(code, lir.beginvar(fieldvar))
                 insert(code, lir.move(fieldvar, ipv))
                 fieldv[curcell] = fieldvar
                 fieldo[curcell] = 0
