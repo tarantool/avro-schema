@@ -889,7 +889,7 @@ local function emit_code(il, ir)
     local p1, p2, p3 = il.id(), il.id(), il.id()
     return il.cleanup({
         { il.declfunc(1, p1), emit_rec_flatten  (il, ir, nil, p1, 0) },
-        { il.declfunc(2, p2), emit_rec_unflatten(il, ir, nil, p2, 0) },
+        { il.declfunc(2, p2), emit_rec_unflatten(il, ir, p2, p2, 0) },
         { il.declfunc(3, p3), emit_rec_xflatten (il, ir, 0, p3) }
     })
 end

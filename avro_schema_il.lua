@@ -995,8 +995,8 @@ local function varref(ipv, ipo, map)
     end
 end
 
--- After BEGINVAR, variable value is 0. If a store follows
--- it is possible to elide the initialization.
+-- After BEGINVAR, the variable value is 0. If a store follows
+-- we can elide the initialization.
 local function elidevarinit(block, i)
     local vid = block[i].ipv
     for lookahead = i+1, i+5 do
@@ -1083,13 +1083,13 @@ local function emit_lua_block(ctx, block, cc, res)
                                    varref(o.ripv, 0, varmap), pos, pos))
             elseif o.op == opcode.PSKIP     then
                 local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format('%s = %s+1+r.b1[r.t[%s]-%d]*(r.v[%s].xoff-1)',
+                insert(res, format('%s = %s+1+r.b2[r.t[%s]-%d]*(r.v[%s].xoff-1)',
                                    varref(o.ripv, 0, varmap), pos, pos,
                                    il.cpool_add('\0\0\0\0\0\0\0\0\0\0\0\1\1'), pos))
             -----------------------------------------------------------
             elseif o.op == opcode.PUTBOOLC  then
                 insert(res, format('r.ot[%s] = %d',
-                                   varref(0, o.offset, varmap), op.ci == 0 and 2 or 3))
+                                   varref(0, o.offset, varmap), o.ci == 0 and 2 or 3))
             elseif o.op == opcode.PUTINTC then
                 local pos = varref(0, o.offset, varmap)
                 insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %d',
@@ -1130,13 +1130,13 @@ local function emit_lua_block(ctx, block, cc, res)
                                    varref(o.ipv, o.ipo, varmap), opt[3]))
             -----------------------------------------------------------
             elseif o.op == opcode.ISBOOL    then
-                insert(res, format('if r.b1[r.t[%s] - %d] == 0 then error("type error", 0) end',
-                                   varref(o.ipv. o.ipo, varmap),
+                insert(res, format('if r.b2[r.t[%s]-%d] == 0 then error("type error", 0) end',
+                                   varref(o.ipv, o.ipo, varmap),
                                    il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0')))
             elseif o.op == opcode.ISINT     then
                 local pos = varref(o.ipv, o.ipo, varmap)
                 insert(res, format([[
-if r.t[%s] ~= 4 or r.v[%s].uval + 0x80000000 > 0xffffffff then error("type error", 0) end]],
+if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then error("type error", 0) end]],
                                    pos, pos))
             elseif o.op >= opcode.ISLONG and o.op <= opcode.ISNUL then
                 insert(res, format('if r.t[%s] ~= %d then error("type error", 0) end',
@@ -1183,7 +1183,7 @@ if r.t[%s] ~= 4 or r.v[%s].uval + 0x80000000 > 0xffffffff then error("type error
                 assert(branch1[1].op == opcode.IBRANCH)
                 insert(res, format('if %s %s 0 then',
                                    varref(head.ipv, 0, varmap),
-                                   branch1[1].ci ~= 0 and '==' or '~='))
+                                   branch1[1].ci == 0 and '==' or '~='))
                 emit_nested_lua_block(ctx, branch1, link, res)
                 if branch2 then
                     assert(branch2[1].op == opcode.IBRANCH)

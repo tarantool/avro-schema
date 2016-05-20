@@ -280,7 +280,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                                      concat(path, '/')), 0)
                     end
                     local xdefault = xfield.default
-                    if xdefault then
+                    if xdefault ~= nil then
                         if type_may_contain_records(field.type) then
                             -- copy it later - may depend on parts we didn't build yet
                             insert(defaults, copy_schema_location_info() or '?')
@@ -935,7 +935,7 @@ build_ir = function(from, to, mem, imatch)
                 end
             end
             for fi, f in ipairs(to.fields) do
-                if f.default then
+                if f.default ~= nil then
                     defaults           = defaults or {}
                     defaults[bnot(fi)] = f.type
                     defaults[fi]       = f.default
