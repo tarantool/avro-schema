@@ -100,6 +100,7 @@ struct schema_il_Opcode {
     static const int ENDVAR      = 0xf6;
 
     static const int CHECKOBUF   = 0xf7;
+    static const int ISSETLABEL  = 0xff;
 
     static const unsigned NILREG  = 0xffffffff;
 };
@@ -147,7 +148,8 @@ local op2str = {
     [opcode.ISMAP      ] = 'ISMAP      ',   [opcode.ISNUL      ] = 'ISNUL      ',
     [opcode.LENIS      ] = 'LENIS      ',   [opcode.ISSET      ] = 'ISSET      ',
     [opcode.ISNOTSET   ] = 'ISNOTSET   ',   [opcode.BEGINVAR   ] = 'BEGINVAR   ',
-    [opcode.ENDVAR     ] = 'ENDVAR     ',   [opcode.CHECKOBUF  ] = 'CHECKOBUF  '
+    [opcode.ENDVAR     ] = 'ENDVAR     ',   [opcode.CHECKOBUF  ] = 'CHECKOBUF  ',
+    [opcode.ISSETLABEL ] = 'ISSETLABEL '
 }
 
 local function opcode_new(op)
@@ -290,7 +292,7 @@ local il_methods = {
         return o
     end,
     ----------------------------------------------------------------
-    isset       = opcode_ctor_ipv(opcode.ISSET),
+    isset       = opcode_ctor_ripv_ipv_ipo(opcode.ISSET),
     isnotset    = opcode_ctor_ipv(opcode.ISNOTSET),
     beginvar    = opcode_ctor_ipv(opcode.BEGINVAR),
     endvar      = opcode_ctor_ipv(opcode.ENDVAR),
@@ -302,7 +304,7 @@ local il_methods = {
         return o
     end
     ----------------------------------------------------------------
-    -- sbranch, putstrc, putbinc and putxc are instance methods
+    -- sbranch, putstrc, putbinc, putxc and issetlabel are instance methods
 }
 
 -- visualize register
@@ -348,17 +350,17 @@ local function opcode_vis(o, objs)
         return format('%s %d,\t%s', opname, o.name, rvis(o.ipv))
     elseif o.op == opcode.IBRANCH then
         return format('%s %d', opname, o.ci)
-    elseif o.op == opcode.SBRANCH then
+    elseif o.op == opcode.SBRANCH or o.op == opcode.ISSETLABEL then
         return format('%s %s', opname, cvis(o.cref, objs))
     elseif o.op == opcode.IFSET or (
-           o.op >= opcode.ISSET and o.op <= opcode.ENDVAR) then
+           o.op >= opcode.ISNOTSET and o.op <= opcode.ENDVAR) then
         return format('%s %s', opname, rvis(o.ipv))
     elseif o.op == opcode.STRSWITCH or (
            o.op >= opcode.ISBOOL and o.op <= opcode.ISNUL) then
         return format('%s [%s]', opname, rvis(o.ipv, o.ipo))
     elseif o.op == opcode.OBJFOREACH then
         return format('%s %s,\t[%s],\t%d', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), o.step)
-    elseif o.op == opcode.MOVE then
+    elseif o.op == opcode.MOVE or o.op == opcode.ISSET then
         return format('%s %s,\t%s', opname, rvis(o.ripv), rvis(o.ipv, o.ipo))
     elseif o.op == opcode.SKIP or o.op == opcode.PSKIP then
         return format('%s %s,\t[%s]', opname, rvis(o.ripv), rvis(o.ipv, o.ipo))
@@ -555,7 +557,7 @@ local function vexecute(il, scope, o, res)
     local fixipo = 0
     if (o.op == opcode.CALLFUNC or
        o.op >= opcode.STRSWITCH and o.op <= opcode.PSKIP or
-       o.op >= opcode.PUTBOOL and o.op <= opcode.LENIS or
+       o.op >= opcode.PUTBOOL and o.op <= opcode.ISSET or
        o.op == opcode.CHECKOBUF) and o.ipv ~= opcode.NILREG then
 
         local vinfo = vlookup(scope, o.ipv)
@@ -1146,8 +1148,14 @@ if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then error("type error",
                 insert(res, format('if r.v[%s].xlen ~= %d then error("length error", 0) end',
                                    varref(o.ipv, o.ipo, varmap), o.len))
             elseif o.op == opcode.ISSET     then
-                insert(res, format('if %s == 0 then error("field missing", 0) end',
-                                   varref(o.ipv, 0, varmap)))
+                local label
+                local nexto = block[i+1]
+                if type(nexto) == 'cdata' and nexto.op == opcode.ISSETLABEL then
+                    label = il.cderef(nexto.cref)
+                    skiptill = i + 2
+                end
+                insert(res, format('if %s == 0 then error("field missing: %s", 0) end',
+                                   varref(o.ripv, 0, varmap), label))
             elseif o.op == opcode.ISNOTSET  then
                 insert(res, format('if %s ~= 0 then error("duplicate field", 0) end',
                                    varref(o.ipv, 0, varmap)))
@@ -1357,6 +1365,11 @@ local function il_create()
         putxc = function(offset, cx)
             local o = opcode_new(opcode.PUTXC)
             o.offset = offset; o.cref = cref(cx)
+            return o
+        end,
+        issetlabel = function(cs)
+            local o = opcode_new(opcode.ISSETLABEL)
+            o.cref = cref(cs)
             return o
         end,
     ----------------------------------------------------------------

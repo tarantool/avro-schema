@@ -349,8 +349,9 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
         end
     end
     local parser_block = emit_rec_flatten_pass2(context, ir, tree,
-                                                ripv, ipv, ipo)
-    local generator_block = emit_rec_flatten_pass3(context, ir, tree, 1)
+                                                nil, ipv, ipo)
+    local generator_block = emit_rec_flatten_pass3(context, ir, tree, 1,
+                                                   ipv, ipo)
     local vlocell = context.vlocell
     local maxcell = context.maxcell
     if vlocell == maxcell then -- update $0
@@ -362,7 +363,8 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
         il.putarrayc(0, maxcell - 1),
         init_block,
         parser_block,
-        generator_block
+        generator_block,
+        il.skip(ripv, ipv, ipo)
     }
 end
 
@@ -487,7 +489,8 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
                     if not ir_record_ioptional(ir, i) then
                         -- we aren't going to see this var during pass3
-                        insert(code, il.isset(fieldvar))
+                        insert(code, il.isset(fieldvar, ipv, ipo))
+                        insert(code, il.issetlabel(inames[i]))
                         insert(code, il.endvar(fieldvar))
                     end
                 end
@@ -504,7 +507,7 @@ end
 -- filled at this point (defaults and/or values stored by the parser),
 -- however $0 wasn't incremented yet.
 -- Computes context.maxcell - total number of cells, plus 1.
-emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
+emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
     local defaults = context.defaults
@@ -524,7 +527,8 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
         elseif not ds then -- it's mandatory
             tbranch = {}
             insert(code, {
-                il.isset(fieldvar),
+                il.isset(fieldvar, ipv, ipo),
+                il.issetlabel(onames[o]),
                 tbranch,
                 il.endvar(fieldvar)
             })
@@ -582,7 +586,8 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell)
             fieldirt = ir_type(fieldir)
             if fieldirt == 'RECORD' then
                 insert(tbranch, emit_rec_flatten_pass3(context, fieldir,
-                                                       tree[o], curcell))
+                                                       tree[o], curcell,
+                                                       fieldvar, 0))
                 curcell = context.maxcell
             elseif fieldrt == 'UNION' then
                 assert(false, 'NYI: union')
