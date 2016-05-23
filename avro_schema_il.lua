@@ -1086,8 +1086,9 @@ local function emit_lua_block(ctx, block, cc, res)
                                    varref(o.ripv, 0, varmap), pos, pos))
             elseif o.op == opcode.PSKIP     then
                 local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format('%s = %s+1+r.b2[r.t[%s]-%d]*(r.v[%s].xoff-1)',
-                                   varref(o.ripv, 0, varmap), pos, pos,
+                insert(res, format('%s = %s+r.b2[r.t[%s]-%d]*(r.v[%s].xoff-1)',
+                                   varref(o.ripv, 0, varmap),
+                                   varref(o.ipv, o.ipo + 1, varmap), pos,
                                    il.cpool_add('\0\0\0\0\0\0\0\0\0\0\0\1\1'), pos))
             -----------------------------------------------------------
             elseif o.op == opcode.PUTBOOLC  then
@@ -1279,16 +1280,15 @@ emit_nested_lua_block = function(ctx, block, cc, res)
 end
 
 local lua_locals_tab = {
-    [0] = 'local x%0d',
-    'local x%0d, x%0d',
-    'local x%0d, x%0d, x%0d',
-    'local x%0d, x%0d, x%0d, x%0d'
+    [0] = 'local x%d',
+    'local x%d, x%d',
+    'local x%d, x%d, x%d'
 }
 
 local function emit_lua_func_body(il, func, res) --> patchpos1, patchpos2, S-by-freq
     local nlocals, varmap = sched_func_variables(func)
     for i = 1, nlocals, 4 do
-        insert(res, format(lua_locals_tab[nlocals - i] or lua_locals_tab[3],
+        insert(res, format(lua_locals_tab[nlocals - i] or 'local x%d, x%d, x%d, x%d',
                            i, i+1, i+2, i+3))
     end
     local patchpos1 = #res
