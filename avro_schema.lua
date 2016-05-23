@@ -303,6 +303,25 @@ local function get_types(schema_h)
     end
 end
 
+local export_helper
+export_helper = function(node, already_built)
+    if type(node) ~= 'table' then
+        return node
+    elseif already_built[node] then
+        return node.name
+    else
+        already_built[node] = true
+        local res = {}
+        for k, v in pairs(node) do
+            res[k] = export_helper(v, already_built)
+        end
+        return res
+    end
+end
+local function export(schema_h)
+    return export_helper(get_schema(schema_h), {})
+end
+
 return {
     are_compatible = are_compatible,
     create         = create,
@@ -310,5 +329,6 @@ return {
     get_names      = get_names,
     get_types      = get_types,
     is             = is_schema,
-    validate       = validate
+    validate       = validate,
+    export         = export
 }

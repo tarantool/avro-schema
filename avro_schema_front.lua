@@ -115,7 +115,7 @@ local function checkaliases(schema, ns, scope)
         return
     end
     local aliases = {}
-    for _, alias in ipairs(xaliases) do
+    for aliasno, alias in ipairs(xaliases) do
         alias = tostring(alias)
         if not validfullname(alias) then
             copy_schema_error('Bad type name: %s', alias)
@@ -124,7 +124,7 @@ local function checkaliases(schema, ns, scope)
         if scope[alias] then
             copy_schema_error('Alias type name already defined: %s', alias)
         end
-        aliases[alias] = 1
+        aliases[aliasno] = alias
         scope[alias] = true
     end
     return aliases
@@ -350,7 +350,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     symbolmap[symbol] = symbolno
                     res.symbols[symbolno] = symbol
                 end
-                dcache[res] = u
+                dcache[res] = symbolmap
                 return res
             elseif xtype == 'array' then
                 res = { type = 'array' }
@@ -563,6 +563,18 @@ local function create_enum_symbol_map(enum)
             res[s] = si
         end
         dcache[enum] = res
+    end
+    return res
+end
+
+local function create_aliases_set(aliases)
+    local res = dcache[aliases]
+    if not res then
+        res = {}
+        for i = 1, #aliases do
+            res[aliases[i]] = 1
+        end
+        dcache[aliases] = res
     end
     return res
 end
@@ -785,10 +797,12 @@ build_ir = function(from, to, mem, imatch)
                 elseif type(tb) ~= 'table' or fb.type ~= tb.type then
                     -- mismatch
                 elseif from.name ~= to.name and imatch and (
-                       not from.aliases or not from.aliases[to.name]) then
+                       not from.aliases or
+                       not create_aliases_set(from.aliases)[to.name]) then
                     -- mismatch
                 elseif from.name ~= to.name and not imatch and (
-                       not to.aliases or not to.aliases[from.name]) then
+                       not to.aliases or
+                       not create_aliases_set(to.aliases)[from.name]) then
                     -- mismatch
                 else
                     bc[fbi], err = build_ir(fb, tb, mem, imatch)
@@ -839,11 +853,13 @@ build_ir = function(from, to, mem, imatch)
         end
         return { 'MAP', bc }
     elseif from.name ~= to.name and imatch and (
-           not from.aliases or not from.aliases[to.name]) then
+           not from.aliases or
+           not create_aliases_set(from.aliases)[to.name]) then
         return nil, build_ir_error(1, 'Types incompatible: %s and %s',
                                    from.name, to.name)
     elseif from.name ~= to.name and not imatch and (
-           not to.aliases or not to.aliases[from.name]) then
+           not to.aliases or
+           not create_aliases_set(to.aliases)[from.name]) then
         return nil, build_ir_error(1, 'Types incompatible: %s and %s',
                                    from.name, to.name)
     elseif from.type == 'fixed' then
