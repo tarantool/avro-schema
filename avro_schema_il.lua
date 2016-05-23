@@ -440,7 +440,8 @@ il_cleanup_helper = function(res, object)
                 il_cleanup_helper(res, object[i])
             end
         end
-    elseif object.op ~= opcode.MOVE or object.ripv ~= opcode.NILREG then
+    elseif object.op < opcode.MOVE and object.op > opcode.PSKIP or
+           object.ripv ~= opcode.NILREG then
         insert(res, object) -- elide NOPs (NOP is MOVE to NILREG)
     end
 end
@@ -1209,17 +1210,46 @@ if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then error("type error",
                 insert(res, 'error("name unknown", 0)')
                 insert(res, 'end')
             elseif head.op == opcode.OBJFOREACH then
-                local pos = varref(head.ipv, head.ipo, varmap)
                 local itervar = varref(head.ripv, 0, varmap)
-                insert(res, format('%s = %s',
-                                   itervar, varref(head.ipv, head.ipo + 1, varmap)))
-                insert(res, format('while %s ~= %s+r.v[%s].xoff do',
-                                   itervar, pos, pos))
-                emit_nested_lua_block(ctx, o, head, res)
                 if head.step ~= 0 then
-                    insert(res, format('%s = %s+%d', itervar, itervar, head.step))
+                    insert(res, format('for %s = %s, %s+r.v[%s].xoff, %d do', 
+                                       itervar,
+                                       varref(head.ipv, head.ipo+1, varmap),
+                                       varref(head.ipv, head.ipo-1, varmap),
+                                       varref(head.ipv, head.ipo, varmap),
+                                       head.step))
+                    emit_nested_lua_block(ctx, o, head, res)
+                    insert(res, 'end')
+                else
+                    local pos = varref(head.ipv, head.ipo, varmap)
+                    insert(res, format('%s = %s',
+                                    itervar, varref(head.ipv, head.ipo + 1, varmap)))
+                    insert(res, format('while %s ~= %s+r.v[%s].xoff do',
+                                    itervar, pos, pos))
+                    emit_nested_lua_block(ctx, o, head, res)
+                    if head.step ~= 0 then
+                        insert(res, format('%s = %s+%d', itervar, itervar, head.step))
+                    end
+                    insert(res, 'end')
+                    -- fuse OBJFOREACH + SKIP
+                    for lookahead = i+1, i+5 do
+                        local o = block[lookahead]
+                        if type(o) ~= 'cdata' then
+                            break
+                        elseif o.op == opcode.SKIP and
+                               o.ipv == head.ipv and o.ipo == head.ipo then
+                            if o.ripv ~= head.ripv then
+                                insert(res, format('%s = %s',
+                                                   varref(o.ripv, 0, varmap),
+                                                   varref(head.ripv, 0, varmap)))
+                            end
+                            skiptill = lookahead+1
+                            break
+                        elseif o.op ~= opcode.ENDVAR then
+                            break
+                        end
+                    end
                 end
-                insert(res, 'end')
             else
                 assert(false)
             end

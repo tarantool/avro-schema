@@ -143,19 +143,19 @@ linker = function(decode_proc, encode_proc)
         decode_proc(r, data)
         r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
         r.ot[0] = 11
-        local v000, v001 = f3(r, 1, 0)
-        r.ov[0].xlen = v001
-        return encode_proc(r, v000)
+        local v0, v1 = f3(r, 1, 0)
+        r.ov[0].xlen = v1
+        return encode_proc(r, v0)
     end
     return {
         flatten  = function(data)
-            return xpcall(flatten, eh_handler, data)
+            return pcall(flatten, data)
         end,
-        unflatten  = function(data, path)
-            return xpcall(unflatten, eh_handler, data, path)
+        unflatten  = function(data)
+            return pcall(unflatten, data)
         end,
-        xflatten  = function(data, path)
-            return xpcall(xflatten, eh_handler, data, path)
+        xflatten  = function(data)
+            return pcall(xflatten, data)
         end
     }
 end

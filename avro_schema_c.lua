@@ -238,9 +238,6 @@ local function objforeach(il, ripv, ipv, ipo, handler)
             handler(ripv)
         }
     else
-        -- note: it's possible to avoid trailing
-        -- MOVE in the case of ripv==ipv with a different
-        -- codegen. DON'T do that, harms CHECKOBUF optimisation.
         local lipv = il.id()
         return {
             il.beginvar(lipv),
@@ -248,7 +245,6 @@ local function objforeach(il, ripv, ipv, ipo, handler)
                 il.objforeach(lipv, ipv, ipo),
                 handler(lipv)
             },
-            il.move(ripv, lipv, 0),
             il.endvar(lipv)
         }
     end
@@ -283,7 +279,8 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
             il.move(0, 0, 1),
             objforeach(il, ripv, ipv, ipo, function(xipv)
                 return emit_convert(il, ir[2], xipv, xipv, 0)
-            end)
+            end),
+            il.skip(ripv, ipv, ipo)
         }
     elseif irt == 'MAP' then
         return {
@@ -299,7 +296,8 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
                     il.move(0, 0, 1),
                     emit_convert(il, ir[2], xipv, xipv, 1)
                 }
-            end)
+            end),
+            il.skip(ripv, ipv, ipo)
         }
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
@@ -328,13 +326,12 @@ local emit_rec_flatten_pass2
 local emit_rec_flatten_pass3
 local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
     assert(ir_type(ir) == 'RECORD')
-    local var_block, aux_block, defaults = {}, {}, {}
+    local var_block, defaults = {}, {}
     local context = {
         il = il,
         defaults = defaults,   -- [celli * 2 - 1] il_put* func,
                                -- [celli * 2]     argument
         var_block = var_block, -- variable declarations
-        aux_block = aux_block, -- certain field checks 
         vlocell = nil          -- first cell with a VLO
     }
     -- a shadow tree (keyed by o)
@@ -365,7 +362,6 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
         il.putarrayc(0, maxcell - 1),
         init_block,
         parser_block,
-        aux_block,
         generator_block
     }
 end
@@ -448,13 +444,14 @@ end
 -- Puts variable names in tree, replacing offsets (which are no longer needed).
 emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     local il = context.il
-    return {
+    local inames, i2o = ir_record_inames(ir), ir_record_i2o(ir)
+    local code = {
         il.ismap(ipv, ipo),
-        objforeach(il, ripv, ipv, ipo, function(xipv)
-            local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
-            local i2o = ir_record_i2o(ir)
+        '' -- the function passed to objforeach() below appends to code
+    }
+    code[2] = objforeach(il, ripv, ipv, ipo, function(xipv)
+            local bc = ir_record_bc(ir)
             local var_block = context.var_block
-            local aux_block = context.aux_block
             local switch = { il.strswitch(xipv, 0) }
             for i = 1, #inames do
                 local fieldir = bc[i]
@@ -468,40 +465,38 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     il.isnotset(fieldvar),
                     il.move(fieldvar, xipv, 1)
                 }
-                switch[i + 1] = branch
-                -- we aren't going to see this var during pass3
-                if not o and not ir_record_ioptional(ir, i) then
-                    insert(aux_block, {
-                        il.isset(fieldvar),
-                        il.endvar(fieldvar)
-                })
-                end
-                if fieldirt == 'RECORD' then
-                    if o then
-                        if not tree[o] then
-                            tree[o] = {}
-                        end
-                        tree[o][0] = fieldvar
+                if fieldirt == 'RECORD' and o then
+                    local childtree = tree[o]
+                    if not childtree then
+                        childtree = {}
+                        tree[o] = childtree
                     end
-                    insert(branch, emit_rec_flatten_pass2(context, fieldir, tree[o],
+                    childtree[0] = fieldvar
+                    insert(branch, emit_rec_flatten_pass2(context, fieldir, childtree,
                                                           xipv, xipv, 1))
                 elseif fieldirt == 'UNION' then
                     assert(false, 'NYI')
-                else
+                elseif targetcell then
                     tree[o] = fieldvar
-                    if targetcell then
-                        insert(branch, emit_patch(il, fieldir, xipv, xipv, 1,
-                                                  targetcell))
-                    elseif o then
-                        insert(branch, emit_check(il, fieldir, xipv, xipv, 1))
-                    else
-                        insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
+                    insert(branch, emit_patch(il, fieldir, xipv, xipv, 1,
+                                              targetcell))
+                elseif o then
+                    tree[o] = fieldvar
+                    insert(branch, emit_check(il, fieldir, xipv, xipv, 1))
+                else
+                    insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
+                    if not ir_record_ioptional(ir, i) then
+                        -- we aren't going to see this var during pass3
+                        insert(code, il.isset(fieldvar))
+                        insert(code, il.endvar(fieldvar))
                     end
                 end
-            end
+                switch[i + 1] = branch
+            end -- for i = 1, #inames do
             return { il.isstr(xipv, 0), switch }
-        end)
-    }
+    end)
+    insert(code, il.skip(ripv, ipv, ipo))
+    return code
 end
 
 -- Emit code generating the (flattened) output record.
@@ -849,38 +844,37 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     il.isnotset(fieldvar),
                     il.move(fieldvar, xipv, 1)
                 }
-                switch[i + 1] = branch
-                if fieldirt == 'RECORD' then
+                if fieldirt == 'RECORD' and o then
                     insert(branch, emit_rec_xflatten_pass2(context, fieldir,
                                                            tree and tree[o],
                                                            xipv, fieldvar, 0))
                 elseif fieldirt == 'UNION' then
                     assert(false, 'NYI')
+                elseif o then
+                    -- Note: this code motion is harmless
+                    -- (see emit_conver/emit_convert_unchecked);
+                    -- allows to keep CHECKOBUF optimiser simple.
+                    local convert = emit_convert(il, fieldir, xipv, xipv, 1)
+                    local typecheck = convert[1]
+                    convert[1] = il.nop()
+                    insert(branch, {
+                        typecheck,
+                        il.checkobuf(3),
+                        il.putarrayc(0, 3),
+                        il.putstrc(1, '='),
+                        il.putintc(2, tree[o]),
+                        il.move(counter, counter, 1),
+                        il.move(0, 0, 3),
+                        convert
+                    })
                 else
-                    if o then
-                        -- Note: this code motion is harmless
-                        -- (see emit_conver/emit_convert_unchecked);
-                        -- allows to keep CHECKOBUF optimiser simple.
-                        local convert = emit_convert(il, fieldir, xipv, xipv, 1)
-                        local typecheck = convert[1]
-                        convert[1] = il.nop()
-                        insert(branch, {
-                            typecheck,
-                            il.checkobuf(3),
-                            il.putarrayc(0, 3),
-                            il.putstrc(1, '='),
-                            il.putintc(2, tree[o]),
-                            il.move(counter, counter, 1),
-                            il.move(0, 0, 3),
-                            convert
-                        })
-                    else
-                        insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
-                    end
+                    insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
                 end
-            end
+                switch[i + 1] = branch
+            end -- for i = 1, #inames do
             return { il.isstr(xipv, 0), switch }
-        end)
+        end),
+        il.skip(ripv, ipv, ipo)
     }
 end
 
