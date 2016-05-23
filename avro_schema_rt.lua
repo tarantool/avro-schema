@@ -231,16 +231,59 @@ local function lua_encode(r, n)
     return msgpacklib_decode(ffi.string(r.t, r.rc))
 end
 
-local function err_type(r, pos, expected_type)
-    error('type error', 0)
+local extract_path
+extract_path = function(r, pos)
+    if pos == 0 then
+        return '', false
+    end
+    local res = {}
+    local iter = 1
+    local counter = 1
+    local ismap = r.t[0] == 12
+    while true do
+        local t = r.t[iter]
+        local xoff = t < 11 and 1 or r.v[iter].xoff
+        if iter + xoff > pos then
+            if not ismap then
+                insert(res, counter)
+            elseif counter % 2 == 0 and r.t[iter-1] == 8 then
+                insert(res, ffi.string(r.b1 - r.v[iter-1].xoff, r.v[iter-1].xlen))
+            else
+                return concat(res, '/'), true -- bad key
+            end
+            if iter == pos then
+                return concat(res, '/'), false
+            end
+            iter = iter + 1
+            counter = 1
+            ismap = t == 12
+        else
+            iter = iter + xoff
+            counter = counter + 1
+        end
+    end
 end
 
-local function err_length(r, pos, expected_length)
-    error('length error', 0)
+local function err_type(r, pos, etype)
+    local path, iskerror = extract_path(r, pos)
+    if iskerror then
+        error(format('/%s: Non-string key', path), 0)
+    else
+        error(format('/%s: Expected %d, encountered %d',
+                     path, etype, r.t[pos]), 0)
+    end
+end
+
+local function err_length(r, pos, elength)
+    local path = extract_path(r, pos)
+    local t = r.t[pos]
+    error(format('/%s: Expecting a %d of length %d. Encountered %s of length %d.',
+                 path, t, elength, t, r.v[pos].xlen), 0)
 end
 
 local function err_missing(r, pos, missing_name)
-    error('missing: '..missing_name, 0)
+    local path = extract_path(r, pos)
+    error(format('/%s: Key missing: %s', path, missing_name), 0)
 end
 
 local function err_duplicate(r, pos)
@@ -248,6 +291,12 @@ local function err_duplicate(r, pos)
 end
 
 local function err_value(r, pos)
+    local path, iskerror = extract_path(r, pos)
+    if iskerror and r.t[pos] == 8 then
+        error(format('/%s: Unknown Key: %s',
+                     path,
+                     ffi.string(r.b1-r.v[pos].xoff, r.v[pos].xlen)), 0)
+    end
     error('value', 0)
 end
 
@@ -262,5 +311,5 @@ return {
     err_length       = err_length,
     err_missing      = err_missing,
     err_duplicate    = err_duplicate,
-    err_name         = err_name
+    err_value        = err_value
 }
