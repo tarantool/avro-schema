@@ -190,10 +190,6 @@ local function vis_msgpack(input)
     return res
 end
 
-local function eh_handler(err, eh_table, regs)
-    return err
-end
-
 local regs = ffi.new('struct schema_rt_Regs')
 regs.t  = ffi.C.malloc(4096)
 regs.v  = ffi.C.malloc(4096*8)
@@ -235,12 +231,36 @@ local function lua_encode(r, n)
     return msgpacklib_decode(ffi.string(r.t, r.rc))
 end
 
+local function err_type(r, pos, expected_type)
+    error('type error', 0)
+end
+
+local function err_length(r, pos, expected_length)
+    error('length error', 0)
+end
+
+local function err_missing(r, pos, missing_name)
+    error('missing: '..missing_name, 0)
+end
+
+local function err_duplicate(r, pos)
+    error('duplicate', 0)
+end
+
+local function err_value(r, pos)
+    error('value', 0)
+end
+
 return {
     vis_msgpack      = vis_msgpack,
-    eh_handler       = eh_handler,
     regs             = regs,
     msgpack_encode   = msgpack_encode,
     msgpack_decode   = msgpack_decode,
     lua_encode       = lua_encode,
-    universal_decode = universal_decode
+    universal_decode = universal_decode,
+    err_type         = err_type,
+    err_length       = err_length,
+    err_missing      = err_missing,
+    err_duplicate    = err_duplicate,
+    err_name         = err_name
 }

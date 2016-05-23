@@ -1133,20 +1133,26 @@ local function emit_lua_block(ctx, block, cc, res)
                                    varref(o.ipv, o.ipo, varmap), opt[3]))
             -----------------------------------------------------------
             elseif o.op == opcode.ISBOOL    then
-                insert(res, format('if r.b2[r.t[%s]-%d] == 0 then error("type error", 0) end',
-                                   varref(o.ipv, o.ipo, varmap),
-                                   il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0')))
+                local pos = varref(o.ipv, o.ipo, varmap)
+                insert(res, format([[
+if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 2) end]],
+                                   pos,
+                                   il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0'),
+                                   pos))
             elseif o.op == opcode.ISINT     then
                 local pos = varref(o.ipv, o.ipo, varmap)
                 insert(res, format([[
-if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then error("type error", 0) end]],
-                                   pos, pos))
+if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 4) end]],
+                                   pos, pos, pos))
             elseif o.op >= opcode.ISLONG and o.op <= opcode.ISNUL then
-                insert(res, format('if r.t[%s] ~= %d then error("type error", 0) end',
-                                   varref(o.ipv, o.ipo, varmap), tab[o.op]))
+                local pos, t = varref(o.ipv, o.ipo, varmap), tab[o.op]
+                insert(res, format('if r.t[%s] ~= %d then rt_err_type(r, %s, %d) end',
+                                   pos, t, pos, t))
             elseif o.op == opcode.LENIS     then
-                insert(res, format('if r.v[%s].xlen ~= %d then error("length error", 0) end',
-                                   varref(o.ipv, o.ipo, varmap), o.len))
+                local pos = varref(o.ipv, o.ipo, varmap)
+                insert(res, format([[
+if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
+                                   pos, o.len, pos, o.len))
             elseif o.op == opcode.ISSET     then
                 local label
                 local nexto = block[i+1]
@@ -1154,11 +1160,14 @@ if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then error("type error",
                     label = il.cderef(nexto.cref)
                     skiptill = i + 2
                 end
-                insert(res, format('if %s == 0 then error("field missing: %s", 0) end',
-                                   varref(o.ripv, 0, varmap), label))
+                insert(res, format('if %s == 0 then rt_err_missing(r, %s, "%s") end',
+                                   varref(o.ripv, 0, varmap),
+                                   varref(o.ipv, o.ipo, varmap),
+                                   label))
             elseif o.op == opcode.ISNOTSET  then
-                insert(res, format('if %s ~= 0 then error("duplicate field", 0) end',
-                                   varref(o.ipv, 0, varmap)))
+                local pos = varref(o.ipv, o.ipo, varmap)
+                insert(res, format('if %s ~= 0 then rt_err_duplicate(r, %s) end',
+                                   pos, pos))
             -----------------------------------------------------------
             elseif o.op == opcode.BEGINVAR  then
                 if not elidevarinit(block, i) then
@@ -1215,7 +1224,7 @@ if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then error("type error",
                     emit_nested_lua_block(ctx, branch, link, res)
                 end
                 insert(res, 'else')
-                insert(res, 'error("name unknown", 0)')
+                insert(res, format('rt_err_value(r, %s)', pos))
                 insert(res, 'end')
             elseif head.op == opcode.OBJFOREACH then
                 local itervar = varref(head.ripv, 0, varmap)

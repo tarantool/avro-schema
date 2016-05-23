@@ -102,13 +102,17 @@ local digest     = require('digest')
 local rt         = require('avro_schema_rt')
 local type       = type
 local error      = error
-local xpcall     = xpcall
+local pcall      = pcall
 local ffi_C      = ffi.C
 local ffi_cast   = ffi.cast
 local regs       = rt.regs
-local eh_handler = rt.eh_handler
+local rt_err_type      = rt.err_type
+local rt_err_length    = rt.err_length
+local rt_err_missing   = rt.err_missing
+local rt_err_duplicate = rt.err_duplicate
+local rt_err_value     = rt.err_value
 local linker
-local cpool     = digest.base64_decode([[]],
+local cpool      = digest.base64_decode([[]],
         '', -- @cpool_pos
         ']])',
     }
