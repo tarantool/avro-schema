@@ -1136,19 +1136,19 @@ local function emit_lua_block(ctx, block, cc, res)
             elseif o.op == opcode.ISBOOL    then
                 local pos = varref(o.ipv, o.ipo, varmap)
                 insert(res, format([[
-if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 2) end]],
+if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0xe8) end]],
                                    pos,
                                    il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0'),
                                    pos))
             elseif o.op == opcode.ISINT     then
                 local pos = varref(o.ipv, o.ipo, varmap)
                 insert(res, format([[
-if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 4) end]],
+if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 0xe9) end]],
                                    pos, pos, pos))
             elseif o.op >= opcode.ISLONG and o.op <= opcode.ISNUL then
                 local pos, t = varref(o.ipv, o.ipo, varmap), tab[o.op]
-                insert(res, format('if r.t[%s] ~= %d then rt_err_type(r, %s, %d) end',
-                                   pos, t, pos, t))
+                insert(res, format('if r.t[%s] ~= %d then rt_err_type(r, %s, 0x%x) end',
+                                   pos, t, pos, o.op))
             elseif o.op == opcode.LENIS     then
                 local pos = varref(o.ipv, o.ipo, varmap)
                 insert(res, format([[
