@@ -19,7 +19,7 @@ set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
 
 # Install module
 install(FILES avro_schema.lua avro_schema_c.lua avro_schema_front.lua
-              avro_schema_lir.lua avro_schema_rt.lua
+              avro_schema_il.lua avro_schema_rt.lua
         DESTINATION ${TARANTOOL_INSTALL_LUADIR})
 
 install(TARGETS avro_schema_rt_c LIBRARY
