@@ -1104,7 +1104,7 @@ local function emit_lua_block(ctx, block, cc, res)
                                    pos, tab[o.op], pos, o.ci))
             elseif o.op == opcode.PUTLONGC  then
                 local pos = varref(0, o.offset, varmap)
-                insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %dLL',
+                insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %s',
                                    pos, pos, o.cl))
             elseif o.op == opcode.PUTFLOATC or o.op == opcode.PUTDOUBLEC then
                 local pos = varref(0, o.offset, varmap)
