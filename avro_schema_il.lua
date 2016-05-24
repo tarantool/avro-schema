@@ -811,7 +811,7 @@ voptimizeblock = function(il, scope, block, res)
                 -- a condition has 2 branches, though empty ones are omitted;
                 -- if it's the case temporary restore the second branch
                 -- for the vmergebranches() to consider this execution path
-                if #o == 2 and head.o == opcode.IFSET then
+                if #o == 2 and head.op == opcode.IFSET then
                     bscopes[3] = { parent = scope }
                 end
                 vmergebranches(il, bscopes, bblocks)
