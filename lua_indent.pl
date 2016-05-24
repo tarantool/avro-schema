@@ -43,7 +43,7 @@ while (<>) {
 
   warn "WARNING: negative indentation at line $.: $orig\n" if $currIndent < 0;
 
-  print((length($orig) ? (INDENT x $currIndent) : ''), $orig, "\n")
+  print((length($orig) && $orig =~ m/^[^:]/ ? (INDENT x $currIndent) : ''), $orig, "\n")
     if $prevLength > 0 || length($orig) > 0; # this is to collapse empty lines
 
   $nextIndent += $brackets + $curly;

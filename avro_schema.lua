@@ -101,7 +101,6 @@ local ffi        = require('ffi')
 local digest     = require('digest')
 local rt         = require('avro_schema_rt')
 local type       = type
-local error      = error
 local pcall      = pcall
 local ffi_C      = ffi.C
 local ffi_cast   = ffi.cast
@@ -221,7 +220,9 @@ local function compile(...)
             file:write(lua_code)
             file:close()
         end
-        local linker          = loadstring(lua_code, '@<schema-jit>') ()
+        local module, err     = loadstring(lua_code, '@<schema-jit>')
+        if not module then error(err, 0) end
+        local linker          = module()
         local process_msgpack = linker(rt_universal_decode, rt_msgpack_encode)
         local process_lua     = linker(rt_universal_decode, rt_lua_encode)
         return true, {

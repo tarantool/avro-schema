@@ -984,6 +984,54 @@ local function sched_func_variables(func)
     return sched_variables_helper(func, 0, varmap, {}), varmap
 end
 
+-- Due to the quirks of the tracing JIT-compiler, it's
+-- beneficial to get rid of nested loops and to transform the code
+-- into a state-machine wrapped in the single top-level for loop.
+-- Also, for loop is far better than any other kind of a loop.
+-- Anyway, this transformation requires goto-s and in Lua goto
+-- is very restricted; basically one can't enter a block/scope
+-- via goto. For this reason we get rid of nested blocks if we
+-- are going to enter it via goto (we call it "peeling").
+
+-- The function adds 'peel' anotations to IL blocks. Also
+-- added are 'break_jit_trace' annotations.
+local peel_annotate
+peel_annotate = function(block, k)
+    if block.peel ~= nil then return end -- tree already processed
+    local peel = false
+    for i = 2, #block do
+        local o = block[i]
+        if type(o) == 'table' then
+            local head = o[1]
+            if head.op == opcode.IFSET or head.op == opcode.STRSWITCH then
+                -- too many conditionals in a row
+                if k >= 2 then o.break_jit_trace = true; k = 0; peel = true end
+                local nk = 0
+                for j = 2, #o do
+                    local branch = o[j]
+                    local bp, bk = peel_annotate(branch, k+1)
+                    peel = peel or bp
+                    if bk > nk then nk = bk end
+                end
+                k = nk
+            elseif head.op == opcode.OBJFOREACH then
+                k = 0
+                for j = 2, #o do
+                    if type(o[j]) == 'table' then
+                        peel_annotate(o, 0)
+                        o.peel = true
+                        peel = true
+                        break
+                    end
+                end
+            end
+        end
+    end
+    block.peel = peel
+    return peel, k
+end
+
+-- variable [ + offset]
 local function varref(ipv, ipo, map)
     local class = 'v'
     local override = map[ipv]
@@ -1018,6 +1066,42 @@ local function elidevarinit(block, i)
         end
     end
     return false
+end
+
+-- in OBJFOREACH iteration variable is undefined upon completion;
+-- the op is often followed by a SKIP to compute the position of the
+-- element following array/map. The later could be fused with OBJFOREACH,
+-- if in the resulting code the iteration variable has a well-defined
+-- value when the loop completes. (in Lua: consider while vs for loop)
+local function fuseskip(block, i, varmap)
+    local head = block[i][1]
+    for lookahead = i+1, i+5 do
+        local o = block[lookahead]
+        if type(o) ~= 'cdata' then
+            return i
+        elseif o.op == opcode.SKIP and
+               o.ipv == head.ipv and o.ipo == head.ipo then
+            if o.ripv ~= head.ripv then
+                return lookahead + 1, format('%s = %s',
+                                             varref(o.ripv, 0, varmap),
+                                             varref(head.ripv, 0, varmap))
+            end
+            return lookahead + 1
+        elseif o.op ~= opcode.ENDVAR then
+            return i
+        end
+    end
+end
+
+-- Break the current JIT trace in a gentle way.
+-- The trace successfully completes and it gets linked with
+-- the existing JIT-ed code.
+local function break_jit_trace(ctx, res)
+    local label = ctx.il.id()
+    insert(ctx.jit_trace_breaks, label)
+    insert(res, format('s = %d', label))
+    insert(res, 'goto continue -- break JIT trace')
+    insert(res, format('::l%d::', label))
 end
 
 local emit_lua_block_tab = {
@@ -1194,6 +1278,7 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
                 assert(false)
             end
         else
+            if o.break_jit_trace then break_jit_trace(ctx, res) end
             local head = o[1]
             local link = block[i+1] or cc
             if     head.op == opcode.IFSET then
@@ -1229,7 +1314,26 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
                 insert(res, 'end')
             elseif head.op == opcode.OBJFOREACH then
                 local itervar = varref(head.ripv, 0, varmap)
-                if head.step ~= 0 then
+                if o.peel or head.step == 0 then
+                    insert(res, format('%s = %s',
+                                       itervar,
+                                       varref(head.ipv, head.ipo + 1 - head.step, varmap)))
+                    local label = il.id(); labelmap[head] = label
+                    insert(res, format('::l%d::', label))
+                    break_jit_trace(ctx, res)
+                    if head.step ~= 0 then
+                        insert(res, format('%s = %s+%d', itervar, itervar, head.step))
+                    end
+                    local pos = varref(head.ipv, head.ipo, varmap)
+                    insert(res, format('if %s ~= %s+r.v[%s].xoff then',
+                                        itervar, pos, pos))
+                    emit_nested_lua_block(ctx, o, head, res)
+                    insert(res, 'end')
+                    local copystmt
+                    -- fuse OBJFOREACH / SKIP
+                    skiptill, copystmt = fuseskip(block, i, varmap)
+                    insert(res, copystmt)
+                else
                     insert(res, format('for %s = %s, %s+r.v[%s].xoff, %d do', 
                                        itervar,
                                        varref(head.ipv, head.ipo+1, varmap),
@@ -1238,35 +1342,6 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
                                        head.step))
                     emit_nested_lua_block(ctx, o, head, res)
                     insert(res, 'end')
-                else
-                    local pos = varref(head.ipv, head.ipo, varmap)
-                    insert(res, format('%s = %s',
-                                    itervar, varref(head.ipv, head.ipo + 1, varmap)))
-                    insert(res, format('while %s ~= %s+r.v[%s].xoff do',
-                                    itervar, pos, pos))
-                    emit_nested_lua_block(ctx, o, head, res)
-                    if head.step ~= 0 then
-                        insert(res, format('%s = %s+%d', itervar, itervar, head.step))
-                    end
-                    insert(res, 'end')
-                    -- fuse OBJFOREACH + SKIP
-                    for lookahead = i+1, i+5 do
-                        local o = block[lookahead]
-                        if type(o) ~= 'cdata' then
-                            break
-                        elseif o.op == opcode.SKIP and
-                               o.ipv == head.ipv and o.ipo == head.ipo then
-                            if o.ripv ~= head.ripv then
-                                insert(res, format('%s = %s',
-                                                   varref(o.ripv, 0, varmap),
-                                                   varref(head.ripv, 0, varmap)))
-                            end
-                            skiptill = lookahead+1
-                            break
-                        elseif o.op ~= opcode.ENDVAR then
-                            break
-                        end
-                    end
                 end
             else
                 assert(false)
@@ -1276,7 +1351,19 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
 end
 
 emit_nested_lua_block = function(ctx, block, cc, res)
-    return emit_lua_block(ctx, block, cc, res)
+    if not block.peel then
+        return emit_lua_block(ctx, block, cc, res)
+    end
+    local il = ctx.il
+    local labelmap, queue = ctx.labelmap, ctx.queue
+    local label = il.id()
+    labelmap[block] = label
+    if not labelmap[cc] then
+        labelmap[cc] = il.id()
+    end
+    insert(res, format('goto l%d', label))
+    insert(queue, block)
+    insert(queue, cc)
 end
 
 local lua_locals_tab = {
@@ -1285,34 +1372,74 @@ local lua_locals_tab = {
     'local x%d, x%d, x%d'
 }
 
-local function emit_lua_func_body(il, func, res) --> patchpos1, patchpos2, S-by-freq
+local function emit_lua_func_body(il, func, res)
     local nlocals, varmap = sched_func_variables(func)
     for i = 1, nlocals, 4 do
         insert(res, format(lua_locals_tab[nlocals - i] or 'local x%d, x%d, x%d, x%d',
                            i, i+1, i+2, i+3))
     end
+    peel_annotate(func, 0)
+    insert(res, '')
     local patchpos1 = #res
-    insert(res, '')
     local head = func[1]
-    local labelmap = { func = 1 }
-    local ctx = { il = il, varmap = varmap, labelmap = labelmap }
-    insert(res, '::l1::')
-    emit_lua_block(ctx, func, head, res)
-    local label = labelmap[head]
-    if label then
-        insert(res, '::l2::')
+    local labelmap, jit_trace_breaks = {}, {}
+    local queue = { func, head }
+    local ctx = {
+        il = il,
+        varmap = varmap,
+        labelmap = labelmap,
+        jit_trace_breaks = jit_trace_breaks,
+        queue = queue
+    }
+    local patchpos2
+    local emitpos = 0
+    while emitpos ~= #queue do
+        local n = emitpos + 1
+        emitpos = #queue
+        for i = n, emitpos, 2 do
+            local entry, cc = queue[i], queue[i+1]
+            local label = labelmap[entry]
+            insert(res, label and format('::l%d::', label))
+            emit_lua_block(ctx, entry, cc, res)
+            label = labelmap[cc]
+            if cc == head then
+                insert(res, label and format('::l%d::', label))
+                insert(res, '')
+                patchpos2 = #res
+            else
+                insert(res, format('goto l%d', label))
+            end
+        end
     end
-    insert(res, '')
-    local patchpos2 = #res
-    return patchpos1, patchpos2
+    return patchpos1, patchpos2, jit_trace_breaks
+end
+
+local function emit_jump_table(labels, res)
+    local kw = 'if'
+    for i = #labels, 1, -1 do
+        local l = labels[i]
+        insert(res, format('%s s == %d then', kw, l))
+        insert(res, format('goto l%d', l))
+        kw = 'elseif'
+    end
+    insert(res, 'end')
 end
 
 local function emit_lua_func(il, func, res)
     local head = func[1]
     insert(res, format('f%d = function(r, v0, v%d)', head.name, head.ipv))
     insert(res, 'local t')
-    local patchpos1, patchpos2 = emit_lua_func_body(il, func, res)
-    res[patchpos2] = format('return v0, v%d', head.ipv)
+    local tpos = #res
+    local patchpos1, patchpos2, jit_trace_breaks = emit_lua_func_body(il, func, res)
+    if next(jit_trace_breaks) then
+        local patch = { 'for _ = 1, 1000000000 do' }
+        emit_jump_table(jit_trace_breaks, patch)
+        res[patchpos1] = concat(patch, '\n')
+        res[tpos] = 'local s, t'
+        insert(res, '::continue::')
+        insert(res, 'end')
+    end
+    res[patchpos2] = format('do return v0, v%d end', head.ipv)
     insert(res, 'end')
 end
 ------------------------------------------------------------------------
