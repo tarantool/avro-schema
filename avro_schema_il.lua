@@ -368,11 +368,11 @@ local function opcode_vis(o, objs)
            o.op == opcode.PUTARRAYC or o.op == opcode.PUTMAPC then
         return format('%s [%s],\t%d', opname, rvis(0, o.offset), o.ci)
     elseif o.op == opcode.PUTLONGC then
-        return format('%s [%s],\t%d', opname, rvis(0, o.offset), o.cl)
+        return format('%s [%s],\t%s', opname, rvis(0, o.offset), o.cl)
     elseif o.op == opcode.PUTFLOATC or o.op == opcode.PUTDOUBLEC then
         return format('%s [%s],\t%f', opname, rvis(0, o.offset), o.cd)
     elseif o.op == opcode.PUTNULC then
-        return opname
+        return format('%s [%s]', opname, rvis(0, o.offset))
     elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC then
         return format('%s [%s],\t%s', opname, rvis(0, o.offset), cvis(o.cref, objs))
     elseif o.op == opcode.PUTXC then
