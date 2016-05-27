@@ -1142,6 +1142,115 @@ local emit_lua_block_tab = {
 
 local emit_nested_lua_block
 
+local function emit_lua_instruction(il, o, res, varmap)
+    local tab = emit_lua_block_tab -- just a shorter alias
+    if     o.op == opcode.CALLFUNC  then
+        insert(res, format('v0 = f%d(r, v0, %s)',
+                            o.func, varref(o.ipv, o.ipo, varmap)))
+    elseif o.op == opcode.MOVE      then
+        insert(res, format('%s = %s',
+                            varref(o.ripv, 0,     varmap),
+                            varref(o.ipv,  o.ipo, varmap)))
+    elseif o.op == opcode.SKIP      then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format('%s = %s+r.v[%s].xoff',
+                            varref(o.ripv, 0, varmap), pos, pos))
+    elseif o.op == opcode.PSKIP     then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format('%s = %s+r.b2[r.t[%s]-%d]*(r.v[%s].xoff-1)',
+                            varref(o.ripv, 0, varmap),
+                            varref(o.ipv, o.ipo + 1, varmap), pos,
+                            il.cpool_add('\0\0\0\0\0\0\0\0\0\0\0\1\1'), pos))
+    -----------------------------------------------------------
+    elseif o.op == opcode.PUTBOOLC  then
+        insert(res, format('r.ot[%s] = %d',
+                            varref(0, o.offset, varmap), o.ci == 0 and 2 or 3))
+    elseif o.op == opcode.PUTINTC then
+        local pos = varref(0, o.offset, varmap)
+        insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %d',
+                            pos, pos, o.ci))
+    elseif o.op == opcode.PUTARRAYC or o.op == opcode.PUTMAPC then
+        local pos = varref(0, o.offset, varmap)
+        insert(res, format('r.ot[%s] = %d; r.ov[%s].xlen = %d',
+                            pos, tab[o.op], pos, o.ci))
+    elseif o.op == opcode.PUTLONGC  then
+        local pos = varref(0, o.offset, varmap)
+        insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %s',
+                            pos, pos, o.cl))
+    elseif o.op == opcode.PUTFLOATC or o.op == opcode.PUTDOUBLEC then
+        local pos = varref(0, o.offset, varmap)
+        insert(res, format('r.ot[%s] = %d; r.ov[%s].dval = %f',
+                            pos, tab[o.op], pos, o.cd))
+    elseif o.op == opcode.PUTNULC   then
+        insert(res, format('r.ot[%s] = 1',
+                            varref(0, o.offset, varmap)))
+    elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC or
+            o.op == opcode.PUTXC     then
+        local pos = varref(0, o.offset, varmap)
+        local str = il.cderef(o.cref)
+        rtval.xlen = #str
+        rtval.xoff = il.cpool_add(str)
+        insert(res, format('r.ot[%s] = %d; r.ov[%s].uval = %s',
+                            pos, tab[o.op], pos, rtval.uval))
+    -----------------------------------------------------------
+    elseif o.op == opcode.PUTBOOL   then
+        insert(res, format('r.ot[%s] = r.t[%s]',
+                            varref(0,     o.offset, varmap),
+                            varref(o.ipv, o.ipo,    varmap)))
+    elseif o.op >= opcode.PUTINT and o.op <= opcode.PUTBIN2STR then
+        local pos = varref(0, o.offset, varmap)
+        local opt = tab[o.op]
+        insert(res, format('r.ot[%s] = %d; r.ov[%s].%s = r.v[%s].%s',
+                            pos, opt[1], pos, opt[2],
+                            varref(o.ipv, o.ipo, varmap), opt[3]))
+    -----------------------------------------------------------
+    elseif o.op == opcode.ISBOOL    then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format([[
+if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0xe8) end]],
+                            pos,
+                            il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0'),
+                            pos))
+    elseif o.op == opcode.ISINT     then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format([[
+if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 0xe9) end]],
+                            pos, pos, pos))
+    elseif o.op >= opcode.ISLONG and o.op <= opcode.ISNUL then
+        local pos, t = varref(o.ipv, o.ipo, varmap), tab[o.op]
+        insert(res, format('if r.t[%s] ~= %d then rt_err_type(r, %s, 0x%x) end',
+                            pos, t, pos, o.op))
+    elseif o.op == opcode.LENIS     then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format([[
+if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
+                            pos, o.len, pos, o.len))
+    elseif o.op == opcode.ISNOTSET  then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format('if %s ~= 0 then rt_err_duplicate(r, %s) end',
+                            pos, pos))
+    -----------------------------------------------------------
+    elseif o.op == opcode.ENDVAR    then
+    -----------------------------------------------------------
+    elseif o.op == opcode.CHECKOBUF then --[[
+        if     o.ipv == opcode.NILREG then
+            insert(res, format('t = v0+%d', o.offset))
+        elseif o.scale == 1 then
+            insert(res, format('t = v0+%d+r.v[%s].xlen',
+                                o.offset, varref(o.ipv, o.ipo, varmap)))
+        else
+            insert(res, format('t = v0+%d+r.v[%s].xlen*%d',
+                                o.offset, varref(o.ipv, o.ipo, varmap),
+                                o.scale))
+        end
+        -- TODO
+        insert(res, '-- checkobuf(t) ')]]
+    -----------------------------------------------------------
+    else
+        assert(false)
+    end
+end
+
 local function emit_lua_block(ctx, block, cc, res)
     local il =       ctx.il
     local varmap =   ctx.varmap   -- variable name -> local name
@@ -1157,88 +1266,7 @@ local function emit_lua_block(ctx, block, cc, res)
                              -- and set skiptill
         elseif type(o) == 'cdata' then
             local tab = emit_lua_block_tab -- just a shorter alias
-            if     o.op == opcode.CALLFUNC  then
-                insert(res, format('v0 = f%d(r, v0, %s)',
-                                   o.func, varref(o.ipv, o.ipo, varmap)))
-            elseif o.op == opcode.MOVE      then
-                insert(res, format('%s = %s',
-                                    varref(o.ripv, 0,     varmap),
-                                    varref(o.ipv,  o.ipo, varmap)))
-            elseif o.op == opcode.SKIP      then
-                local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format('%s = %s+r.v[%s].xoff',
-                                   varref(o.ripv, 0, varmap), pos, pos))
-            elseif o.op == opcode.PSKIP     then
-                local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format('%s = %s+r.b2[r.t[%s]-%d]*(r.v[%s].xoff-1)',
-                                   varref(o.ripv, 0, varmap),
-                                   varref(o.ipv, o.ipo + 1, varmap), pos,
-                                   il.cpool_add('\0\0\0\0\0\0\0\0\0\0\0\1\1'), pos))
-            -----------------------------------------------------------
-            elseif o.op == opcode.PUTBOOLC  then
-                insert(res, format('r.ot[%s] = %d',
-                                   varref(0, o.offset, varmap), o.ci == 0 and 2 or 3))
-            elseif o.op == opcode.PUTINTC then
-                local pos = varref(0, o.offset, varmap)
-                insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %d',
-                                   pos, pos, o.ci))
-            elseif o.op == opcode.PUTARRAYC or o.op == opcode.PUTMAPC then
-                local pos = varref(0, o.offset, varmap)
-                insert(res, format('r.ot[%s] = %d; r.ov[%s].xlen = %d',
-                                   pos, tab[o.op], pos, o.ci))
-            elseif o.op == opcode.PUTLONGC  then
-                local pos = varref(0, o.offset, varmap)
-                insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %s',
-                                   pos, pos, o.cl))
-            elseif o.op == opcode.PUTFLOATC or o.op == opcode.PUTDOUBLEC then
-                local pos = varref(0, o.offset, varmap)
-                insert(res, format('r.ot[%s] = %d; r.ov[%s].dval = %f',
-                                   pos, tab[o.op], pos, o.cd))
-            elseif o.op == opcode.PUTNULC   then
-                insert(res, format('r.ot[%s] = 1',
-                                   varref(0, o.offset, varmap)))
-            elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC or
-                   o.op == opcode.PUTXC     then
-                local pos = varref(0, o.offset, varmap)
-                local str = il.cderef(o.cref)
-                rtval.xlen = #str
-                rtval.xoff = il.cpool_add(str)
-                insert(res, format('r.ot[%s] = %d; r.ov[%s].uval = %s',
-                                   pos, tab[o.op], pos, rtval.uval))
-            -----------------------------------------------------------
-            elseif o.op == opcode.PUTBOOL   then
-                insert(res, format('r.ot[%s] = r.t[%s]',
-                                   varref(0,     o.offset, varmap),
-                                   varref(o.ipv, o.ipo,    varmap)))
-            elseif o.op >= opcode.PUTINT and o.op <= opcode.PUTBIN2STR then
-                local pos = varref(0, o.offset, varmap)
-                local opt = tab[o.op]
-                insert(res, format('r.ot[%s] = %d; r.ov[%s].%s = r.v[%s].%s',
-                                   pos, opt[1], pos, opt[2],
-                                   varref(o.ipv, o.ipo, varmap), opt[3]))
-            -----------------------------------------------------------
-            elseif o.op == opcode.ISBOOL    then
-                local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format([[
-if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0xe8) end]],
-                                   pos,
-                                   il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0'),
-                                   pos))
-            elseif o.op == opcode.ISINT     then
-                local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format([[
-if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 0xe9) end]],
-                                   pos, pos, pos))
-            elseif o.op >= opcode.ISLONG and o.op <= opcode.ISNUL then
-                local pos, t = varref(o.ipv, o.ipo, varmap), tab[o.op]
-                insert(res, format('if r.t[%s] ~= %d then rt_err_type(r, %s, 0x%x) end',
-                                   pos, t, pos, o.op))
-            elseif o.op == opcode.LENIS     then
-                local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format([[
-if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
-                                   pos, o.len, pos, o.len))
-            elseif o.op == opcode.ISSET     then
+            if o.op == opcode.ISSET     then
                 local label
                 local nexto = block[i+1]
                 if type(nexto) == 'cdata' and nexto.op == opcode.ISSETLABEL then
@@ -1249,33 +1277,13 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
                                    varref(o.ripv, 0, varmap),
                                    varref(o.ipv, o.ipo, varmap),
                                    label))
-            elseif o.op == opcode.ISNOTSET  then
-                local pos = varref(o.ipv, o.ipo, varmap)
-                insert(res, format('if %s ~= 0 then rt_err_duplicate(r, %s) end',
-                                   pos, pos))
             -----------------------------------------------------------
             elseif o.op == opcode.BEGINVAR  then
                 if not elidevarinit(block, i) then
                     insert(res, format('%s = 0', varref(o.ipv, 0, varmap)))
                 end
-            elseif o.op == opcode.ENDVAR    then
-            -----------------------------------------------------------
-            elseif o.op == opcode.CHECKOBUF then --[[
-                if     o.ipv == opcode.NILREG then 
-                    insert(res, format('t = v0+%d', o.offset))
-                elseif o.scale == 1 then
-                    insert(res, format('t = v0+%d+r.v[%s].xlen',
-                                       o.offset, varref(o.ipv, o.ipo, varmap)))
-                else
-                    insert(res, format('t = v0+%d+r.v[%s].xlen*%d',
-                                       o.offset, varref(o.ipv, o.ipo, varmap),
-                                       o.scale))
-                end
-                -- TODO
-                insert(res, '-- checkobuf(t) ')]]
-            -----------------------------------------------------------
             else
-                assert(false)
+                emit_lua_instruction(il, o, res, varmap)
             end
         else
             if o.break_jit_trace then break_jit_trace(ctx, res) end
@@ -1372,9 +1380,9 @@ local lua_locals_tab = {
     'local x%d, x%d, x%d'
 }
 
-local function emit_lua_func_body(il, func, res)
+local function emit_lua_func_body(il, func, nlocals_declared, res)
     local nlocals, varmap = sched_func_variables(func)
-    for i = 1, nlocals, 4 do
+    for i = 1 + (nlocals_declared or 0), nlocals, 4 do
         insert(res, format(lua_locals_tab[nlocals - i] or 'local x%d, x%d, x%d, x%d',
                            i, i+1, i+2, i+3))
     end
@@ -1425,21 +1433,52 @@ local function emit_jump_table(labels, res)
     insert(res, 'end')
 end
 
-local function emit_lua_func(il, func, res)
+-- result is configurable via opts:
+--  .func_decl           - cutomize function declaration
+--  .func_locals         - add more locals
+--  .func_return         - customize return
+--  .conversion_init     - custom code executed before conversion
+--  .conversion_complete - custom code executed after conversion
+--  .iter_prolog         - custom code executed on every loop iteration
+local function emit_lua_func(il, func, res, opts)
     local head = func[1]
-    insert(res, format('f%d = function(r, v0, v%d)', head.name, head.ipv))
+    local func_decl = opts and opts.func_decl or
+                      format('f%d = function(r, v0, v%d)', head.name, head.ipv)
+    local func_locals = opts and opts.func_locals
+    local func_return = opts and opts.func_return or
+                        format('do return v0 end', head.ipv)
+    local conversion_init     = opts and opts.conversion_init
+    local conversion_complete = opts and opts.conversion_complete
+    local iter_prolog = opts and opts.iter_prolog
+    local nlocals_declared = opts and opts.nlocals_declared
+
+    insert(res, func_decl)
+    insert(res, func_locals)
     insert(res, 'local t')
     local tpos = #res
-    local patchpos1, patchpos2, jit_trace_breaks = emit_lua_func_body(il, func, res)
+    local patchpos1, patchpos2, jit_trace_breaks =
+        emit_lua_func_body(il, func, nlocals_declared, res)
+    res[patchpos1] = conversion_init or ''
+    if conversion_complete then
+        local label = il.id()
+        insert(jit_trace_breaks, 1, label)
+        res[patchpos2] = format('%s\ns = %d\ngoto continue', conversion_complete, label)
+    else
+        res[patchpos2] = func_return
+    end
     if next(jit_trace_breaks) then
         local patch = { 'for _ = 1, 1000000000 do' }
+        insert(patch, iter_prolog)
         emit_jump_table(jit_trace_breaks, patch)
+        if conversion_complete then
+            patch[#patch - 1] = func_return
+        end
+        insert(patch, conversion_init)
         res[patchpos1] = concat(patch, '\n')
         res[tpos] = 'local s, t'
         insert(res, '::continue::')
         insert(res, 'end')
     end
-    res[patchpos2] = format('do return v0, v%d end', head.ipv)
     insert(res, 'end')
 end
 ------------------------------------------------------------------------
@@ -1522,11 +1561,14 @@ local function il_create()
         end,
         cleanup = il_cleanup,
         optimize = function(code) return voptimize(il, code) end,
-        emit_lua_func = function(func, res)
-            return emit_lua_func(il, func, res)
+        emit_lua_func = function(func, res, opts)
+            return emit_lua_func(il, func, res, opts)
         end,
-        emit_lua_func_body = function(func, res)
-            return emit_lua_func_body(il, func, res)
+        append_lua_code = function(code, res)
+            local varmap = {}
+            for i = 1, #code do
+                emit_lua_instruction(il, code[i], res, varmap)
+            end
         end
     }, { __index = il_methods })
     return il

@@ -815,12 +815,13 @@ copy_data:
         if (__builtin_expect(value->xoff == UINT32_MAX, 0)) {
             /* Offset is too big; next item contains explicit ptr. */
             memcpy(out, value[1].p, value->xlen);
+            out += value->xlen;
             value++;
             typeid++;
         } else {
             memcpy(out, copy_from - value->xoff, value->xlen);
+            out += value->xlen;
         }
-        out += value->xlen;
         copy_from = bank1;
         continue;
     }

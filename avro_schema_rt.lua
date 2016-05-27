@@ -14,6 +14,7 @@ ffi.cdef[[
 
 struct schema_rt_Value {
     union {
+        void          *p;
         int64_t        ival;
         uint64_t       uval;
         double         dval;

@@ -345,7 +345,7 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
     for i = 1, context.vlocell - 1 do
         local ilfunc = defaults[i * 2 - 1]
         if ilfunc then
-            insert(init_block, ilfunc(i, defaults[i * 2]))
+            insert(init_block, ilfunc(i - 1, defaults[i * 2]))
         end
     end
     local parser_block = emit_rec_flatten_pass2(context, ir, tree,
@@ -355,17 +355,16 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
     local vlocell = context.vlocell
     local maxcell = context.maxcell
     if vlocell == maxcell then -- update $0
-        insert(generator_block, il.move(0, 0, vlocell))
+        insert(generator_block, il.move(0, 0, vlocell - 1))
     end
     return {
         var_block,
         il.checkobuf(vlocell),
-        il.putarrayc(0, maxcell - 1),
         init_block,
         parser_block,
         generator_block,
         il.skip(ripv, ipv, ipo)
-    }
+    }, maxcell - 1
 end
 
 -- A subset of cells in the resulting flattened record
@@ -409,7 +408,7 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
 ::restart::
             fieldirt = ir_type(fieldir)
             if type(fieldir) ~= 'table' or fieldirt == 'FIXED' or fieldirt == 'ENUM' then
-            tree[o] = curcell
+                tree[o] = curcell - 1
                 curcell = curcell + 1
             elseif fieldirt == 'RECORD' then
                 local childtree = {}
@@ -567,7 +566,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
 
             if dsplit ~= dcells then -- after vlocell; append
                 if didcross then -- update $0
-                    insert(fbranch, il.move(0, 0, vlocell))
+                    insert(fbranch, il.move(0, 0, vlocell - 1))
                 end
                 insert(fbranch, il.checkobuf(dcells - dsplit))
                 for i = dsplit + 1, dcells do
@@ -593,7 +592,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
                 assert(false, 'NYI: union')
             elseif curcell >= vlocell then -- append
                 if curcell == vlocell then -- update $0
-                    insert(tbranch, il.move(0, 0, vlocell))
+                    insert(tbranch, il.move(0, 0, vlocell - 1))
                 end
                 insert(tbranch, emit_convert_unchecked(il, fieldir,
                                                        nil, fieldvar, 0))
@@ -615,11 +614,10 @@ local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
     assert(ir_type(ir) == 'RECORD')
     if not ripv then
         ripv = il.id()
+        local code, width = emit_rec_unflatten(il, ir, ripv, ipv, ipo)
         return {
-            il.beginvar(ripv),
-            emit_rec_unflatten(il, ir, ripv, ipv, ipo),
-            il.endvar(ripv)
-        }
+            il.beginvar(ripv), code, il.endvar(ripv)
+        }, width
     end
     local context = {
         il = il,
@@ -631,13 +629,11 @@ local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
     local tree = {}
     local parser_block = emit_rec_unflatten_pass1(context, ir, tree, 1, false)
     return {
-        il.isarray(ipv, ipo),
-        il.lenis(ipv, ipo, context.maxcell - 1),
-        il.move(ripv, ipv, ipo + 1),
-        parser_block,
+        il.move(ripv, ipv, ipo),
+        emit_rec_unflatten_pass1(context, ir, tree, 1, false),
         emit_rec_unflatten_pass2(context, ir, tree, 1) and
             emit_rec_unflatten_pass3(context, ir, tree, 1)
-    }
+    }, context.maxcell - 1
 end
 
 emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
@@ -779,13 +775,13 @@ end
 local emit_rec_xflatten_pass1
 local emit_rec_xflatten_pass2
 
-local function emit_rec_xflatten(il, ir, internal, ipv)
+local function emit_rec_xflatten(il, ir, n_svc_fields, ipv)
     assert(ir_type(ir) == 'RECORD')
     local counter = il.id()
     local var_block = {}
     local context = {
         il = il,
-        internal = internal,
+        n_svc_fields = n_svc_fields,
         var_block = var_block,
         counter = counter
     }
@@ -802,7 +798,7 @@ end
 emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
-    local internal = context.internal
+    local n_svc_fields = context.n_svc_fields
     for o = 1, #onames do
         local fieldir = bc[o2i[o]]
         if not fieldir then
@@ -810,7 +806,7 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
             curcell = curcell + prepare_flat_defaults_vec(context.il, ds, dv)
         else
             local fieldirt
-            tree[o] = curcell + internal
+            tree[o] = curcell + n_svc_fields
             fieldirt = ir_type(fieldir)
             if     fieldirt == 'RECORD' then
                 local ctree = {}
@@ -884,13 +880,13 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
 end
 
 -----------------------------------------------------------------------
-local function emit_code(il, ir)
-    local p1, p2, p3 = il.id(), il.id(), il.id()
+local function emit_code(il, ir, n_svc_fields)
+    local flatten, width = emit_rec_flatten(il, ir, nil, 1, 0)
     return il.cleanup({
-        { il.declfunc(1, p1), emit_rec_flatten  (il, ir, nil, p1, 0) },
-        { il.declfunc(2, p2), emit_rec_unflatten(il, ir, p2, p2, 0) },
-        { il.declfunc(3, p3), emit_rec_xflatten (il, ir, 0, p3) }
-    })
+        { il.declfunc(1, 1), flatten },
+        { il.declfunc(2, 1), (emit_rec_unflatten(il, ir, 1, 1, 0)) },
+        { il.declfunc(3, 1), emit_rec_xflatten (il, ir, n_svc_fields, 1) }
+    }), width
 end
 
 -----------------------------------------------------------------------
