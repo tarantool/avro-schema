@@ -1024,6 +1024,10 @@ peel_annotate = function(block, k)
                         break
                     end
                 end
+                if not o.peel and head.step == 0 then
+                    o.peel = true
+                    peel = true
+                end
             end
         end
     end

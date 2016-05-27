@@ -627,7 +627,6 @@ local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
         lastref = {}
     }
     local tree = {}
-    local parser_block = emit_rec_unflatten_pass1(context, ir, tree, 1, false)
     return {
         il.move(ripv, ipv, ipo),
         emit_rec_unflatten_pass1(context, ir, tree, 1, false),
