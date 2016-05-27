@@ -1380,10 +1380,14 @@ local lua_locals_tab = {
     'local x%d, x%d, x%d'
 }
 
-local function emit_lua_func_body(il, func, nlocals_declared, res)
+local function emit_lua_func_body(il, func, nlocals_min, res)
     local nlocals, varmap = sched_func_variables(func)
-    for i = 1 + (nlocals_declared or 0), nlocals, 4 do
-        insert(res, format(lua_locals_tab[nlocals - i] or 'local x%d, x%d, x%d, x%d',
+    if nlocals_min and nlocals_min > nlocals then
+        nlocals = nlocals_min
+    end
+    for i = 1, nlocals, 4 do
+        insert(res, format(lua_locals_tab[nlocals - i] or
+                           'local x%d, x%d, x%d, x%d',
                            i, i+1, i+2, i+3))
     end
     peel_annotate(func, 0)
@@ -1450,14 +1454,14 @@ local function emit_lua_func(il, func, res, opts)
     local conversion_init     = opts and opts.conversion_init
     local conversion_complete = opts and opts.conversion_complete
     local iter_prolog = opts and opts.iter_prolog
-    local nlocals_declared = opts and opts.nlocals_declared
+    local nlocals_min = opts and opts.nlocals_min
 
     insert(res, func_decl)
     insert(res, func_locals)
     insert(res, 'local t')
     local tpos = #res
     local patchpos1, patchpos2, jit_trace_breaks =
-        emit_lua_func_body(il, func, nlocals_declared, res)
+        emit_lua_func_body(il, func, nlocals_min, res)
     res[patchpos1] = conversion_init or ''
     if conversion_complete then
         local label = il.id()
