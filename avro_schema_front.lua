@@ -739,7 +739,8 @@ end
 local function validate_data(schema, data)
     -- return xpcall(copy_data, copy_data_eh, schema, data, {})
     -- LuaJit issue (?)
-    return pcall(copy_data, schema, data, {})
+    local ok, res = pcall(copy_data, schema, data, {})
+    return ok, res
 end
 
 copy_field_default = function(fieldtype, default)
