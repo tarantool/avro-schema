@@ -250,7 +250,7 @@ v0 = encode_proc(r, v0)]],
 end
 
 local expand_lua_template
-local function gen_lua_code(width, service_fields, il, il_code)
+local function gen_lua_code(width_in, width_out, service_fields, il, il_code)
     expand_lua_template = expand_lua_template or compile_template([=[
 -- v2.1
 local ffi        = require('ffi')
@@ -290,8 +290,8 @@ end
 return linker
 ]=])
     local inner_decls = {}
-    gen_lua_flatten(width, service_fields, il, il_code, inner_decls)
-    gen_lua_unflatten(width, service_fields, il, il_code, inner_decls)
+    gen_lua_flatten(width_out, service_fields, il, il_code, inner_decls)
+    gen_lua_unflatten(width_in, service_fields, il, il_code, inner_decls)
     gen_lua_xflatten(il, il_code, inner_decls)
 
     return expand_lua_template({
@@ -343,7 +343,7 @@ local function compile(...)
     else
         local il = il_create()
         local debug = args.debug
-        local il_code, width = c_emit_code(il, ir, #service_fields)
+        local il_code, width_in, width_out = c_emit_code(il, ir, #service_fields)
         if not debug then
             il_code = il.optimize(il_code)
         end
@@ -353,7 +353,7 @@ local function compile(...)
             file:write(il.vis(il_code))
             file:close()
         end
-        local lua_code = gen_lua_code(width, service_fields, il, il_code)
+        local lua_code = gen_lua_code(width_in, width_out, service_fields, il, il_code)
         local dump_src = args.dump_src
         if dump_src then
             local file = io.open(dump_src, 'w+')

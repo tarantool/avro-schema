@@ -880,12 +880,13 @@ end
 
 -----------------------------------------------------------------------
 local function emit_code(il, ir, n_svc_fields)
-    local flatten, width = emit_rec_flatten(il, ir, nil, 1, 0)
+    local flatten, width_out = emit_rec_flatten(il, ir, nil, 1, 0)
+    local unflatten, width_in = emit_rec_unflatten(il, ir, 1, 1, 0)
     return il.cleanup({
         { il.declfunc(1, 1), flatten },
-        { il.declfunc(2, 1), (emit_rec_unflatten(il, ir, 1, 1, 0)) },
+        { il.declfunc(2, 1), unflatten },
         { il.declfunc(3, 1), emit_rec_xflatten (il, ir, n_svc_fields, 1) }
-    }), width
+    }), width_in, width_out
 end
 
 -----------------------------------------------------------------------
