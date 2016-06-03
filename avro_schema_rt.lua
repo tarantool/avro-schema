@@ -1,10 +1,12 @@
 local ffi        = require('ffi')
+local bit        = require('bit')
 local msgpacklib = require('msgpack')
 
 local find, format = string.find, string.format
 local byte, sub = string.byte, string.sub
 local concat, insert = table.concat, table.insert
 local remove = table.remove
+local bor = bit.bor
 
 local ffi_cast = ffi.cast
 local msgpacklib_encode = msgpacklib and msgpacklib.encode
@@ -266,6 +268,14 @@ extract_path = function(r, pos)
 end
 
 local function err_type(r, pos, etype)
+    -- T==4(LONG) and (etype==0xea(ISFLOAT) or etype==0xeb(ISDOUBLE))
+    -- due to T range (1..12) and etype-s coding (232 + (0..9))
+    -- this check is robust
+    if r.t[pos] * bor(etype, 1) == 0x3ac then
+        r.t[pos] = 7 -- long 2 float
+        r.v[pos].dval = r.v[pos].ival
+        return
+    end
     local path, iskerror = extract_path(r, pos)
     if iskerror then
         error(format('/%s: Non-string key', path), 0)

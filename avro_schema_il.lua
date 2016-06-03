@@ -81,11 +81,12 @@ struct schema_il_Opcode {
     static const int PUTSTR2BIN  = 0xe6;
     static const int PUTBIN2STR  = 0xe7;
 
+    /* rt.err_type depends on these values */
     static const int ISBOOL      = 0xe8;
     static const int ISINT       = 0xe9;
-    static const int ISLONG      = 0xea;
-    static const int ISFLOAT     = 0xeb;
-    static const int ISDOUBLE    = 0xec;
+    static const int ISFLOAT     = 0xea;
+    static const int ISDOUBLE    = 0xeb;
+    static const int ISLONG      = 0xec;
     static const int ISSTR       = 0xed;
     static const int ISBIN       = 0xee;
     static const int ISARRAY     = 0xef;
@@ -1136,8 +1137,6 @@ local emit_lua_block_tab = {
     [opcode.PUTBIN2STR ] = {  8, 'uval',  'uval' },
     ----------------------- T
     [opcode.ISLONG     ] =  4,
-    [opcode.ISFLOAT    ] =  6,
-    [opcode.ISDOUBLE   ] =  7,
     [opcode.ISSTR      ] =  8,
     [opcode.ISBIN      ] =  9,
     [opcode.ISARRAY    ] = 11,
@@ -1220,6 +1219,13 @@ if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0xe8) end]],
         insert(res, format([[
 if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 0xe9) end]],
                             pos, pos, pos))
+    elseif o.op == opcode.ISFLOAT or o.op == opcode.ISDOUBLE then
+        local pos = varref(o.ipv, o.ipo, varmap)
+        insert(res, format([[
+if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0x%x) end]],
+                            pos,
+                            il.cpool_add('\0\0\0\0\0\0\1\1\0\0\0\0\0'),
+                            pos, o.op))
     elseif o.op >= opcode.ISLONG and o.op <= opcode.ISNUL then
         local pos, t = varref(o.ipv, o.ipo, varmap), tab[o.op]
         insert(res, format('if r.t[%s] ~= %d then rt_err_type(r, %s, 0x%x) end',
