@@ -17,9 +17,19 @@ add_library(avro_schema_rt_c SHARED avro_schema_rt.c)
 set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
                      "avro_schema_rt_c")
 
+# postprocess Lua file, replacing opcode.X named constants with values
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_il_.lua
+                   DEPENDS avro_schema_il.lua
+                   COMMAND ${CMAKE_SOURCE_DIR}/avro_schema_il_filt.sh
+                   ${CMAKE_SOURCE_DIR}/avro_schema_il.lua avro_schema_il_.lua)
+add_custom_target(postprocess_lua ALL DEPENDS ${CMAKE_BINARY_DIR}/avro_schema_il_.lua)
+
 # Install module
 install(FILES avro_schema.lua avro_schema_c.lua avro_schema_front.lua
-              avro_schema_il.lua avro_schema_rt.lua
+              avro_schema_rt.lua
+        DESTINATION ${TARANTOOL_INSTALL_LUADIR})
+
+install(FILES ${CMAKE_BINARY_DIR}/avro_schema_il_.lua RENAME avro_schema_il.lua
         DESTINATION ${TARANTOOL_INSTALL_LUADIR})
 
 install(TARGETS avro_schema_rt_c LIBRARY
