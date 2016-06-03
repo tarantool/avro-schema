@@ -234,8 +234,8 @@ local function lua_encode(r, n)
     return msgpacklib_decode(ffi.string(r.t, r.rc))
 end
 
-local extract_path
-extract_path = function(r, pos)
+local extract_location
+extract_location = function(r, pos)
     if pos == 0 then
         return '', false
     end
@@ -252,10 +252,12 @@ extract_path = function(r, pos)
             elseif counter % 2 == 0 and r.t[iter-1] == 8 then
                 insert(res, ffi.string(r.b1 - r.v[iter-1].xoff, r.v[iter-1].xlen))
             else
-                return concat(res, '/'), true -- bad key
+                return res[1] and format('%s: ', concat(res, '/')) or
+                       '', true -- bad key
             end
             if iter == pos then
-                return concat(res, '/'), false
+                return res[1] and format('%s: ', concat(res, '/')) or
+                       '', false
             end
             iter = iter + 1
             counter = 1
@@ -267,6 +269,12 @@ extract_path = function(r, pos)
     end
 end
 
+local etype2typename = {
+    [0xe8] = 'BOOL', [0xe9] = 'INT', [0xea] = 'FLOAT', [0xeb] = 'DOUBLE',
+    [0xec] = 'LONG', [0xed] = 'STR', [0xee] = 'BIN', [0xef] = 'ARRAY',
+    [0xf0] = 'MAP', [0xf1] = 'NIL'
+}
+
 local function err_type(r, pos, etype)
     -- T==4(LONG) and (etype==0xea(ISFLOAT) or etype==0xeb(ISDOUBLE))
     -- due to T range (1..12) and etype-s coding (232 + (0..9))
@@ -276,25 +284,29 @@ local function err_type(r, pos, etype)
         r.v[pos].dval = r.v[pos].ival
         return
     end
-    local path, iskerror = extract_path(r, pos)
+    local location, iskerror = extract_location(r, pos)
     if iskerror then
-        error(format('/%s: Non-string key', path), 0)
+        error(format('%sNon-string key', location), 0)
+    elseif etype == 0xe9 and r.t[pos] == 4 then
+        error(format('%sValue exceeds INT range: %s',
+                     location, r.v[pos].ival), 0)
     else
-        error(format('/%s: Expected %d, encountered %d',
-                     path, etype, r.t[pos]), 0)
+        error(format('%sExpected %s, encountered %s',
+                     location, etype2typename[etype],
+                     typenames[r.t[pos]]), 0)
     end
 end
 
 local function err_length(r, pos, elength)
-    local path = extract_path(r, pos)
-    local t = r.t[pos]
-    error(format('/%s: Expecting a %d of length %d. Encountered %s of length %d.',
-                 path, t, elength, t, r.v[pos].xlen), 0)
+    local location = extract_location(r, pos)
+    local t = typenames[r.t[pos]]
+    error(format('%sExpecting %s of length %d. Encountered %s of length %d.',
+                 location, t, elength, t, r.v[pos].xlen), 0)
 end
 
 local function err_missing(r, pos, missing_name)
-    local path = extract_path(r, pos)
-    error(format('/%s: Key missing: %s', path, missing_name), 0)
+    local location = extract_location(r, pos)
+    error(format('%sKey missing: %s', location, missing_name), 0)
 end
 
 local function err_duplicate(r, pos)
@@ -302,10 +314,10 @@ local function err_duplicate(r, pos)
 end
 
 local function err_value(r, pos)
-    local path, iskerror = extract_path(r, pos)
+    local location, iskerror = extract_location(r, pos)
     if iskerror and r.t[pos] == 8 then
-        error(format('/%s: Unknown Key: %s',
-                     path,
+        error(format('%sUnknown Key: %s',
+                     location,
                      ffi.string(r.b1-r.v[pos].xoff, r.v[pos].xlen)), 0)
     end
     error('value', 0)
