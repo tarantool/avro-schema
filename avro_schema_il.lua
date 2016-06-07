@@ -414,7 +414,7 @@ il_vis_helper = function(res, il, indentcache, level, object)
     end
 end
 local function il_vis(il, root)
-    res = {}
+    local res = {}
     il_vis_helper(res, il, {}, 0, root)
     if res[1] == '\n' then res[1] = '' end
     insert(res, '\n')
@@ -686,7 +686,7 @@ local function vprepareloop(il, scope, lblock, block)
         local vinfo = vlookup(scope, vid)
         if vinfo.inc > 0 then
             insert(block, il.move(vid, vid, vinfo.inc))
-            info = vcreate(scope, vid)
+            local info = vcreate(scope, vid)
             info.gen = il.id()
             info.inc = 0
         end

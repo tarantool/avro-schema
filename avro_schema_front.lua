@@ -83,7 +83,7 @@ local function checkname(schema, ns, scope)
     if find(xname, '%.') then
         ns = gsub(xname, '%.[^.]*$', '')
     else
-        xns = schema.namespace
+        local xns = schema.namespace
         if xns then
             ns = tostring(xns)
             xname = format('%s.%s', xns, xname)

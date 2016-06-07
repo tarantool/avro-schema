@@ -37,8 +37,8 @@ end
 local ir_by_key        = setmetatable( {}, { __mode = 'v' } )
 
 local function get_ir(from_schema, to_schema, inverse)
-    k = format('%s%p.%p', inverse and '-' or '', from_schema, to_schema)
-    ir = ir_by_key[k]
+    local k = format('%s%p.%p', inverse and '-' or '', from_schema, to_schema)
+    local ir = ir_by_key[k]
     if ir then
         if type(ir) == 'table' and ir[1] == 'ERR' then
             return false, ir[2]

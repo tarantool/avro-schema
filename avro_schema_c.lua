@@ -140,7 +140,7 @@ prepare_flat_defaults_vec_helper = function(il, schema, val, res, curcell)
     end
 end
 local function prepare_flat_defaults_vec(il, schema, val)
-    res = {}
+    local res = {}
     return prepare_flat_defaults_vec_helper(il, schema, val, res, 1) - 1, res
 end
 
@@ -588,7 +588,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
                                                        tree[o], curcell,
                                                        fieldvar, 0))
                 curcell = context.maxcell
-            elseif fieldrt == 'UNION' then
+            elseif fieldirt == 'UNION' then
                 assert(false, 'NYI: union')
             elseif curcell >= vlocell then -- append
                 if curcell == vlocell then -- update $0
@@ -651,7 +651,7 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
                                                   childtree, curcell,
                                                   hidden or ir_record_ohidden(ir, i2o[i])))
             curcell = context.maxcell
-        elseif fieldrt == 'UNION' then
+        elseif fieldirt == 'UNION' then
             assert(false, 'NYI: union')
         elseif i2o[i] and not ir_record_ohidden(ir, i2o[i]) and not hidden then
             tree[i] = curcell
@@ -830,7 +830,7 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
             local inames, bc = ir_record_inames(ir), ir_record_bc(ir)
             local i2o = ir_record_i2o(ir)
             local var_block = context.var_block
-            counter = context.counter
+            local counter = context.counter
             local switch = { il.strswitch(xipv, 0) }
             for i = 1, #inames do
                 local fieldir = bc[i]
