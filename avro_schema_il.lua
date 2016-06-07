@@ -9,8 +9,6 @@ local format, rep    = string.format, string.rep
 local insert, remove = table.insert, table.remove
 local concat         = table.concat
 
-local rtval          = ffi.new('struct schema_rt_Value')
-
 ffi.cdef([[
 struct schema_il_Opcode {
     struct {
@@ -1188,13 +1186,16 @@ local function emit_lua_instruction(il, o, res, varmap)
         insert(res, format('r.ot[%s] = 1',
                             varref(0, o.offset, varmap)))
     elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC or
-            o.op == opcode.PUTXC     then
+           o.op == opcode.PUTXC     then
         local pos = varref(0, o.offset, varmap)
         local str = il.cderef(o.cref)
-        rtval.xlen = #str
-        rtval.xoff = il.cpool_add(str)
-        insert(res, format('r.ot[%s] = %d; r.ov[%s].uval = %s',
-                            pos, tab[o.op], pos, rtval.uval))
+        -- Note: 64 bit constants are slowing down JIT compilation due to
+        --       O(n) search in 64 bit const pool, init xlen/xoff separately
+        --       instead of doing uval at once
+        insert(res, format([[
+r.ot[%s] = %d; r.ov[%s].xlen = %d; r.ov[%s].xoff = %d]],
+                           pos, tab[o.op],
+                           pos, #str, pos, il.cpool_add(str)))
     -----------------------------------------------------------
     elseif o.op == opcode.PUTBOOL   then
         insert(res, format('r.ot[%s] = r.t[%s]',
