@@ -737,10 +737,7 @@ local function copy_data_eh(err)
 end
 
 local function validate_data(schema, data)
-    -- return xpcall(copy_data, copy_data_eh, schema, data, {})
-    -- LuaJit issue (?)
-    local ok, res = pcall(copy_data, schema, data, {})
-    return ok, res
+    return xpcall(copy_data, copy_data_eh, schema, data, {})
 end
 
 copy_field_default = function(fieldtype, default)
