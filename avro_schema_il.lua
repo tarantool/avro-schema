@@ -1313,7 +1313,7 @@ t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
         insert(res, stmt) -- no samples from the string
     else
         local len_min = band(0xff, rshift(func, 8*(3-band(a, 0x3))))
-        insert(res, format('t = 0\nif r.v[%s].xlen > %d then -- %x',
+        insert(res, format('if r.v[%s].xlen > %d then -- %x',
                            pos, len_min, func))
         insert(res, stmt)
         insert(res, "end")
