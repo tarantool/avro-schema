@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <malloc.h>
 #include <assert.h>
 
 enum TypeId {
@@ -886,13 +885,13 @@ error_badcode:
  * 0x0fp1p2p3
  *
  * A chunk of random data is passed explicitly (i.e. random/size_random.)
- * The function gets n Nul-terminated strings.
+ * The function gets n ASCII-Z strings.
  */
 uint32_t create_hash_func(int n, const unsigned char *strings[],
                           const unsigned char *random, size_t size_random)
 {
     /*
-     * Select sampling position with a simple greedy algorithm:
+     * Select sampling positions with a simple greedy algorithm:
      * 1) initially, all strings are in the same collision domain;
      * 2) for each valid position, count collisions -
      *    eg: let strings be { 'March', 'May' },
@@ -918,22 +917,20 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
     if (n == 0) return 0;
 
     /*
-     * mem: int32_t probes[256] | n*2 int32_t slots  (filling sample_pos[])
-     * mem: n*2 int32_t slots | bitmap               (collisions_found?)
-     * Note: having *probes* aligned makes rebuilding collision domains
-     *       marginally faster.
+     * mem: int32_t probes[128] | n*2 int32_t slots (sel. sampling pos-s)
+     * mem: n*2 int32_t slots | bitmap              (collisions_found?)
      */
 #define BITMAP_SIZE(n) \
     (sizeof(uint64_t) * ((n) + 63) / 64)
 
     size_t bitmap_size = BITMAP_SIZE(n * 2);
-    size_t probes_size = 256 * sizeof(int32_t);
-    mem = memalign(16, (n * 2) * sizeof(int32_t) +
-                   (bitmap_size > probes_size ? bitmap_size : probes_size));
+    size_t probes_size = 128 * sizeof(int32_t);
+    mem = malloc((n * 2) * sizeof(int32_t) +
+                 (bitmap_size > probes_size ? bitmap_size : probes_size));
     if (mem == NULL)
         return 0;
     uint32_t * const probes  = mem;
-    uint32_t * const slots   = probes + 256;
+    uint32_t * const slots   = probes + 128;
     uint32_t *       indices = slots;
 
     /* semi-arbitrary limit, hard max is MAX_INT32 / 257
@@ -950,7 +947,7 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
         indices[i] = i;
     indices[n-1] = DOMAIN_END_BIT | (n - 1);
 
-    memset(probes, 0, 256 * sizeof probes[0]);
+    memset(probes, 0, 128 * sizeof probes[0]);
 pick_next_sample:
     gen = 1;
     collisions_min = n + 1;
@@ -963,7 +960,7 @@ pick_next_sample:
             unsigned probe;
 
             if (pos == -1) {
-                probe = strlen(str) & 0xff;
+                probe = 0x7f & strlen(str);
             } else {
                 probe = str[pos];
                 if (str[pos] == 0) goto save_best_pos;
@@ -974,7 +971,7 @@ pick_next_sample:
             else
                 probes[probe] = gen;
 
-            if (idx & DOMAIN_END_BIT) gen++; /* end of a collision domain */
+            gen += (idx >> 31); /* end of a collision domain? */
         }
         /* did we improve? */
         if (collisions < collisions_min) {
@@ -1033,7 +1030,7 @@ sort_sample_pos:
     uint32_t *next_indices = (indices == slots ? slots + n : slots);
 
     /* reuse probes for collision counters */
-    memset(probes, 0, 256 * sizeof probes[0]); gen = 1;
+    memset(probes, 0, 128 * sizeof probes[0]); gen = 1;
     for (i = 0; i < n; ) {
         int j, end;
         uint64_t map, map_copy;
@@ -1050,8 +1047,8 @@ sort_sample_pos:
             const uint32_t idx = indices[j];
             const char * const str = strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
-                              (0xff & strlen(str)) : str[best_pos]);
-            map |= (uint64_t)1 << (probe / 4);
+                              (0x7f & strlen(str)) : str[best_pos]);
+            map |= (uint64_t)1 << (probe / 2);
             probes[probe]++;
             if (idx & DOMAIN_END_BIT) {
                 /* the end of the original collision domain */
@@ -1068,11 +1065,9 @@ sort_sample_pos:
         /* assign output positions for new collision domains */
         map_copy = map;
         while (map_copy) {
-            int pos = 4 * (unsigned)__builtin_ctzll(map_copy);
+            int pos = 2 * (unsigned)__builtin_ctzll(map_copy);
             i = probes[pos] += i;
             i = probes[pos+1] += i;
-            i = probes[pos+2] += i;
-            i = probes[pos+3] += i;
             map_copy &= map_copy - 1;
         }
         /* copy */
@@ -1080,13 +1075,13 @@ sort_sample_pos:
             const uint32_t idx = indices[j];
             const char * const str = strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
-                              (0xff & strlen(str)) : str[best_pos]);
+                              (0x7f & strlen(str)) : str[best_pos]);
             next_indices[--probes[probe]] = idx;
         }
         /* zero out entries we touched */
         while (map) {
-            int pos = 4 * (unsigned)__builtin_ctzll(map);
-            probes[pos] = probes[pos+1] = probes[pos+2] = probes[pos+3] = 0;
+            int pos = 2 * (unsigned)__builtin_ctzll(map);
+            probes[pos] = probes[pos+1] = 0;
             map &= map - 1;
         }
     }
