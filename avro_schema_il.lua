@@ -1391,21 +1391,25 @@ local function emit_lua_block(ctx, block, cc, res)
                     local head = branch[1]
                     assert(head.op == opcode.SBRANCH)
                     local str = il.cderef(head.cref)
+                    local if_or_elseif = i == 2 and 'if' or 'elseif'
                     if func ~= 0 then
-                        insert(res, format('%s t == %d then',
-                                           i == 2 and 'if' or 'elseif',
+                        insert(res, format('%s t == %d then', if_or_elseif,
                                            rt_C.eval_hash_func(func, str, #str)))
-                        insert(res, format([[
-if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then
-    rt_err_value(r, %s)
-end]],
-                                           pos, #str, pos, il.cpool_add(str), #str, pos))
-
+                        if func == 0x04000000 then -- hash == xlen, don't check again
+                            insert(res, format([[
+if ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]],
+                                               pos, il.cpool_add(str), #str))
+                        else
+                            insert(res, format([[
+if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]],
+                                               pos, #str, pos, il.cpool_add(str), #str))
+                        end
+                        insert(res, format('rt_err_value(r, %s)\nend', pos))
                     else
                         insert(res, format([[
 %s r.v[%s].xlen == %d and ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) == 0 then]],
-                                           i == 2 and 'if' or 'elseif',
-                                           pos, #str, pos, il.cpool_add(str), #str))
+                                           if_or_elseif, pos, #str,
+                                           pos, il.cpool_add(str), #str))
                     end
                     emit_nested_lua_block(ctx, branch, link, res)
                 end

@@ -956,7 +956,7 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
     memset(probes, 0, 256 * sizeof probes[0]);
 pick_next_sample:
     gen = 1;
-    collisions_min = n;
+    collisions_min = n + 1;
     /* don't consider len again if already using it */
     for (pos = use_len - 1; pos < 256; pos++) {
         int collisions = 0;
@@ -979,9 +979,8 @@ pick_next_sample:
 
             if (idx & DOMAIN_END_BIT) gen++; /* end of a collision domain */
         }
-        /* did we improve? <= is important because initially best_pos
-         * has a bogus value */
-        if (collisions <= collisions_min) {
+        /* did we improve? */
+        if (collisions < collisions_min) {
             collisions_min = collisions;
             best_pos = pos;
         }
