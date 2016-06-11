@@ -1283,9 +1283,9 @@ local emit_compute_hash_func_tab = {
     [0x0a] = 't = bor(r.b1[%d-r.v[%s].xoff], lshift(r.b1[%d-r.v[%s].xoff], 8))',
     [0x0b] = 't = bor(r.b1[%d-r.v[%s].xoff], bor(lshift(r.b1[%d-r.v[%s].xoff], 8), lshift(r.b1[%d-r.v[%s].xoff], 16)))',
     [0x0c] = 't = r.v[%s].xlen',
-    [0x0d] = 't = bor(band(255, r.v[%s].xlen), lshift(r.b1[%d-r.v[%s].xoff], 8))',
-    [0x0e] = 't = bor(band(255, r.v[%s].xlen), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), lshift(r.b1[%d-r.v[%s].xoff], 16)))',
-    [0x0f] = 't = bor(bor(band(255, r.v[%s].xlen), lshift(r.b1[%d-r.v[%s].xoff], 8)), bor(lshift(r.b1[%d-r.v[%s].xoff], 16), lshift(r.b1[%d-r.v[%s].xoff], 24)))'
+    [0x0d] = 't = bor(lshift(r.v[%s].xlen, 8), r.b1[%d-r.v[%s].xoff])',
+    [0x0e] = 't = bor(lshift(r.v[%s].xlen, 16), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))',
+    [0x0f] = 't = bor(bor(lshift(r.v[%s].xlen, 24), lshift(r.b1[%d-r.v[%s].xoff], 16)), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))'
 }
 
 local function emit_compute_hash_func(func, pos, res)

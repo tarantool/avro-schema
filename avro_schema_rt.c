@@ -878,8 +878,8 @@ error_badcode:
  * 0x07p1p2p3
  *
  * 0x09p1     - length? and up to 3 positions, result is 32bit
- * 0x0ap1p2     a1 | (a2 << 8) | (a3 << 16) | (a4 << 24),
- * 0x0bp1p2p3   unused a-s (arguments) set to 0, length is a1
+ * 0x0ap1p2     see eval_hash_func()
+ * 0x0bp1p2p3
  * 0x0c
  * 0x0dp1
  * 0x0ep1p2
@@ -893,7 +893,6 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
 {
     /*
      * Select sampling position with a simple greedy algorithm:
-     *
      * 1) initially, all strings are in the same collision domain;
      * 2) for each valid position, count collisions -
      *    eg: let strings be { 'March', 'May' },
@@ -920,9 +919,7 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
 
     /*
      * mem: int32_t probes[256] | n*2 int32_t slots  (filling sample_pos[])
-     * mem: n*2 int32_t slots | bitmap               (checking the final
-     *                                                hash func for
-     *                                                collisions)
+     * mem: n*2 int32_t slots | bitmap               (collisions_found?)
      * Note: having *probes* aligned makes rebuilding collision domains
      *       marginally faster.
      */
@@ -941,7 +938,7 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
 
     /* semi-arbitrary limit, hard max is MAX_INT32 / 257
      * (larger size causes generation counter to wrap)
-     * Note: it's highly unlikely we will ever get a huge string set;
+     * Note: it's highly unlikely we'll ever get a huge string set;
      *       if we do, it makes sense to have character *COLUMNS*
      *       in continuous memory (aka transpose) for improved memory
      *       access pattern, not implemented.
@@ -995,7 +992,7 @@ save_best_pos:
 
     if (collisions_min == 0) {
         uint32_t func;
-        // Found a solution, sort sample_pos[] first
+        /* Found a solution, sort sample_pos[] first */
 sort_sample_pos:
         if (sample_pos[0] > sample_pos[1]) {
             int temp = sample_pos[0];
@@ -1164,11 +1161,11 @@ eval_hash_func(uint32_t func, const unsigned char *str, size_t len)
     case 0xc:
         return len;
     case 0xd:
-        return (0xff & len) | (str[a] << 8);
+        return (len << 8) | str[a];
     case 0xe:
-        return (0xff & len) | (str[a] << 8) | (str[b] << 16);
+        return (len << 16) | (str[a] << 8) | str[b];
     case 0xf:
-        return (0xff & len) | (str[a] << 8) | (str[b] << 16) | (str[c] << 24);
+        return (len << 24) | (str[a] << 16) | (str[b] << 8) | str[c];
     }
 }
 
@@ -1221,7 +1218,7 @@ collisions_found(uint32_t func, int n, const unsigned char *strings[],
                 /* bucket used; maybe a collision */
                 if (buckets[index] == hash) return 1;
             } else {
-                /* mark buket as used and store hash */
+                /* mark bucket as used and store hash */
                 bitmap[index / 64] |= mask;
                 buckets[index] = hash;
                 break;
