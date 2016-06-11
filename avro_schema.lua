@@ -257,7 +257,6 @@ local ffi        = require('ffi')
 local bit        = require('bit')
 local digest     = require('digest')
 local rt         = require('avro_schema_rt')
-local type       = type
 local pcall      = pcall
 local bor, band  = bit.bor, bit.band
 local lshift     = bit.lshift
