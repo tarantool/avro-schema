@@ -1271,17 +1271,17 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
 end
 
 local emit_compute_hash_func_tab = {
-    [0x01] = 't = r.b1[%d-r.v[%s].xoff]',
-    [0x02] = 't = r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
-    [0x03] = 't = r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x01] = 't = r.b1[-r.v[%s].xoff+%d]',
+    [0x02] = 't = r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]',
+    [0x03] = 't = r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]',
     [0x04] = 't = r.v[%s].xlen',
     [0x05] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]',
     [0x06] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
     [0x07] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
     [0x08] = 't = 0',
-    [0x09] = 't = r.b1[%d-r.v[%s].xoff]',
-    [0x0a] = 't = bor(r.b1[%d-r.v[%s].xoff], lshift(r.b1[%d-r.v[%s].xoff], 8))',
-    [0x0b] = 't = bor(r.b1[%d-r.v[%s].xoff], bor(lshift(r.b1[%d-r.v[%s].xoff], 8), lshift(r.b1[%d-r.v[%s].xoff], 16)))',
+    [0x09] = 't = r.b1[-r.v[%s].xoff+%d]',
+    [0x0a] = 't = bor(lshift(r.b1[-r.v[%s].xoff+%d], 8), r.b1[-r.v[%s].xoff+%d])',
+    [0x0b] = 't = bor(lshift(r.b1[-r.v[%s].xoff+%d], 16), bor(lshift(r.b1[-r.v[%s].xoff+%d], 8), r.b1[-r.v[%s].xoff+%d]))',
     [0x0c] = 't = r.v[%s].xlen',
     [0x0d] = 't = bor(lshift(r.v[%s].xlen, 8), r.b1[%d-r.v[%s].xoff])',
     [0x0e] = 't = bor(lshift(r.v[%s].xlen, 16), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))',
@@ -1301,20 +1301,14 @@ t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
     local b = band(0xff, rshift(func, 16))
     local c = band(0xff, rshift(func,  8))
     local d = band(0xff, func)
-    local stmt
-    if band(a, 0x4) == 0 then
-        stmt = format(emit_compute_hash_func_tab[a],
-                      b, pos, c, pos, d, pos)
-    else
-        stmt = format(emit_compute_hash_func_tab[a],
-                      pos, b, pos, c, pos, d, pos)
-    end
+    local stmt = format(emit_compute_hash_func_tab[a],
+                        pos, b, pos, c, pos, d, pos)
     if band(a, 0x3) == 0 then
         insert(res, stmt) -- no samples from the string
     else
-        local len_min = band(0xff, rshift(func, 8*(3-band(a, 0x3))))
+        local idx_max = band(0xff, rshift(func, 8*(3-band(a, 0x3))))
         insert(res, format('if r.v[%s].xlen > %d then -- %x',
-                           pos, len_min, func))
+                           pos, idx_max, func))
         insert(res, stmt)
         insert(res, "end")
     end

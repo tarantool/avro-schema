@@ -1155,9 +1155,9 @@ eval_hash_func(uint32_t func, const unsigned char *str, size_t len)
     case 0x9:
         return str[a];
     case 0xa:
-        return str[a] | (str[b] << 8);
+        return (str[a] << 8) | str[b];
     case 0xb:
-        return str[a] | (str[b] << 8) | (str[c] << 16);
+        return (str[a] << 16) | (str[b] << 8) | str[c];
     case 0xc:
         return len;
     case 0xd:
