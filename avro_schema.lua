@@ -254,13 +254,17 @@ local function gen_lua_code(width_in, width_out, service_fields, il, il_code)
     expand_lua_template = expand_lua_template or compile_template([=[
 -- v2.1
 local ffi        = require('ffi')
+local bit        = require('bit')
 local digest     = require('digest')
 local rt         = require('avro_schema_rt')
 local type       = type
 local pcall      = pcall
+local bor, band  = bit.bor, bit.band
+local lshift     = bit.lshift
 local ffi_C      = ffi.C
 local ffi_cast   = ffi.cast
 local ffi_string = ffi.string
+local rt_C       = ffi.load(rt.C_path)
 local rt_regs          = rt.regs
 local rt_err_type      = rt.err_type
 local rt_err_length    = rt.err_length

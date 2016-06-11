@@ -68,6 +68,16 @@ unparse_msgpack(size_t            nitems,
                 uint8_t          *stock_buf,
                 uint8_t         **msgpack_out);
 
+int32_t
+create_hash_func(int n, const char *strings[],
+                 const char *random, size_t size_random);
+
+int32_t
+eval_hash_func(int32_t func, const unsigned char *str, size_t len);
+
+int32_t
+eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
+
 void *malloc(size_t);
 void  free(void *);
 int   memcmp(const void *, const void *, size_t);
@@ -75,8 +85,9 @@ int   memcmp(const void *, const void *, size_t);
 ]]
 
 local null        = ffi_cast('void *', 0)
-local schema_rt_C = ffi.load(package.searchpath('avro_schema_rt_c',
-                                                package.cpath))
+local rt_C_path   = package.searchpath('avro_schema_rt_c',
+                                     package.cpath)
+local rt_C        = ffi.load(rt_C_path)
 
 --
 -- vis_msgpack
@@ -142,7 +153,7 @@ local function vis_msgpack(input)
     local typeid_out = ffi.new('uint8_t *[1]');
     local value_out  = ffi.new('struct schema_rt_Value *[1]')
     
-    local rc = schema_rt_C.parse_msgpack(
+    local rc = rt_C.parse_msgpack(
         input, #input, 0, null, null, typeid_out, value_out)
 
     if rc < 0 then
@@ -201,14 +212,14 @@ regs.ov = ffi.C.malloc(512*8)
 
 local function msgpack_decode(r, s)
     local r = regs
-    if schema_rt_C.parse_msgpack(s, #s, 4096, r.t, r.v, r.t_, r.v_) < 0 then
+    if rt_C.parse_msgpack(s, #s, 4096, r.t, r.v, r.t_, r.v_) < 0 then
         error('Malformed msgpack data', 0)
     end
     r.b1 = ffi_cast("const uint8_t *", s) + #s
 end
 
 local function msgpack_encode(r, n)
-    r.rc = schema_rt_C.unparse_msgpack(n, r.ot, r.ov, r.b1, r.b2, 4096, r.t, r.t_)
+    r.rc = rt_C.unparse_msgpack(n, r.ot, r.ov, r.b1, r.b2, 4096, r.t, r.t_)
     if r.rc < 0 then
         error('Internal error', 0)
     end
@@ -220,14 +231,14 @@ local function universal_decode(r, s)
     if type(s) ~= 'string' then
         s = msgpacklib_encode(s)
     end
-    if schema_rt_C.parse_msgpack(s, #s, 4096, r.t, r.v, r.t_, r.v_) < 0 then
+    if rt_C.parse_msgpack(s, #s, 4096, r.t, r.v, r.t_, r.v_) < 0 then
         error('Malformed msgpack data', 0)
     end
     r.b1 = ffi_cast("const uint8_t *", s) + #s
 end
 
 local function lua_encode(r, n)
-    r.rc = schema_rt_C.unparse_msgpack(n, r.ot, r.ov, r.b1, r.b2, 4096, r.t, r.t_)
+    r.rc = rt_C.unparse_msgpack(n, r.ot, r.ov, r.b1, r.b2, 4096, r.t, r.t_)
     if r.rc < 0 then
         error('Internal error', 0)
     end
@@ -324,6 +335,10 @@ local function err_value(r, pos)
 end
 
 return {
+    -- don't expose C library (unsafe),
+    -- but let module user to load it herself (if she can)
+    C_path           = rt_C_path,
+
     vis_msgpack      = vis_msgpack,
     regs             = regs,
     msgpack_encode   = msgpack_encode,

@@ -2,12 +2,20 @@ local ffi            = require('ffi')
 local json           = require('json')
 local msgpack        = require('msgpack')
 local rt             = require('avro_schema_rt')
+local digest         = require('digest')
+local bit            = require('bit')
+local rt_C           = ffi.load(rt.C_path)
 local json_encode    = json and json.encode
 local msgpack_decode = msgpack and msgpack.decode
 local ffi_new        = ffi.new
 local format, rep    = string.format, string.rep
 local insert, remove = table.insert, table.remove
 local concat         = table.concat
+local band, rshift   = bit.band, bit.rshift
+
+local random_bytes   = digest.base64_decode([[
+X1CntcveBDc4inHKyWfyXw5iCjg1f3TmeX88pZ2Galb9tXpTt1uBO0pZrkU5NW1/4Ki9g8fAwElq
+B3dRsBscsg==]])
 
 ffi.cdef([[
 struct schema_il_Opcode {
@@ -1262,6 +1270,56 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
     end
 end
 
+local emit_compute_hash_func_tab = {
+    [0x01] = 't = r.b1[%d-r.v[%s].xoff]',
+    [0x02] = 't = r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x03] = 't = r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x04] = 't = r.v[%s].xlen',
+    [0x05] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]',
+    [0x06] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x07] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x08] = 't = 0',
+    [0x09] = 't = r.b1[%d-r.v[%s].xoff]',
+    [0x0a] = 't = bor(r.b1[%d-r.v[%s].xoff], lshift(r.b1[%d-r.v[%s].xoff], 8))',
+    [0x0b] = 't = bor(r.b1[%d-r.v[%s].xoff], bor(lshift(r.b1[%d-r.v[%s].xoff], 8), lshift(r.b1[%d-r.v[%s].xoff], 16)))',
+    [0x0c] = 't = r.v[%s].xlen',
+    [0x0d] = 't = bor(band(255, r.v[%s].xlen), lshift(r.b1[%d-r.v[%s].xoff], 8))',
+    [0x0e] = 't = bor(band(255, r.v[%s].xlen), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), lshift(r.b1[%d-r.v[%s].xoff], 16)))',
+    [0x0f] = 't = bor(bor(band(255, r.v[%s].xlen), lshift(r.b1[%d-r.v[%s].xoff], 8)), bor(lshift(r.b1[%d-r.v[%s].xoff], 16), lshift(r.b1[%d-r.v[%s].xoff], 24)))'
+}
+
+local function emit_compute_hash_func(func, pos, res)
+    if func == 0 then
+        return
+    elseif func > 0x0f000000 then
+        insert(res, format([[
+t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
+                      rt_C.eval_hash_func(func, '', 0), pos, pos))
+        return
+    end
+    local a = rshift(func, 24)
+    local b = band(0xff, rshift(func, 16))
+    local c = band(0xff, rshift(func,  8))
+    local d = band(0xff, func)
+    local stmt
+    if band(a, 0x4) == 0 then
+        stmt = format(emit_compute_hash_func_tab[a],
+                      b, pos, c, pos, d, pos)
+    else
+        stmt = format(emit_compute_hash_func_tab[a],
+                      pos, b, pos, c, pos, d, pos)
+    end
+    if band(a, 0x3) == 0 then
+        insert(res, stmt) -- no samples from the string
+    else
+        local len_min = band(0xff, rshift(func, 8*(3-band(a, 0x3))))
+        insert(res, format('t = 0\nif r.v[%s].xlen > %d then -- %x',
+                           pos, len_min, func))
+        insert(res, stmt)
+        insert(res, "end")
+    end
+end
+
 local function emit_lua_block(ctx, block, cc, res)
     local il =       ctx.il
     local varmap =   ctx.varmap   -- variable name -> local name
@@ -1316,16 +1374,39 @@ local function emit_lua_block(ctx, block, cc, res)
                 end
                 insert(res, 'end')
             elseif head.op == opcode.STRSWITCH then
-                local pos = varref(head.ipv, head.ipo, varmap)
+                local strings = ffi_new('const char *[?]', #o - 1)
                 for i = 2, #o do
                     local branch = o[i]
                     local head = branch[1]
                     assert(head.op == opcode.SBRANCH)
                     local str = il.cderef(head.cref)
-                    insert(res, format([[
+                    strings[i - 2] = str
+                end
+                local func = rt_C.create_hash_func(#o - 1, strings,
+                                                   random_bytes, #random_bytes)
+                local pos = varref(head.ipv, head.ipo, varmap)
+                emit_compute_hash_func(func, pos, res)
+                for i = 2, #o do
+                    local branch = o[i]
+                    local head = branch[1]
+                    assert(head.op == opcode.SBRANCH)
+                    local str = il.cderef(head.cref)
+                    if func ~= 0 then
+                        insert(res, format('%s t == %d then',
+                                           i == 2 and 'if' or 'elseif',
+                                           rt_C.eval_hash_func(func, str, #str)))
+                        insert(res, format([[
+if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then
+    rt_err_value(r, %s)
+end]],
+                                           pos, #str, pos, il.cpool_add(str), #str, pos))
+
+                    else
+                        insert(res, format([[
 %s r.v[%s].xlen == %d and ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) == 0 then]],
-                                       i == 2 and 'if' or 'elseif',
-                                       pos, #str, pos, il.cpool_add(str), #str))
+                                           i == 2 and 'if' or 'elseif',
+                                           pos, #str, pos, il.cpool_add(str), #str))
+                    end
                     emit_nested_lua_block(ctx, branch, link, res)
                 end
                 insert(res, 'else')
