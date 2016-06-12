@@ -912,13 +912,13 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
     int use_len = 0, sample_count = 0, sample_pos[4] = {256, 256, 256, 256};
     uint32_t gen;
     int best_pos, collisions_min;
-    int i, pos;
+    int n_active, i, pos, o, max_len = 256;
 
     if (n == 0) return 0;
 
     /*
-     * mem: int32_t probes[128] | n*2 int32_t slots (sel. sampling pos-s)
-     * mem: n*2 int32_t slots | bitmap              (collisions_found?)
+     * mem: int32_t probes[128] | int32_t slots[n*2] (sel. sampling pos-s)
+     * mem:  int32_t slots[n*2] | bitmap             (collisions_found?)
      */
 #define BITMAP_SIZE(n) \
     (sizeof(uint64_t) * ((n) + 63) / 64)
@@ -948,13 +948,14 @@ uint32_t create_hash_func(int n, const unsigned char *strings[],
     indices[n-1] = DOMAIN_END_BIT | (n - 1);
 
     memset(probes, 0, 128 * sizeof probes[0]);
+    n_active = n;
 pick_next_sample:
     gen = 1;
-    collisions_min = n + 1;
+    collisions_min = n_active + 1; best_pos = 0;
     /* don't consider len again if already using it */
-    for (pos = use_len - 1; pos < 256; pos++) {
+    for (pos = use_len - 1; pos < max_len; pos++) {
         int collisions = 0;
-        for (i = 0; i < n; i++) {
+        for (i = 0; i < n_active; i++) {
             uint32_t  idx = indices[i];
             const char *str = strings[idx & IDX_MASK];
             unsigned probe;
@@ -963,7 +964,11 @@ pick_next_sample:
                 probe = 0x7f & strlen(str);
             } else {
                 probe = str[pos];
-                if (str[pos] == 0) goto save_best_pos;
+                if (str[pos] == 0) {
+                    /* we may drop the string when splitting domains */
+                    max_len = pos;
+                    goto save_best_pos;
+                }
             }
 
             if (probes[probe] == gen)
@@ -971,7 +976,8 @@ pick_next_sample:
             else
                 probes[probe] = gen;
 
-            gen += (idx >> 31); /* end of a collision domain? */
+            /* end of a collision domain? */
+            gen += (idx >> __builtin_ctzl(DOMAIN_END_BIT));
         }
         /* did we improve? */
         if (collisions < collisions_min) {
@@ -1027,18 +1033,14 @@ sort_sample_pos:
 
     /* rebuild collision domains...
      * it starts here and spans till the function's end */
-    uint32_t *next_indices = (indices == slots ? slots + n : slots);
+    uint32_t *next_indices = (indices == slots ? slots + n_active : slots);
 
     /* reuse probes for collision counters */
-    memset(probes, 0, 128 * sizeof probes[0]); gen = 1;
-    for (i = 0; i < n; ) {
+    memset(probes, 0, 128 * sizeof probes[0]);
+    o = 0;
+    for (i = 0; i < n_active; ) {
         int j, end;
         uint64_t map, map_copy;
-        if (indices[i] & DOMAIN_END_BIT) {
-            /* 1-element collision domain */
-            next_indices[i] = indices[i]; i++;
-            continue;
-        }
         /* estimate new collision domains' sizes;
          * (bit)map helps to avoid considering the entire probes[]
          * in subsequent steps */
@@ -1061,23 +1063,27 @@ sort_sample_pos:
              * convenient. */
             if (probes[probe] == 1) indices[j] = DOMAIN_END_BIT | idx;
         }
-        end = j + 1; j = i;
-        /* assign output positions for new collision domains */
+        end = j + 1;
+        /* assign output positions for new collision domains;
+         * drop 1-element collision domains */
         map_copy = map;
         while (map_copy) {
             int pos = 2 * (unsigned)__builtin_ctzll(map_copy);
-            i = probes[pos] += i;
-            i = probes[pos+1] += i;
+            probes[pos+0] =
+                (probes[pos+0] > 1 ? (o += probes[pos+0]) : n_active);
+            probes[pos+1] =
+                (probes[pos+1] > 1 ? (o += probes[pos+1]) : n_active);
             map_copy &= map_copy - 1;
         }
         /* copy */
-        for (; j != end; j++) {
+        for (j = i; j != end; j++) {
             const uint32_t idx = indices[j];
             const char * const str = strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
                               (0x7f & strlen(str)) : str[best_pos]);
             next_indices[--probes[probe]] = idx;
         }
+        i = end;
         /* zero out entries we touched */
         while (map) {
             int pos = 2 * (unsigned)__builtin_ctzll(map);
@@ -1086,6 +1092,7 @@ sort_sample_pos:
         }
     }
     indices = next_indices;
+    n_active = o;
     goto pick_next_sample;
 }
 
@@ -1103,8 +1110,7 @@ static uint32_t create_fnv_func(int n, const unsigned char *strings[],
         uint32_t v;
         memcpy(&v, random, sizeof(v));
         v = net2host32(v);
-        if (!collisions_found(v, n, strings, mem)) {
-            /* technically, it may be not a FNV1A, yet no collisions */
+        if (v > 0xf000000 && !collisions_found(v, n, strings, mem)) {
             func = v;
             goto done;
         }
