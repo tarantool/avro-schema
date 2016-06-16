@@ -28,7 +28,8 @@ make %{?_smp_mflags} check
 %make_install
 
 %files
-%{_libdir}/tarantool/avro.so
+%{_libdir}/tarantool/avro_schema_rt_c.so
+%{_datarootdir}/tarantool/avro_*.lua
 
 %changelog
 * Wed Mar 9 2016 Nick Zavaritsky <mejedi@tarantool.org> 1.0.0-1
