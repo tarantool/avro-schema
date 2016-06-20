@@ -103,6 +103,13 @@ create_fnv_func(int n, const unsigned char *strings[],
                 const unsigned char *random, size_t size_random,
                 void *mem);
 
+#if !(C_HAVE_BSWAP16)
+static inline uint16_t __builtin_bswap16(uint16_t a)
+{
+    return (a << 8) | ( a >> 8);
+}
+#endif
+
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define net2host16(v) __builtin_bswap16(v)
 #define net2host32(v) __builtin_bswap32(v)

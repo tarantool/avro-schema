@@ -9,6 +9,13 @@ set(TARANTOOL_FIND_REQUIRED ON)
 find_package(Tarantool)
 include_directories(${TARANTOOL_INCLUDE_DIRS})
 
+# Check if __builtin_bswap16 is pesent
+include(CheckCSourceCompiles)
+check_c_source_compiles("int main() { return __builtin_bswap16(0); }" C_HAVE_BSWAP16)
+if(C_HAVE_BSWAP16)
+    add_definitions(-DC_HAVE_BSWAP16=1)
+endif()
+
 # Set CFLAGS
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -Wextra")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -fno-strict-aliasing -fvisibility=hidden")
