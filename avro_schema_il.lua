@@ -989,11 +989,13 @@ local function il_create()
             local o = opcode_new(opcode.PUTENUMS2I)
             o.offset = offset; o.ipv = ipv; o.ipo = ipo
             extra[o] = tab
+            return o
         end,
         putenumi2s = function(offset, ipv, ipo, tab)
             local o = opcode_new(opcode.PUTENUMI2S)
             o.offset = offset; o.ipv = ipv; o.ipo = ipo
             extra[o] = tab
+            return o
         end,
         isset = function(ripv, ipv, ipo, cs)
             local o = opcode_new(opcode.ISSET)

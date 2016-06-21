@@ -183,7 +183,7 @@ emit_patch = function(il, ir, ripv, ipv, ipo, opo)
             il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'ENUM' then
-        assert(false, 'NYI: enum')
+        return il.do_enum('patch', il, ir, ripv, ipv, ipo, opo)
     else
         assert(false, 'VLO') -- VLO, can't patch
     end
@@ -220,7 +220,7 @@ emit_check = function(il, ir, ripv, ipv, ipo)
     elseif irt == 'RECORD' then
         assert(false, 'record/check') -- should not happen
     elseif irt == 'ENUM' then
-        assert(false, 'NYI: enum')
+        return il.do_enum('check', il, ir, ripv, ipv, ipo)
     else
         assert(false)
     end
@@ -304,7 +304,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
     elseif irt == 'RECORD' then
         return il.do_record('convert', il, ir, ripv, ipv, ipo)
     elseif irt == 'ENUM' then
-        assert(false, 'NYI: enum')
+        return il.do_enum('convert', il, ir, ripv, ipv, ipo)
     else
         assert(false)
     end
@@ -888,6 +888,41 @@ local function do_record_flatten(_, il, ir, ripv, ipv, ipo)
     }
 end
 
+local do_enum_flatten_cache = setmetatable({}, {__mode = 'k' })
+local function do_enum_flatten(op, il, ir, ripv, ipv, ipo, opo)
+    local tab = do_enum_flatten_cache[ir]
+    if not tab then
+        tab = {}
+        local inames, i2o = ir[3], ir[4]
+        for i = 1, #inames do
+            tab[inames[i]] = (i2o[i] or 0) - 1
+        end
+        do_enum_flatten_cache[ir] = tab
+    end
+    if op == 'patch' then
+        return {
+            il.isstr(ipv, ipo),
+            il.putenums2i(opo, ipv, ipo, tab),
+            il.move(ripv, ipv, ipo + 1)
+        }
+    elseif op == 'check' then
+        return {
+            il.isstr(ipv, ipo),
+            il.move(ripv, ipv, ipo + 1)
+        }
+    elseif op == 'convert' then
+        return {
+            il.isstr(ipv, ipo),
+            il.checkobuf(1),
+            il.putenums2i(0, ipv, ipo, tab),
+            il.move(0, 0, 1),
+            il.move(ripv, ipv, ipo + 1)
+        }
+    else
+        assert(false, 'internal error')
+    end
+end
+
 local function do_record_unflatten(_, il, ir, ripv, ipv, ipo)
     local unflatten, width_in = emit_rec_unflatten(il, ir, ripv, ipv, ipo + 1)
     return {
@@ -897,12 +932,50 @@ local function do_record_unflatten(_, il, ir, ripv, ipv, ipo)
     }
 end
 
+local do_enum_unflatten_cache = setmetatable({}, {__mode = 'k' })
+local function do_enum_unflatten(op, il, ir, ripv, ipv, ipo, opo)
+    local tab = do_enum_unflatten_cache[ir]
+    if not tab then
+        tab = {}
+        local n, i2o, onames = #ir[3], ir[4], ir[5]
+        for i = 1, n do
+            local o = i2o[i]
+            tab[i] = o and onames[o] or ''
+        end
+        do_enum_unflatten_cache[ir] = tab
+    end
+    if op == 'patch' then
+        return {
+            il.isint(ipv, ipo),
+            il.putenumi2s(opo, ipv, ipo, tab),
+            il.move(ripv, ipv, ipo + 1)
+        }
+    elseif op == 'check' then
+        return {
+            il.isint(ipv, ipo),
+            il.move(ripv, ipv, ipo + 1)
+        }
+    elseif op == 'convert' then
+        return {
+            il.isint(ipv, ipo),
+            il.checkobuf(1),
+            il.putenumi2s(0, ipv, ipo, tab),
+            il.move(0, 0, 1),
+            il.move(ripv, ipv, ipo + 1)
+        }
+    else
+        assert(false, 'internal error')
+    end
+end
+
 local function emit_code(il, ir, n_svc_fields)
     -- configure for unflatten
     il.do_record = do_record_unflatten
+    il.do_enum = do_enum_unflatten
     local unflatten, width_in = emit_rec_unflatten(il, ir, 1, 1, 0)
     -- configure for flatten / xflatten
     il.do_record = do_record_flatten
+    il.do_enum = do_enum_flatten
     local flatten, width_out = emit_rec_flatten(il, ir, nil, 1, 0)
     return il.cleanup({
         { il.declfunc(1, 1), flatten },
