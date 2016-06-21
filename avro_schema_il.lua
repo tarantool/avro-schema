@@ -32,7 +32,6 @@ struct schema_il_Opcode {
         int32_t  ci;
         int64_t  cl;
         double   cd;
-        uint32_t cref;
     };
 
     // block
@@ -98,7 +97,6 @@ struct schema_il_Opcode {
     static const int ENDVAR      = 0xf6;
 
     static const int CHECKOBUF   = 0xf7;
-    static const int ISSETLABEL  = 0xff;
 
     static const unsigned NILREG  = 0xffffffff;
 };
@@ -146,8 +144,7 @@ local op2str = {
     [opcode.ISMAP      ] = 'ISMAP      ',   [opcode.ISNUL      ] = 'ISNUL      ',
     [opcode.LENIS      ] = 'LENIS      ',   [opcode.ISSET      ] = 'ISSET      ',
     [opcode.ISNOTSET   ] = 'ISNOTSET   ',   [opcode.BEGINVAR   ] = 'BEGINVAR   ',
-    [opcode.ENDVAR     ] = 'ENDVAR     ',   [opcode.CHECKOBUF  ] = 'CHECKOBUF  ',
-    [opcode.ISSETLABEL ] = 'ISSETLABEL '
+    [opcode.ENDVAR     ] = 'ENDVAR     ',   [opcode.CHECKOBUF  ] = 'CHECKOBUF  '
 }
 
 local function opcode_new(op)
@@ -290,7 +287,6 @@ local il_methods = {
         return o
     end,
     ----------------------------------------------------------------
-    isset       = opcode_ctor_ripv_ipv_ipo(opcode.ISSET),
     isnotset    = opcode_ctor_ipv(opcode.ISNOTSET),
     beginvar    = opcode_ctor_ipv(opcode.BEGINVAR),
     endvar      = opcode_ctor_ipv(opcode.ENDVAR),
@@ -302,7 +298,7 @@ local il_methods = {
         return o
     end
     ----------------------------------------------------------------
-    -- sbranch, putstrc, putbinc, putxc and issetlabel are instance methods
+    -- sbranch, putstrc, putbinc, putxc and isset are instance methods
 }
 
 -- visualize register
@@ -317,9 +313,9 @@ local function rvis(reg, inc)
 end
 
 -- visualize constant
-local function cvis(cref, objs, decode)
-    if objs then
-        local c = objs[cref]
+local function cvis(o, extra, decode)
+    if extra then
+        local c = extra[o]
         if c then
             local ok, res = true, c
             if decode then
@@ -333,11 +329,11 @@ local function cvis(cref, objs, decode)
             end
         end
     end
-    return format('#%d', cref)
+    return format('#%p', o)
 end
 
 -- visualize opcode
-local function opcode_vis(o, objs)
+local function opcode_vis(o, extra)
     local opname = op2str[o.op]
     if o == opcode_NOP then
         return 'NOP'
@@ -348,8 +344,8 @@ local function opcode_vis(o, objs)
         return format('%s %d,\t%s', opname, o.name, rvis(o.ipv))
     elseif o.op == opcode.IBRANCH then
         return format('%s %d', opname, o.ci)
-    elseif o.op == opcode.SBRANCH or o.op == opcode.ISSETLABEL then
-        return format('%s %s', opname, cvis(o.cref, objs))
+    elseif o.op == opcode.SBRANCH then
+        return format('%s %s', opname, cvis(o, extra))
     elseif o.op == opcode.IFSET or (
            o.op >= opcode.ISNOTSET and o.op <= opcode.ENDVAR) then
         return format('%s %s', opname, rvis(o.ipv))
@@ -358,8 +354,10 @@ local function opcode_vis(o, objs)
         return format('%s [%s]', opname, rvis(o.ipv, o.ipo))
     elseif o.op == opcode.OBJFOREACH then
         return format('%s %s,\t[%s],\t%d', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), o.step)
-    elseif o.op == opcode.MOVE or o.op == opcode.ISSET then
+    elseif o.op == opcode.MOVE then
         return format('%s %s,\t%s', opname, rvis(o.ripv), rvis(o.ipv, o.ipo))
+    elseif o.op == opcode.ISSET then
+        return format('%s %s,\t%s,\t%s', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), cvis(o, extra))
     elseif o.op == opcode.SKIP or o.op == opcode.PSKIP then
         return format('%s %s,\t[%s]', opname, rvis(o.ripv), rvis(o.ipv, o.ipo))
     elseif o.op == opcode.PUTBOOLC or o.op == opcode.PUTINTC or
@@ -372,9 +370,9 @@ local function opcode_vis(o, objs)
     elseif o.op == opcode.PUTNULC then
         return format('%s [%s]', opname, rvis(0, o.offset))
     elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC then
-        return format('%s [%s],\t%s', opname, rvis(0, o.offset), cvis(o.cref, objs))
+        return format('%s [%s],\t%s', opname, rvis(0, o.offset), cvis(o, extra))
     elseif o.op == opcode.PUTXC then
-        return format('%s [%s],\t%s', opname, rvis(0, o.offset), cvis(o.cref, objs, msgpack_decode))
+        return format('%s [%s],\t%s', opname, rvis(0, o.offset), cvis(o, extra, msgpack_decode))
     elseif o.op >= opcode.PUTBOOL and o.op <= opcode.PUTBIN2STR then
         return format('%s [%s],\t[%s]', opname, rvis(0, o.offset), rvis(o.ipv, o.ipo))
     elseif o.op == opcode.LENIS then
@@ -954,59 +952,46 @@ local function voptimize(il, code)
 end
 
 local function il_create()
-    local objs = {}
-    local refs = {}
-    local ref  = 0
 
-    local function cref(object)
-        local res = refs[object]
-        if not res then
-            res = ref + 1
-            objs[res] = object
-            refs[object] = res
-            ref = res
-        end
-        return res
-    end
-
+    local extra = {}
     local id = 10 -- low ids are reserved
 
     local il
     il = setmetatable({
         sbranch = function(cs)
             local o = opcode_new(opcode.SBRANCH)
-            o.cref = cref(cs)
+            extra[o] = cs
             return o
         end,
         putstrc = function(offset, cs)
             local o = opcode_new(opcode.PUTSTRC)
-            o.offset = offset; o.cref = cref(cs)
+            o.offset = offset; extra[o] = cs
             return o
         end,
         putbinc = function(offset, cb)
             local o = opcode_new(opcode.PUTBINC)
-            o.offset = offset; o.cref = cref(cb)
+            o.offset = offset; extra[o] = cb
             return o
         end,
         putxc = function(offset, cx)
             local o = opcode_new(opcode.PUTXC)
-            o.offset = offset; o.cref = cref(cx)
+            o.offset = offset; extra[o] = cx
             return o
         end,
-        issetlabel = function(cs)
-            local o = opcode_new(opcode.ISSETLABEL)
-            o.cref = cref(cs)
+        isset = function(ripv, ipv, ipo, cs)
+            local o = opcode_new(opcode.ISSET)
+            o.ripv = ripv; o.ipv = ipv
+            o.ipo = ipo; extra[o] = cs
             return o
         end,
     ----------------------------------------------------------------
         id = function() id = id + 1; return id end,
-        cref = cref,
-        cderef = function(ref)
-            return objs[ref]
+        get_extra = function(o)
+            return extra[o]
         end,
         vis = function(code) return il_vis(il, code) end,
         opcode_vis = function(o)
-            return opcode_vis(o, objs)
+            return opcode_vis(o, extra)
         end,
         cleanup = il_cleanup,
         optimize = function(code) return voptimize(il, code) end,

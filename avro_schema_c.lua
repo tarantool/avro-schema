@@ -488,8 +488,7 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
                     if not ir_record_ioptional(ir, i) then
                         -- we aren't going to see this var during pass3
-                        insert(code, il.isset(fieldvar, ipv, ipo))
-                        insert(code, il.issetlabel(inames[i]))
+                        insert(code, il.isset(fieldvar, ipv, ipo, inames[i]))
                         insert(code, il.endvar(fieldvar))
                     end
                 end
@@ -526,8 +525,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
         elseif not ds then -- it's mandatory
             tbranch = {}
             insert(code, {
-                il.isset(fieldvar, ipv, ipo),
-                il.issetlabel(onames[o]),
+                il.isset(fieldvar, ipv, ipo, onames[o]),
                 tbranch,
                 il.endvar(fieldvar)
             })

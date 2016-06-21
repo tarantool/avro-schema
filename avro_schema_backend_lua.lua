@@ -245,7 +245,7 @@ local function emit_lua_instruction(il, o, res, varmap)
     elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC or
            o.op == opcode.PUTXC     then
         local pos = varref(0, o.offset, varmap)
-        local str = il.cderef(o.cref)
+        local str = il.get_extra(o)
         -- Note: 64 bit constants are slowing down JIT compilation due to
         --       O(n) search in 64 bit const pool, init xlen/xoff separately
         --       instead of doing uval at once
@@ -379,16 +379,10 @@ local function emit_lua_block(ctx, block, cc, res)
         elseif type(o) == 'cdata' then
             local tab = emit_lua_block_tab -- just a shorter alias
             if o.op == opcode.ISSET     then
-                local label
-                local nexto = block[i+1]
-                if type(nexto) == 'cdata' and nexto.op == opcode.ISSETLABEL then
-                    label = il.cderef(nexto.cref)
-                    skiptill = i + 2
-                end
                 insert(res, format('if %s == 0 then rt_err_missing(r, %s, "%s") end',
                                    varref(o.ripv, 0, varmap),
                                    varref(o.ipv, o.ipo, varmap),
-                                   label))
+                                   il.get_extra(o)))
             -----------------------------------------------------------
             elseif o.op == opcode.BEGINVAR  then
                 if not elidevarinit(block, i) then
@@ -422,7 +416,7 @@ local function emit_lua_block(ctx, block, cc, res)
                     local branch = o[i]
                     local head = branch[1]
                     assert(head.op == opcode.SBRANCH)
-                    local str = il.cderef(head.cref)
+                    local str = il.get_extra(head)
                     strings[i - 2] = str
                 end
                 local func = rt_C.create_hash_func(#o - 1, strings,
@@ -433,7 +427,7 @@ local function emit_lua_block(ctx, block, cc, res)
                     local branch = o[i]
                     local head = branch[1]
                     assert(head.op == opcode.SBRANCH)
-                    local str = il.cderef(head.cref)
+                    local str = il.get_extra(head)
                     local if_or_elseif = i == 2 and 'if' or 'elseif'
                     if func ~= 0 then
                         insert(res, format('%s t == %d then', if_or_elseif,
