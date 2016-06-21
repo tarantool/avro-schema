@@ -78,6 +78,48 @@ eval_hash_func(int32_t func, const unsigned char *str, size_t len);
 int32_t
 eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
 
+/* phf ***************************************************************/
+
+struct schema_rt_phf {
+    bool                      nodiv;
+    int32_t                   seed;
+    size_t                    r;
+    size_t                    m;
+    void                     *g;
+    size_t                    d_max;
+    int                       g_op;
+    intptr_t                  reserved;
+};
+
+int
+phf_init_uint32(struct schema_rt_phf *phf,
+                const int32_t *k,
+                size_t n,
+                size_t lambda,/* displacement table compaction factor (try 4) */
+                size_t alpha, /* hash table load factor (in percent, try 80%) */
+                int32_t seed,
+                bool nodiv);
+
+void
+phf_compact(struct schema_rt_phf *phf);
+
+int32_t
+phf_hash_uint32(struct schema_rt_phf *phf, int32_t k);
+
+void
+phf_destroy(struct schema_rt_phf *phf);
+
+int32_t
+phf_hash_uint32_band_raw8(void *g, int32_t k, int32_t seed, size_t r, size_t m);
+
+int32_t
+phf_hash_uint32_band_raw16(void *g, int32_t k, int32_t seed, size_t r, size_t m);
+
+int32_t
+phf_hash_uint32_band_raw32(void *g, int32_t k, int32_t seed, size_t r, size_t m);
+
+/* libc **************************************************************/
+
 void *malloc(size_t);
 void  free(void *);
 int   memcmp(const void *, const void *, size_t);
