@@ -345,7 +345,7 @@ local function err_type(r, pos, etype)
                      location, r.v[pos].ival), 0)
     else
         error(format('%sExpected %s, encountered %s',
-                     location, etype2typename[etype] or etype,
+                     location, etype2typename[etype],
                      typenames[r.t[pos]]), 0)
     end
 end
