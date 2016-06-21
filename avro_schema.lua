@@ -1,8 +1,9 @@
-local digest = require('digest')
-local front  = require('avro_schema_front')
-local c      = require('avro_schema_c')
-local il     = require('avro_schema_il')
-local rt     = require('avro_schema_rt')
+local digest      = require('digest')
+local front       = require('avro_schema_front')
+local c           = require('avro_schema_c')
+local il          = require('avro_schema_il')
+local backend_lua = require('avro_schema_backend_lua')
+local rt          = require('avro_schema_rt')
 
 local format, find, sub = string.format, string.find, string.sub
 local insert, remove, concat = table.insert, table.remove, table.concat
@@ -17,6 +18,7 @@ local rt_msgpack_encode   = rt.msgpack_encode
 local rt_msgpack_decode   = rt.msgpack_decode
 local rt_lua_encode       = rt.lua_encode
 local rt_universal_decode = rt.universal_decode
+local install_lua_backend = backend_lua.install
 
 -- We give away a handle but we never expose schema data.
 local schema_by_handle = setmetatable( {}, { __mode = 'k' } )
@@ -356,6 +358,7 @@ local function compile(...)
             file:write(il.vis(il_code))
             file:close()
         end
+        install_lua_backend(il)
         local lua_code = gen_lua_code(width_in, width_out, service_fields, il, il_code)
         local dump_src = args.dump_src
         if dump_src then
