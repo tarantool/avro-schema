@@ -65,9 +65,7 @@ parse_msgpack(const uint8_t *msgpack_in,
               uint8_t       *stock_typeid_buf,
               struct Value  *stock_value_buf,
               uint8_t      **typeid_out,
-              struct Value **value_out
-
-) __attribute__((__visibility__("default")));
+              struct Value **value_out);
 
 ssize_t
 unparse_msgpack(size_t             nitems,
@@ -77,22 +75,17 @@ unparse_msgpack(size_t             nitems,
                const uint8_t     *bank2,
                size_t             stock_buf_size_or_hint,
                uint8_t           *stock_buf,
-               uint8_t          **msgpack_out
-
-) __attribute__((__visibility__("default")));
+               uint8_t          **msgpack_out);
 
 uint32_t
 create_hash_func(int n, const unsigned char *strings[],
-                 const unsigned char *random, size_t size_random
-) __attribute__((__visibility__("default")));
+                 const unsigned char *random, size_t size_random);
 
 uint32_t
-eval_hash_func(uint32_t func, const unsigned char *str, size_t len
-) __attribute__((__visibility__("default")));
+eval_hash_func(uint32_t func, const unsigned char *str, size_t len);
 
 uint32_t
-eval_fnv1a_func(uint32_t seed, const unsigned char *str, size_t len
-) __attribute__((__visibility__("default")));
+eval_fnv1a_func(uint32_t seed, const unsigned char *str, size_t len);
 
 static int
 collisions_found(uint32_t func, int n, const unsigned char *strings[],
