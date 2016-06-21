@@ -1,0 +1,15 @@
+{
+global:
+    _init;
+    _fini;
+    parse_msgpack;
+    unparse_msgpack;
+    create_hash_func;
+    eval_hash_func;
+    eval_fnv1a_func;
+    phf_init_uint32;
+    phf_compact;
+    phf_hash_uint32;
+    phf_destroy;
+local: *;
+};

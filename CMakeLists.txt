@@ -16,13 +16,42 @@ if(C_HAVE_BSWAP16)
     add_definitions(-DC_HAVE_BSWAP16=1)
 endif()
 
-# Set CFLAGS
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -Wextra")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -fno-strict-aliasing -fvisibility=hidden")
+# Set CFLAGS/CXXFLAGS
 
-add_library(avro_schema_rt_c SHARED avro_schema_rt.c)
+# We need more warnings!
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -Wextra")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -Wextra")
+
+# MsgPack parser violates strict aliasing rules
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -fno-strict-aliasing")
+
+# lib/phf is the only C++ user; it needs a bare minimum of C++ features
+# Note: we use a fraction of libphf features and we hate dead cruft!
+#       Also we'd like to avoid changing the source too much. We rely on
+#       the linker to drop unused code and, since the entire libphf
+#       comes in the single object file, we have to arrange for each
+#       function to live in a separate section (-ffunction-sections).
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fno-rtti -fno-exceptions -fdata-sections -ffunction-sections")
+
+# libphf doesn't really require libstdc++
+add_definitions(-DPHF_NO_LIBCXX=1)
+
+# libphf assumes UINT32_C macro definitions are available
+add_definitions(-D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS)
+
+# 1) list exported symbols explicitly, since only a fraction
+#    of libphf is actually needed (--version-script)
+# 2) enable linker to drop unused parts (--gc-sections)
+# 3) don't link default libs, since libstdc++ is unnecessary
+set (CMAKE_SHARED_LINKER_FLAGS
+    "-Wl,--version-script,${CMAKE_SOURCE_DIR}/exports -Wl,--gc-sections -nodefaultlibs")
+
+add_library(avro_schema_rt_c SHARED avro_schema_rt.c lib/phf/phf.cc)
 set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
                      "avro_schema_rt_c")
+
+# link with libc explicitly (-nodefaultlibs earlier)
+target_link_libraries(avro_schema_rt_c c)
 
 # postprocess Lua file, replacing opcode.X named constants with values
 add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_il_.lua
