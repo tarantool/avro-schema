@@ -6,7 +6,7 @@ local find, format = string.find, string.format
 local byte, sub = string.byte, string.sub
 local concat, insert = table.concat, table.insert
 local remove = table.remove
-local bor = bit.bor
+local bor, band = bit.bor, bit.band
 
 local ffi_cast = ffi.cast
 local msgpacklib_encode = msgpacklib and msgpacklib.encode
@@ -323,29 +323,29 @@ extract_location = function(r, pos)
 end
 
 local etype2typename = {
-    [0xe8] = 'BOOL', [0xe9] = 'INT', [0xea] = 'FLOAT', [0xeb] = 'DOUBLE',
-    [0xec] = 'LONG', [0xed] = 'STR', [0xee] = 'BIN', [0xef] = 'ARRAY',
-    [0xf0] = 'MAP', [0xf1] = 'NIL'
+    [0xea] = 'BOOL', [0xeb] = 'INT', [0xec] = 'FLOAT', [0xed] = 'DOUBLE',
+    [0xee] = 'LONG', [0xef] = 'STR', [0xf0] = 'BIN',   [0xf1] = 'ARRAY',
+    [0xf2] = 'MAP',  [0xf3] = 'NIL'
 }
 
 local function err_type(r, pos, etype)
-    -- T==4(LONG) and (etype==0xea(ISFLOAT) or etype==0xeb(ISDOUBLE))
-    -- due to T range (1..12) and etype-s coding (232 + (0..9))
+    -- T==4(LONG) and (etype==0xec(ISFLOAT) or etype==0xed(ISDOUBLE))
+    -- due to T range (1..12) and etype-s coding (234 + (0..9))
     -- this check is robust
-    if r.t[pos] * bor(etype, 1) == 0x3ac then
-        r.t[pos] = 7 -- long 2 float
+    if r.t[pos] * band(etype, 0xfe) == 0x3b0 then
+        r.t[pos] = 7 + band(etype, 1) -- long 2 float / double
         r.v[pos].dval = r.v[pos].ival
         return
     end
     local location, iskerror = extract_location(r, pos)
     if iskerror then
         error(format('%sNon-string key', location), 0)
-    elseif etype == 0xe9 and r.t[pos] == 4 then
+    elseif etype == 0xeb and r.t[pos] == 4 then
         error(format('%sValue exceeds INT range: %s',
                      location, r.v[pos].ival), 0)
     else
         error(format('%sExpected %s, encountered %s',
-                     location, etype2typename[etype],
+                     location, etype2typename[etype] or etype,
                      typenames[r.t[pos]]), 0)
     end
 end

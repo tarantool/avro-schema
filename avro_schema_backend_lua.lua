@@ -268,15 +268,15 @@ r.ot[%s] = %d; r.ov[%s].xlen = %d; r.ov[%s].xoff = %d]],
     elseif o.op == opcode.ISBOOL    then
         local pos = varref(o.ipv, o.ipo, varmap)
         insert(res, format([[
-if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0xe8) end]],
+if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0x%x) end]],
                             pos,
                             il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0'),
-                            pos))
+                            pos, opcode.ISBOOL))
     elseif o.op == opcode.ISINT     then
         local pos = varref(o.ipv, o.ipo, varmap)
         insert(res, format([[
-if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 0xe9) end]],
-                            pos, pos, pos))
+if r.t[%s] ~= 4 or r.v[%s].uval+0x80000000 > 0xffffffff then rt_err_type(r, %s, 0x%x) end]],
+                            pos, pos, pos, opcode.ISINT))
     elseif o.op == opcode.ISFLOAT or o.op == opcode.ISDOUBLE then
         local pos = varref(o.ipv, o.ipo, varmap)
         insert(res, format([[

@@ -77,26 +77,29 @@ struct schema_il_Opcode {
     static const int PUTSTR2BIN  = 0xe6;
     static const int PUTBIN2STR  = 0xe7;
 
+    static const int PUTENUMI2S  = 0xe8;
+    static const int PUTENUMS2I  = 0xe9;
+
     /* rt.err_type depends on these values */
-    static const int ISBOOL      = 0xe8;
-    static const int ISINT       = 0xe9;
-    static const int ISFLOAT     = 0xea;
-    static const int ISDOUBLE    = 0xeb;
-    static const int ISLONG      = 0xec;
-    static const int ISSTR       = 0xed;
-    static const int ISBIN       = 0xee;
-    static const int ISARRAY     = 0xef;
-    static const int ISMAP       = 0xf0;
-    static const int ISNUL       = 0xf1;
+    static const int ISBOOL      = 0xea;
+    static const int ISINT       = 0xeb;
+    static const int ISFLOAT     = 0xec;
+    static const int ISDOUBLE    = 0xed;
+    static const int ISLONG      = 0xee;
+    static const int ISSTR       = 0xef;
+    static const int ISBIN       = 0xf0;
+    static const int ISARRAY     = 0xf1;
+    static const int ISMAP       = 0xf2;
+    static const int ISNUL       = 0xf3;
 
-    static const int LENIS       = 0xf2;
+    static const int LENIS       = 0xf4;
 
-    static const int ISSET       = 0xf3;
-    static const int ISNOTSET    = 0xf4;    
-    static const int BEGINVAR    = 0xf5;
-    static const int ENDVAR      = 0xf6;
+    static const int ISSET       = 0xf5;
+    static const int ISNOTSET    = 0xf6;
+    static const int BEGINVAR    = 0xf7;
+    static const int ENDVAR      = 0xf8;
 
-    static const int CHECKOBUF   = 0xf7;
+    static const int CHECKOBUF   = 0xf9;
 
     static const unsigned NILREG  = 0xffffffff;
 };
@@ -137,6 +140,7 @@ local op2str = {
     [opcode.PUTINT2DBL ] = 'PUTINT2DBL ',   [opcode.PUTLONG2FLT] = 'PUTLONG2FLT',
     [opcode.PUTLONG2DBL] = 'PUTLONG2DBL',   [opcode.PUTFLT2DBL ] = 'PUTFLT2DBL ',
     [opcode.PUTSTR2BIN ] = 'PUTSTR2BIN ',   [opcode.PUTBIN2STR ] = 'PUTBIN2STR ',
+    [opcode.PUTENUMI2S ] = 'PUTENUMI2S ',   [opcode.PUTENUMS2I ] = 'PUTENUMS2I ',
     [opcode.ISBOOL     ] = 'ISBOOL     ',   [opcode.ISINT      ] = 'ISINT      ',
     [opcode.ISLONG     ] = 'ISLONG     ',   [opcode.ISFLOAT    ] = 'ISFLOAT    ',
     [opcode.ISDOUBLE   ] = 'ISDOUBLE   ',   [opcode.ISSTR      ] = 'ISSTR      ',
@@ -375,6 +379,9 @@ local function opcode_vis(o, extra)
         return format('%s [%s],\t%s', opname, rvis(0, o.offset), cvis(o, extra, msgpack_decode))
     elseif o.op >= opcode.PUTBOOL and o.op <= opcode.PUTBIN2STR then
         return format('%s [%s],\t[%s]', opname, rvis(0, o.offset), rvis(o.ipv, o.ipo))
+    elseif o.op == opcode.PUTENUMI2S or o.op == opcode.PUTENUMS2I then
+        return format('%s [%s],\t[%s],\t%s', opname,
+                      rvis(0, o.offset), rvis(o.ipv, o.ipo), cvis(o, extra))
     elseif o.op == opcode.LENIS then
         return format('%s [%s],\t%d', opname, rvis(o.ipv, o.ipo), o.len)
     elseif o.op == opcode.CHECKOBUF then
@@ -560,7 +567,7 @@ local function vexecute(il, scope, o, res)
         fixipo = vinfo.inc
     end
     local fixoffset = 0
-    if o.op >= opcode.PUTBOOLC and o.op <= opcode.PUTBIN2STR or
+    if o.op >= opcode.PUTBOOLC and o.op <= opcode.PUTENUMS2I or
        o.op == opcode.CHECKOBUF then
 
         local vinfo = vlookup(scope, 0)
@@ -977,6 +984,16 @@ local function il_create()
             local o = opcode_new(opcode.PUTXC)
             o.offset = offset; extra[o] = cx
             return o
+        end,
+        putenums2i = function(offset, ipv, ipo, tab)
+            local o = opcode_new(opcode.PUTENUMS2I)
+            o.offset = offset; o.ipv = ipv; o.ipo = ipo
+            extra[o] = tab
+        end,
+        putenumi2s = function(offset, ipv, ipo, tab)
+            local o = opcode_new(opcode.PUTENUMI2S)
+            o.offset = offset; o.ipv = ipv; o.ipo = ipo
+            extra[o] = tab
         end,
         isset = function(ripv, ipv, ipo, cs)
             local o = opcode_new(opcode.ISSET)
