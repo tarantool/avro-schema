@@ -218,7 +218,7 @@ emit_check = function(il, ir, ripv, ipv, ipo)
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
     elseif irt == 'RECORD' then
-        assert(false, 'NYI: record')
+        assert(false, 'record/check') -- should not happen
     elseif irt == 'ENUM' then
         assert(false, 'NYI: enum')
     else
@@ -302,7 +302,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
     elseif irt == 'RECORD' then
-        assert(false, 'NYI: record')
+        return il.do_record('convert', il, ir, ripv, ipv, ipo)
     elseif irt == 'ENUM' then
         assert(false, 'NYI: enum')
     else
@@ -877,9 +877,33 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
 end
 
 -----------------------------------------------------------------------
+
+local function do_record_flatten(_, il, ir, ripv, ipv, ipo)
+    local flatten, width_out = emit_rec_flatten(il, ir, ripv, ipv, ipo)
+    return {
+        il.checkobuf(1),
+        il.putarrayc(0, width_out),
+        il.move(0, 0, 1),
+        flatten
+    }
+end
+
+local function do_record_unflatten(_, il, ir, ripv, ipv, ipo)
+    local unflatten, width_in = emit_rec_unflatten(il, ir, ripv, ipv, ipo + 1)
+    return {
+        il.isarray(ipv, ipo),
+        il.lenis(ipv, ipo, width_in),
+        unflatten
+    }
+end
+
 local function emit_code(il, ir, n_svc_fields)
-    local flatten, width_out = emit_rec_flatten(il, ir, nil, 1, 0)
+    -- configure for unflatten
+    il.do_record = do_record_unflatten
     local unflatten, width_in = emit_rec_unflatten(il, ir, 1, 1, 0)
+    -- configure for flatten / xflatten
+    il.do_record = do_record_flatten
+    local flatten, width_out = emit_rec_flatten(il, ir, nil, 1, 0)
     return il.cleanup({
         { il.declfunc(1, 1), flatten },
         { il.declfunc(2, 1), unflatten },
