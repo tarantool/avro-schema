@@ -804,6 +804,34 @@ PHF_PUBLIC void phf_destroy(struct phf *phf) {
 	PHF::destroy(phf);
 } /* phf_destroy() */
 
+extern "C" {
+
+PHF_PUBLIC phf_hash_t phf_hash_uint32_band_raw8(uint8_t *map, uint32_t k, uint32_t seed, size_t r, size_t m) {
+    return phf_hash_<true>(map, k, seed, r, m);
+} /* phf_hash_uint32_band_raw8 */
+
+PHF_PUBLIC phf_hash_t phf_hash_uint32_band_raw16(uint16_t *map, uint32_t k, uint32_t seed, size_t r, size_t m) {
+    return phf_hash_<true>(map, k, seed, r, m);
+} /* phf_hash_uint32_band_raw16 */
+
+PHF_PUBLIC phf_hash_t phf_hash_uint32_band_raw32(uint32_t *map, uint32_t k, uint32_t seed, size_t r, size_t m) {
+    return phf_hash_<true>(map, k, seed, r, m);
+} /* phf_hash_uint32_band_raw32 */
+
+PHF_PUBLIC phf_hash_t phf_hash_uint32_mod_raw8(uint8_t *map, uint32_t k, uint32_t seed, size_t r, size_t m) {
+    return phf_hash_<false>(map, k, seed, r, m);
+} /* phf_hash_uint32_mod_raw8 */
+
+PHF_PUBLIC phf_hash_t phf_hash_uint32_mod_raw16(uint16_t *map, uint32_t k, uint32_t seed, size_t r, size_t m) {
+    return phf_hash_<false>(map, k, seed, r, m);
+} /* phf_hash_uint32_mod_raw16 */
+
+PHF_PUBLIC phf_hash_t phf_hash_uint32_mod_raw32(uint32_t *map, uint32_t k, uint32_t seed, size_t r, size_t m) {
+    return phf_hash_<false>(map, k, seed, r, m);
+} /* phf_hash_uint32_mod_raw32 */
+
+} /* extern "C" */
+
 
 #if PHF_LUALIB
 #include <time.h> /* time(2) */
