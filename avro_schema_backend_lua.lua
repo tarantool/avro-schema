@@ -457,17 +457,25 @@ if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]
                 local itervar = varref(head.ripv, 0, varmap)
                 if o.peel or head.step == 0 then
                     insert(res, format('%s = %s',
-                                       itervar,
-                                       varref(head.ipv, head.ipo + 1 - head.step, varmap)))
-                    local label = il.id(); labelmap[head] = label
-                    insert(res, format('::l%d::', label))
-                    break_jit_trace(ctx, res)
-                    if head.step ~= 0 then
-                        insert(res, format('%s = %s+%d', itervar, itervar, head.step))
+                                        itervar, varref(head.ipv, head.ipo +
+                                                        1 - head.step,
+                                                        varmap)))
+                    if il.enable_loop_peeling then
+                        local label = il.id(); labelmap[head] = label
+                        insert(res, format('::l%d::', label))
+                        break_jit_trace(ctx, res)
+                        if head.step ~= 0 then
+                            insert(res, format('%s = %s+%d', itervar,
+                                               itervar, head.step))
+                        end
+                        local pos = varref(head.ipv, head.ipo, varmap)
+                        insert(res, format('if %s ~= %s+r.v[%s].xoff then',
+                                            itervar, pos, pos))
+                    else -- head.step == 0
+                        local pos = varref(head.ipv, head.ipo, varmap)
+                        insert(res, format('while %s ~= %s+r.v[%s].xoff do',
+                                            itervar, pos, pos))
                     end
-                    local pos = varref(head.ipv, head.ipo, varmap)
-                    insert(res, format('if %s ~= %s+r.v[%s].xoff then',
-                                        itervar, pos, pos))
                     emit_nested_lua_block(ctx, o, head, res)
                     insert(res, 'end')
                     local copystmt
@@ -523,7 +531,9 @@ local function emit_lua_func_body(il, func, nlocals_min, res)
                            'local x%d, x%d, x%d, x%d',
                            i, i+1, i+2, i+3))
     end
-    peel_annotate(func, 0)
+    if il.enable_loop_peeling then
+        peel_annotate(func, 0)
+    end
     insert(res, '')
     local patchpos1 = #res
     local head = func[1]
@@ -596,12 +606,15 @@ local function emit_lua_func(il, func, res, opts)
     local patchpos1, patchpos2, jit_trace_breaks =
         emit_lua_func_body(il, func, nlocals_min, res)
     res[patchpos1] = conversion_init or ''
-    if conversion_complete then
+    if not conversion_complete then
+        res[patchpos2] = func_return
+    elseif il.enable_loop_peeling --[[ and conversion_complete ]] then
         local label = il.id()
         insert(jit_trace_breaks, 1, label)
         res[patchpos2] = format('%s\ns = %d\ngoto continue', conversion_complete, label)
-    else
-        res[patchpos2] = func_return
+    else --[[ not il.enable_loop_peeling and conversion_complete ]]
+        res[patchpos2] = conversion_complete
+        res[patchpos2+1] = func_return
     end
     if next(jit_trace_breaks) then
         local patch = { 'for _ = 1, 1000000000 do' }
@@ -620,7 +633,7 @@ local function emit_lua_func(il, func, res, opts)
 end
 ------------------------------------------------------------------------
 
-local function install_backend(il)
+local function install_backend(il, opts)
 
     local cmax = 1000000
     local cmin = 1000001
@@ -655,6 +668,8 @@ local function install_backend(il)
             emit_lua_instruction(il, code[i], res, varmap)
         end
     end
+
+    il.enable_loop_peeling = (opts.enable_loop_peeling ~= false)
 
     return il
 end

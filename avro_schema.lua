@@ -358,7 +358,7 @@ local function compile(...)
             file:write(il.vis(il_code))
             file:close()
         end
-        install_lua_backend(il)
+        install_lua_backend(il, args)
         local lua_code = gen_lua_code(width_in, width_out, service_fields, il, il_code)
         local dump_src = args.dump_src
         if dump_src then
