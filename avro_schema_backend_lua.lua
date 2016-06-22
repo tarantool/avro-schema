@@ -164,7 +164,7 @@ local function break_jit_trace(ctx, res)
     insert(res, format('::l%d::', label))
 end
 
-local emit_lua_block_tab = {
+local emit_instruction_tab = {
     ----------------------- T
     [opcode.PUTARRAYC  ] = 11,
     [opcode.PUTMAPC    ] = 12,
@@ -198,10 +198,10 @@ local emit_lua_block_tab = {
     [opcode.ISMAP      ] = 12
 }
 
-local emit_nested_lua_block
+local emit_nested_block
 
-local function emit_lua_instruction(il, o, res, varmap)
-    local tab = emit_lua_block_tab -- just a shorter alias
+local function emit_instruction(il, o, res, varmap)
+    local tab = emit_instruction_tab -- a shorter alias
     if     o.op == opcode.CALLFUNC  then
         insert(res, format('v0 = f%d(r, v0, %s)',
                             o.func, varref(o.ipv, o.ipo, varmap)))
@@ -314,9 +314,46 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
         -- TODO
         insert(res, '-- checkobuf(t) ')]]
     -----------------------------------------------------------
+    elseif o.op == opcode.ISSET     then
+        insert(res, format('if %s == 0 then rt_err_missing(r, %s, "%s") end',
+                            varref(o.ripv, 0, varmap),
+                            varref(o.ipv, o.ipo, varmap),
+                            il.get_extra(o)))
+    -----------------------------------------------------------
     else
         assert(false)
     end
+end
+
+local function emit_if_block(ctx, block, cc, res)
+    local varmap  = ctx.varmap
+    local head, branch1, branch2 = block[1], block[2], block[3]
+    assert(branch1[1].op == opcode.IBRANCH)
+    insert(res, format('if %s %s 0 then',
+                        varref(head.ipv, 0, varmap),
+                        branch1[1].ci == 0 and '==' or '~='))
+    emit_nested_block(ctx, branch1, cc, res)
+    if branch2 then
+        assert(branch2[1].op == opcode.IBRANCH)
+        assert(branch2[1].ci ~= branch1[1].ci)
+        insert(res, 'else')
+        emit_nested_block(ctx, branch2, cc, res)
+    end
+    insert(res, 'end')
+end
+
+local function create_strswitch_hash_func(il, block)
+    if not il.enable_fast_strings then return 0 end
+    local strings = ffi_new('const char *[?]', #block - 1)
+    for i = 2, #block do
+        local branch = block[i]
+        local branch_head = branch[1]
+        assert(branch_head.op == opcode.SBRANCH)
+        local str = il.get_extra(branch_head)
+        strings[i - 2] = str
+    end
+    return rt_C.create_hash_func(#block - 1, strings,
+                                 random_bytes, #random_bytes)
 end
 
 local emit_compute_hash_func_tab = {
@@ -339,7 +376,7 @@ local emit_compute_hash_func_tab = {
 
 local function emit_compute_hash_func(func, pos, res)
     if func == 0 then
-        return
+        assert(false)
     elseif func > 0x0f000000 then
         insert(res, format([[
 t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
@@ -363,7 +400,83 @@ t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
     end
 end
 
-local function emit_lua_block(ctx, block, cc, res)
+local function emit_strswitch_block(ctx, block, cc, res)
+    local il     = ctx.il
+    local varmap = ctx.varmap
+    local head   = block[1]
+    local func   = create_strswitch_hash_func(il, block)
+    local pos    = varref(head.ipv, head.ipo, varmap)
+    if func ~= 0 then
+        emit_compute_hash_func(func, pos, res)
+    else
+        insert(res, format('t = ffi_string(r.b1-r.v[%s].xoff, r.v[%s].xlen)',
+                           pos, pos))
+    end
+    for i = 2, #block do
+        local branch = block[i]
+        local branch_head = branch[1]
+        assert(branch_head.op == opcode.SBRANCH)
+        local str = il.get_extra(branch_head)
+        local if_or_elseif = i == 2 and 'if' or 'elseif'
+        if func ~= 0 then
+            insert(res, format('%s t == %d then', if_or_elseif,
+                                rt_C.eval_hash_func(func, str, #str)))
+            insert(res, format([[
+if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]],
+                                pos, #str, pos, il.cpool_add(str), #str))
+            insert(res, format('rt_err_value(r, %s)\nend', pos))
+        else
+            insert(res, format('%s t == %q then',
+                               if_or_elseif, str))
+        end
+        emit_nested_block(ctx, branch, cc, res)
+    end
+    insert(res, 'else')
+    insert(res, format('rt_err_value(r, %s)', pos))
+    insert(res, 'end')
+end
+
+local function emit_objforeach_block(ctx, block, cc, res)
+    local il      = ctx.il
+    local varmap  = ctx.varmap
+    local head    = block[1]
+    local itervar = varref(head.ripv, 0, varmap)
+    if block.peel or head.step == 0 then
+        insert(res, format('%s = %s',
+                            itervar, varref(head.ipv, head.ipo + 1 - head.step,
+                                            varmap)))
+        if il.enable_loop_peeling then
+            local label = il.id(); ctx.labelmap[head] = label
+            insert(res, format('::l%d::', label))
+            break_jit_trace(ctx, res)
+            if head.step ~= 0 then
+                insert(res, format('%s = %s+%d', itervar,
+                                    itervar, head.step))
+            end
+            local pos = varref(head.ipv, head.ipo, varmap)
+            insert(res, format('if %s ~= %s+r.v[%s].xoff then',
+                                itervar, pos, pos))
+        else -- head.step == 0
+            local pos = varref(head.ipv, head.ipo, varmap)
+            insert(res, format('while %s ~= %s+r.v[%s].xoff do',
+                                itervar, pos, pos))
+        end
+        emit_nested_block(ctx, block, head, res)
+        insert(res, 'end')
+        return true -- can FUSE with SKIP
+    else
+        insert(res, format('for %s = %s, %s+r.v[%s].xoff, %d do',
+                            itervar,
+                            varref(head.ipv, head.ipo+1, varmap),
+                            varref(head.ipv, head.ipo-1, varmap),
+                            varref(head.ipv, head.ipo, varmap),
+                            head.step))
+        emit_nested_block(ctx, block, head, res)
+        insert(res, 'end')
+    end
+end
+
+local function emit_block(ctx, block, cc, res)
     local il =       ctx.il
     local varmap =   ctx.varmap   -- variable name -> local name
     local labelmap = ctx.labelmap -- il object -> label name
@@ -374,123 +487,28 @@ local function emit_lua_block(ctx, block, cc, res)
         if label then
             insert(res, format('::l%d::', label))
         end
-        if i < skiptill then -- sometimes we fuse several ops
-                             -- and set skiptill
-        elseif type(o) == 'cdata' then
-            local tab = emit_lua_block_tab -- just a shorter alias
-            if o.op == opcode.ISSET     then
-                insert(res, format('if %s == 0 then rt_err_missing(r, %s, "%s") end',
-                                   varref(o.ripv, 0, varmap),
-                                   varref(o.ipv, o.ipo, varmap),
-                                   il.get_extra(o)))
-            -----------------------------------------------------------
-            elseif o.op == opcode.BEGINVAR  then
+        if type(o) == 'cdata' then
+            if o.op == opcode.BEGINVAR  then
                 if not elidevarinit(block, i) then
                     insert(res, format('%s = 0', varref(o.ipv, 0, varmap)))
                 end
-            else
-                emit_lua_instruction(il, o, res, varmap)
+            elseif i >= skiptill then -- FUSE
+                emit_instruction(il, o, res, varmap)
             end
         else
             if o.break_jit_trace then break_jit_trace(ctx, res) end
             local head = o[1]
             local link = block[i+1] or cc
             if     head.op == opcode.IFSET then
-                local branch1 = o[2]
-                local branch2 = o[3]
-                assert(branch1[1].op == opcode.IBRANCH)
-                insert(res, format('if %s %s 0 then',
-                                   varref(head.ipv, 0, varmap),
-                                   branch1[1].ci == 0 and '==' or '~='))
-                emit_nested_lua_block(ctx, branch1, link, res)
-                if branch2 then
-                    assert(branch2[1].op == opcode.IBRANCH)
-                    assert(branch2[1].ci ~= branch1[1].ci)
-                    insert(res, 'else')
-                    emit_nested_lua_block(ctx, branch2, link, res)
-                end
-                insert(res, 'end')
+                emit_if_block(ctx, o, link, res)
             elseif head.op == opcode.STRSWITCH then
-                local strings = ffi_new('const char *[?]', #o - 1)
-                for i = 2, #o do
-                    local branch = o[i]
-                    local head = branch[1]
-                    assert(head.op == opcode.SBRANCH)
-                    local str = il.get_extra(head)
-                    strings[i - 2] = str
-                end
-                local func = rt_C.create_hash_func(#o - 1, strings,
-                                                   random_bytes, #random_bytes)
-                local pos = varref(head.ipv, head.ipo, varmap)
-                emit_compute_hash_func(func, pos, res)
-                for i = 2, #o do
-                    local branch = o[i]
-                    local head = branch[1]
-                    assert(head.op == opcode.SBRANCH)
-                    local str = il.get_extra(head)
-                    local if_or_elseif = i == 2 and 'if' or 'elseif'
-                    if func ~= 0 then
-                        insert(res, format('%s t == %d then', if_or_elseif,
-                                           rt_C.eval_hash_func(func, str, #str)))
-                        if func == 0x04000000 then -- hash == xlen, don't check again
-                            insert(res, format([[
-if ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]],
-                                               pos, il.cpool_add(str), #str))
-                        else
-                            insert(res, format([[
-if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]],
-                                               pos, #str, pos, il.cpool_add(str), #str))
-                        end
-                        insert(res, format('rt_err_value(r, %s)\nend', pos))
-                    else
-                        insert(res, format([[
-%s r.v[%s].xlen == %d and ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) == 0 then]],
-                                           if_or_elseif, pos, #str,
-                                           pos, il.cpool_add(str), #str))
-                    end
-                    emit_nested_lua_block(ctx, branch, link, res)
-                end
-                insert(res, 'else')
-                insert(res, format('rt_err_value(r, %s)', pos))
-                insert(res, 'end')
+                emit_strswitch_block(ctx, o, link, res)
             elseif head.op == opcode.OBJFOREACH then
-                local itervar = varref(head.ripv, 0, varmap)
-                if o.peel or head.step == 0 then
-                    insert(res, format('%s = %s',
-                                        itervar, varref(head.ipv, head.ipo +
-                                                        1 - head.step,
-                                                        varmap)))
-                    if il.enable_loop_peeling then
-                        local label = il.id(); labelmap[head] = label
-                        insert(res, format('::l%d::', label))
-                        break_jit_trace(ctx, res)
-                        if head.step ~= 0 then
-                            insert(res, format('%s = %s+%d', itervar,
-                                               itervar, head.step))
-                        end
-                        local pos = varref(head.ipv, head.ipo, varmap)
-                        insert(res, format('if %s ~= %s+r.v[%s].xoff then',
-                                            itervar, pos, pos))
-                    else -- head.step == 0
-                        local pos = varref(head.ipv, head.ipo, varmap)
-                        insert(res, format('while %s ~= %s+r.v[%s].xoff do',
-                                            itervar, pos, pos))
-                    end
-                    emit_nested_lua_block(ctx, o, head, res)
-                    insert(res, 'end')
+                local can_fuse = emit_objforeach_block(ctx, o, link, res)
+                if can_fuse then -- fuse OBJFOREACH / SKIP
                     local copystmt
-                    -- fuse OBJFOREACH / SKIP
                     skiptill, copystmt = fuseskip(block, i, varmap)
                     insert(res, copystmt)
-                else
-                    insert(res, format('for %s = %s, %s+r.v[%s].xoff, %d do', 
-                                       itervar,
-                                       varref(head.ipv, head.ipo+1, varmap),
-                                       varref(head.ipv, head.ipo-1, varmap),
-                                       varref(head.ipv, head.ipo, varmap),
-                                       head.step))
-                    emit_nested_lua_block(ctx, o, head, res)
-                    insert(res, 'end')
                 end
             else
                 assert(false)
@@ -499,9 +517,9 @@ if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]
     end
 end
 
-emit_nested_lua_block = function(ctx, block, cc, res)
+emit_nested_block = function(ctx, block, cc, res)
     if not block.peel then
-        return emit_lua_block(ctx, block, cc, res)
+        return emit_block(ctx, block, cc, res)
     end
     local il = ctx.il
     local labelmap, queue = ctx.labelmap, ctx.queue
@@ -515,19 +533,19 @@ emit_nested_lua_block = function(ctx, block, cc, res)
     insert(queue, cc)
 end
 
-local lua_locals_tab = {
+local locals_tab = {
     [0] = 'local x%d',
     'local x%d, x%d',
     'local x%d, x%d, x%d'
 }
 
-local function emit_lua_func_body(il, func, nlocals_min, res)
+local function emit_func_body(il, func, nlocals_min, res)
     local nlocals, varmap = sched_func_variables(func)
     if nlocals_min and nlocals_min > nlocals then
         nlocals = nlocals_min
     end
     for i = 1, nlocals, 4 do
-        insert(res, format(lua_locals_tab[nlocals - i] or
+        insert(res, format(locals_tab[nlocals - i] or
                            'local x%d, x%d, x%d, x%d',
                            i, i+1, i+2, i+3))
     end
@@ -555,7 +573,7 @@ local function emit_lua_func_body(il, func, nlocals_min, res)
             local entry, cc = queue[i], queue[i+1]
             local label = labelmap[entry]
             insert(res, label and format('::l%d::', label))
-            emit_lua_block(ctx, entry, cc, res)
+            emit_block(ctx, entry, cc, res)
             label = labelmap[cc]
             if cc == head then
                 insert(res, label and format('::l%d::', label))
@@ -587,7 +605,7 @@ end
 --  .conversion_init     - custom code executed before conversion
 --  .conversion_complete - custom code executed after conversion
 --  .iter_prolog         - custom code executed on every loop iteration
-local function emit_lua_func(il, func, res, opts)
+local function emit_func(il, func, res, opts)
     local head = func[1]
     local func_decl = opts and opts.func_decl or
                       format('f%d = function(r, v0, v%d)', head.name, head.ipv)
@@ -604,7 +622,7 @@ local function emit_lua_func(il, func, res, opts)
     insert(res, 'local t')
     local tpos = #res
     local patchpos1, patchpos2, jit_trace_breaks =
-        emit_lua_func_body(il, func, nlocals_min, res)
+        emit_func_body(il, func, nlocals_min, res)
     res[patchpos1] = conversion_init or ''
     if not conversion_complete then
         res[patchpos2] = func_return
@@ -659,17 +677,18 @@ local function install_backend(il, opts)
     end
 
     function il.emit_lua_func(func, res, opts)
-        return emit_lua_func(il, func, res, opts)
+        return emit_func(il, func, res, opts)
     end
     
     function il.append_lua_code(code, res)
         local varmap = {}
         for i = 1, #code do
-            emit_lua_instruction(il, code[i], res, varmap)
+            emit_instruction(il, code[i], res, varmap)
         end
     end
 
     il.enable_loop_peeling = (opts.enable_loop_peeling ~= false)
+    il.enable_fast_strings = (opts.enable_fast_strings ~= false)
 
     return il
 end
