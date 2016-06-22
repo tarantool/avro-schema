@@ -95,6 +95,11 @@ static uint32_t
 create_fnv_func(int n, const unsigned char *strings[],
                 const unsigned char *random, size_t size_random,
                 void *mem);
+int
+schema_rt_key_eq(const char *key, size_t klen, const char *str, size_t len)
+{
+    return klen != 0 && klen == len && memcmp(key, str, klen) == 0;
+}
 
 #if !(C_HAVE_BSWAP16)
 static inline uint16_t __builtin_bswap16(uint16_t a)

@@ -7,6 +7,7 @@ global:
     create_hash_func;
     eval_hash_func;
     eval_fnv1a_func;
+    schema_rt_key_eq;
     phf_init_uint32;
     phf_compact;
     phf_hash_uint32;

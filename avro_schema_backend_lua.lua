@@ -422,8 +422,8 @@ local function emit_strswitch_block(ctx, block, cc, res)
             insert(res, format('%s t == %d then', if_or_elseif,
                                 rt_C.eval_hash_func(func, str, #str)))
             insert(res, format([[
-if r.v[%s].xlen ~= %d or ffi_C.memcmp(r.b1-r.v[%s].xoff, r.b2-%d, %d) ~= 0 then]],
-                                pos, #str, pos, il.cpool_add(str), #str))
+if rt_C.schema_rt_key_eq(r.b2-%d, %d, r.b1-r.v[%s].xoff, r.v[%s].xlen) == 0 then]],
+                               il.cpool_add(str), #str, pos, pos))
             insert(res, format('rt_err_value(r, %s)\nend', pos))
         else
             insert(res, format('%s t == %q then',

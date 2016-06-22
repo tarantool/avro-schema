@@ -78,6 +78,9 @@ eval_hash_func(int32_t func, const unsigned char *str, size_t len);
 int32_t
 eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
 
+int
+schema_rt_key_eq(const char *key, size_t klen, const char *str, size_t len);
+
 /* phf ***************************************************************/
 
 struct schema_rt_phf {
