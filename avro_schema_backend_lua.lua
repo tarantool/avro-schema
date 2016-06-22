@@ -106,64 +106,6 @@ local function varref(ipv, ipo, map)
     end
 end
 
--- After BEGINVAR, the variable value is 0. If a store follows
--- we can elide the initialization.
-local function elidevarinit(block, i)
-    local vid = block[i].ipv
-    for lookahead = i+1, i+5 do
-        local o = block[lookahead]
-        if not o then
-            return true
-        elseif type(o) == 'table' then
-            local head = o[1]
-            return head.op == opcode.OBJFOREACH and
-                   head.ripv == vid
-        elseif o.op >= opcode.OBJFOREACH and o.op <= opcode.PSKIP and
-               o.ripv == vid then
-            return true
-        elseif o.ipv == vid then
-            return false -- false negatives are ok
-        end
-    end
-    return false
-end
-
--- in OBJFOREACH iteration variable is undefined upon completion;
--- the op is often followed by a SKIP to compute the position of the
--- element following array/map. The later could be fused with OBJFOREACH,
--- if in the resulting code the iteration variable has a well-defined
--- value when the loop completes. (in Lua: consider while vs for loop)
-local function fuseskip(block, i, varmap)
-    local head = block[i][1]
-    for lookahead = i+1, i+5 do
-        local o = block[lookahead]
-        if type(o) ~= 'cdata' then
-            return i
-        elseif o.op == opcode.SKIP and
-               o.ipv == head.ipv and o.ipo == head.ipo then
-            if o.ripv ~= head.ripv then
-                return lookahead + 1, format('%s = %s',
-                                             varref(o.ripv, 0, varmap),
-                                             varref(head.ripv, 0, varmap))
-            end
-            return lookahead + 1
-        elseif o.op ~= opcode.ENDVAR then
-            return i
-        end
-    end
-end
-
--- Break the current JIT trace in a gentle way.
--- The trace successfully completes and it gets linked with
--- the existing JIT-ed code.
-local function break_jit_trace(ctx, res)
-    local label = ctx.il.id()
-    insert(ctx.jit_trace_breaks, label)
-    insert(res, format('s = %d', label))
-    insert(res, 'goto continue -- break JIT trace')
-    insert(res, format('::l%d::', label))
-end
-
 local emit_instruction_tab = {
     ----------------------- T
     [opcode.PUTARRAYC  ] = 11,
@@ -198,7 +140,49 @@ local emit_instruction_tab = {
     [opcode.ISMAP      ] = 12
 }
 
-local emit_nested_block
+local emit_compute_hash_func_tab = {
+    [0x01] = 't = r.b1[-r.v[%s].xoff+%d]',
+    [0x02] = 't = r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]',
+    [0x03] = 't = r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]',
+    [0x04] = 't = r.v[%s].xlen',
+    [0x05] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]',
+    [0x06] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x07] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
+    [0x08] = 't = 0',
+    [0x09] = 't = r.b1[-r.v[%s].xoff+%d]',
+    [0x0a] = 't = bor(lshift(r.b1[-r.v[%s].xoff+%d], 8), r.b1[-r.v[%s].xoff+%d])',
+    [0x0b] = 't = bor(lshift(r.b1[-r.v[%s].xoff+%d], 16), bor(lshift(r.b1[-r.v[%s].xoff+%d], 8), r.b1[-r.v[%s].xoff+%d]))',
+    [0x0c] = 't = r.v[%s].xlen',
+    [0x0d] = 't = bor(lshift(r.v[%s].xlen, 8), r.b1[%d-r.v[%s].xoff])',
+    [0x0e] = 't = bor(lshift(r.v[%s].xlen, 16), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))',
+    [0x0f] = 't = bor(bor(lshift(r.v[%s].xlen, 24), lshift(r.b1[%d-r.v[%s].xoff], 16)), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))'
+}
+
+local function emit_compute_hash_func(func, pos, res)
+    if func == 0 then
+        assert(false)
+    elseif func > 0x0f000000 then
+        insert(res, format([[
+t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
+                      rt_C.eval_hash_func(func, '', 0), pos, pos))
+        return
+    end
+    local a = rshift(func, 24)
+    local b = band(0xff, rshift(func, 16))
+    local c = band(0xff, rshift(func,  8))
+    local d = band(0xff, func)
+    local stmt = format(emit_compute_hash_func_tab[a],
+                        pos, b, pos, c, pos, d, pos)
+    if band(a, 0x3) == 0 then
+        insert(res, stmt) -- no samples from the string
+    else
+        local idx_max = band(0xff, rshift(func, 8*(3-band(a, 0x3))))
+        insert(res, format('if r.v[%s].xlen > %d then -- %x',
+                           pos, idx_max, func))
+        insert(res, stmt)
+        insert(res, "end")
+    end
+end
 
 local function emit_instruction(il, o, res, varmap)
     local tab = emit_instruction_tab -- a shorter alias
@@ -325,6 +309,8 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
     end
 end
 
+local emit_nested_block
+
 local function emit_if_block(ctx, block, cc, res)
     local varmap  = ctx.varmap
     local head, branch1, branch2 = block[1], block[2], block[3]
@@ -354,50 +340,6 @@ local function create_strswitch_hash_func(il, block)
     end
     return rt_C.create_hash_func(#block - 1, strings,
                                  random_bytes, #random_bytes)
-end
-
-local emit_compute_hash_func_tab = {
-    [0x01] = 't = r.b1[-r.v[%s].xoff+%d]',
-    [0x02] = 't = r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]',
-    [0x03] = 't = r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]+r.b1[-r.v[%s].xoff+%d]',
-    [0x04] = 't = r.v[%s].xlen',
-    [0x05] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]',
-    [0x06] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
-    [0x07] = 't = r.v[%s].xlen+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]+r.b1[%d-r.v[%s].xoff]',
-    [0x08] = 't = 0',
-    [0x09] = 't = r.b1[-r.v[%s].xoff+%d]',
-    [0x0a] = 't = bor(lshift(r.b1[-r.v[%s].xoff+%d], 8), r.b1[-r.v[%s].xoff+%d])',
-    [0x0b] = 't = bor(lshift(r.b1[-r.v[%s].xoff+%d], 16), bor(lshift(r.b1[-r.v[%s].xoff+%d], 8), r.b1[-r.v[%s].xoff+%d]))',
-    [0x0c] = 't = r.v[%s].xlen',
-    [0x0d] = 't = bor(lshift(r.v[%s].xlen, 8), r.b1[%d-r.v[%s].xoff])',
-    [0x0e] = 't = bor(lshift(r.v[%s].xlen, 16), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))',
-    [0x0f] = 't = bor(bor(lshift(r.v[%s].xlen, 24), lshift(r.b1[%d-r.v[%s].xoff], 16)), bor(lshift(r.b1[%d-r.v[%s].xoff], 8), r.b1[%d-r.v[%s].xoff]))'
-}
-
-local function emit_compute_hash_func(func, pos, res)
-    if func == 0 then
-        assert(false)
-    elseif func > 0x0f000000 then
-        insert(res, format([[
-t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
-                      rt_C.eval_hash_func(func, '', 0), pos, pos))
-        return
-    end
-    local a = rshift(func, 24)
-    local b = band(0xff, rshift(func, 16))
-    local c = band(0xff, rshift(func,  8))
-    local d = band(0xff, func)
-    local stmt = format(emit_compute_hash_func_tab[a],
-                        pos, b, pos, c, pos, d, pos)
-    if band(a, 0x3) == 0 then
-        insert(res, stmt) -- no samples from the string
-    else
-        local idx_max = band(0xff, rshift(func, 8*(3-band(a, 0x3))))
-        insert(res, format('if r.v[%s].xlen > %d then -- %x',
-                           pos, idx_max, func))
-        insert(res, stmt)
-        insert(res, "end")
-    end
 end
 
 local function emit_strswitch_block(ctx, block, cc, res)
@@ -476,6 +418,64 @@ local function emit_objforeach_block(ctx, block, cc, res)
     end
 end
 
+-- After BEGINVAR, the variable value is 0. If a store follows
+-- we can elide the initialization.
+local function elide_var_init(block, i)
+    local vid = block[i].ipv
+    for lookahead = i+1, i+5 do
+        local o = block[lookahead]
+        if not o then
+            return true
+        elseif type(o) == 'table' then
+            local head = o[1]
+            return head.op == opcode.OBJFOREACH and
+                   head.ripv == vid
+        elseif o.op >= opcode.OBJFOREACH and o.op <= opcode.PSKIP and
+               o.ripv == vid then
+            return true
+        elseif o.ipv == vid then
+            return false -- false negatives are ok
+        end
+    end
+    return false
+end
+
+-- in OBJFOREACH iteration variable is undefined upon completion;
+-- the op is often followed by a SKIP to compute the position of the
+-- element following array/map. The later could be fused with OBJFOREACH,
+-- if in the resulting code the iteration variable has a well-defined
+-- value when the loop completes. (in Lua: consider while vs for loop)
+local function fuse_skip(block, i, varmap)
+    local head = block[i][1]
+    for lookahead = i+1, i+5 do
+        local o = block[lookahead]
+        if type(o) ~= 'cdata' then
+            return i
+        elseif o.op == opcode.SKIP and
+               o.ipv == head.ipv and o.ipo == head.ipo then
+            if o.ripv ~= head.ripv then
+                return lookahead + 1, format('%s = %s',
+                                             varref(o.ripv, 0, varmap),
+                                             varref(head.ripv, 0, varmap))
+            end
+            return lookahead + 1
+        elseif o.op ~= opcode.ENDVAR then
+            return i
+        end
+    end
+end
+
+-- Break the current JIT trace in a gentle way.
+-- The trace successfully completes and it gets linked with
+-- the existing JIT-ed code.
+local function break_jit_trace(ctx, res)
+    local label = ctx.il.id()
+    insert(ctx.jit_trace_breaks, label)
+    insert(res, format('s = %d', label))
+    insert(res, 'goto continue -- break JIT trace')
+    insert(res, format('::l%d::', label))
+end
+
 local function emit_block(ctx, block, cc, res)
     local il =       ctx.il
     local varmap =   ctx.varmap   -- variable name -> local name
@@ -489,7 +489,7 @@ local function emit_block(ctx, block, cc, res)
         end
         if type(o) == 'cdata' then
             if o.op == opcode.BEGINVAR  then
-                if not elidevarinit(block, i) then
+                if not elide_var_init(block, i) then
                     insert(res, format('%s = 0', varref(o.ipv, 0, varmap)))
                 end
             elseif i >= skiptill then -- FUSE
@@ -507,7 +507,7 @@ local function emit_block(ctx, block, cc, res)
                 local can_fuse = emit_objforeach_block(ctx, o, link, res)
                 if can_fuse then -- fuse OBJFOREACH / SKIP
                     local copystmt
-                    skiptill, copystmt = fuseskip(block, i, varmap)
+                    skiptill, copystmt = fuse_skip(block, i, varmap)
                     insert(res, copystmt)
                 end
             else
