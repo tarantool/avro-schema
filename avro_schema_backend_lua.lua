@@ -387,6 +387,17 @@ if rt_C.schema_rt_key_eq(r.b2-%d, %d, r.b1-r.v[%s].xoff, r.v[%s].xlen) == 0 then
     insert(res, 'end')
 end
 
+-- Break the current JIT trace in a gentle way.
+-- The trace successfully completes and it gets linked with
+-- the existing JIT-ed code.
+local function break_jit_trace(ctx, res)
+    local label = ctx.il.id()
+    insert(ctx.jit_trace_breaks, label)
+    insert(res, format('s = %d', label))
+    insert(res, 'goto continue -- break JIT trace')
+    insert(res, format('::l%d::', label))
+end
+
 local function emit_objforeach_block(ctx, block, cc, res)
     local il      = ctx.il
     local varmap  = ctx.varmap
@@ -472,17 +483,6 @@ local function fuse_skip(block, i, varmap)
             return i
         end
     end
-end
-
--- Break the current JIT trace in a gentle way.
--- The trace successfully completes and it gets linked with
--- the existing JIT-ed code.
-local function break_jit_trace(ctx, res)
-    local label = ctx.il.id()
-    insert(ctx.jit_trace_breaks, label)
-    insert(res, format('s = %d', label))
-    insert(res, 'goto continue -- break JIT trace')
-    insert(res, format('::l%d::', label))
 end
 
 local function emit_block(ctx, block, cc, res)
