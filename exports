@@ -12,8 +12,8 @@ global:
     phf_compact;
     phf_hash_uint32;
     phf_destroy;
-    phf_hash_uint32_mod_raw8;
-    phf_hash_uint32_mod_raw16;
-    phf_hash_uint32_mod_raw32;
+    phf_hash_uint32_band_raw8;
+    phf_hash_uint32_band_raw16;
+    phf_hash_uint32_band_raw32;
 local: *;
 };

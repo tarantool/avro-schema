@@ -114,13 +114,13 @@ void
 phf_destroy(struct schema_rt_phf *phf);
 
 int32_t
-phf_hash_uint32_mod_raw8(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
+phf_hash_uint32_band_raw8(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 
 int32_t
-phf_hash_uint32_mod_raw16(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
+phf_hash_uint32_band_raw16(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 
 int32_t
-phf_hash_uint32_mod_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
+phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 
 /* libc **************************************************************/
 

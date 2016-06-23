@@ -800,12 +800,12 @@ r.ov[%s].xoff = %s[r.v[%s].ival*2+1];]],
             h[i] = rt_C.eval_hash_func(hash_func, s[i], #s[i])
         end
         local phf = ffi.new('struct schema_rt_phf')
-        local res = rt_C.phf_init_uint32(phf, h, n, 4, 90, seed, 0)
+        local res = rt_C.phf_init_uint32(phf, h, n, 4, 90, seed, 1)
         if res ~= 0 then
             error('internal error: phf: '..res)
         end
         rt_C.phf_compact(phf)
-        local g_width = byte('\1#\2#\4', phf.g_op) -- 1:int8 3:int16 5:int32
+        local g_width = byte('#\1#\2#\4', phf.g_op) -- 2:int8 4:int16 6:int32
         cpool_align(4)
         local g_offset = cpool_add_raw(ffi_string(phf.g, phf.r*(g_width)))
         local r, m = tonumber(phf.r), tonumber(phf.m)
@@ -820,7 +820,7 @@ r.ov[%s].xoff = %s[r.v[%s].ival*2+1];]],
         end
         rt_C.phf_destroy(phf)
         local eval_phf_func = format([[
-t = rt_C.phf_hash_uint32_mod_raw%d(r.b2-%d, t, %d, %d, %d)]],
+t = rt_C.phf_hash_uint32_band_raw%d(r.b2-%d, t, %d, %d, %d)]],
                                      g_width*8, g_offset, seed, r, m)
         return hash_func, eval_phf_func, is_sparse and v_max,
                cpool_add_uint_array(aux_table, m*3)
