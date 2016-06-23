@@ -360,12 +360,6 @@ static inline uint32_t phf_round32(std::string k, uint32_t h1) {
 #endif
 
 static inline uint32_t phf_mix32(uint32_t h1) {
-	h1 ^= h1 >> 16;
-	h1 *= UINT32_C(0x85ebca6b);
-	h1 ^= h1 >> 13;
-	h1 *= UINT32_C(0xc2b2ae35);
-	h1 ^= h1 >> 16;
-
 	return h1;
 } /* phf_mix32() */
 
