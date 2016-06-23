@@ -687,24 +687,24 @@ local function install_backend(il, opts)
     -- store a uint array in cpool; pick the smallest type to fit the values
     -- return an expression (string) to access the array in runtime
     local function cpool_add_uint_array(t, len)
-        local v_max = t[1]
-        for i = 2,len do
+        local v_max = 0
+        for i = 0,len-1 do
             local v = t[i] or 0
             v_max = max(v, v_max)
         end
-        local item_type = v_max < 0x100 and 'uint8_t' or
-                          v_max < 0x10000 and 'uint16_t' or 'uint32_t'
-        local array_type = item_type .. '[?]'
+        local item_bits = v_max < 0x100 and 8 or
+                          v_max < 0x10000 and 16 or 32
+        local array_type = format('uint%d_t [?]', item_bits)
         local buf = ffi_new(array_type, len)
-        for i = 1,len do
-            buf[i-1] = t[i] or 0
+        for i = 0,len-1 do
+            buf[i] = t[i] or 0
         end
         cpool_align(4)
         local cpos = cpool_add_raw(ffi_string(buf, ffi_sizeof(array_type, len)))
-        if item_type == 'uint8_t' then
-            return format('(r.b2-%d)', cpos)
+        if item_bits == 8 then
+            return format('r.b2-%d', cpos), 8
         else
-            return format('ffi_cast("%s *", r.b2-%d)', item_type, cpos)
+            return format('r.b2_%d-%d', item_bits, cpos/(item_bits/8)), item_bits
         end
     end
 
@@ -736,8 +736,8 @@ local function install_backend(il, opts)
             for i = 1, n do
                 local str = tab[i]
                 is_sparse = is_sparse or str == ''
-                data[i*2 - 1] = #str
-                data[i*2    ] = il.cpool_add(str)
+                data[i*2 - 2] = #str
+                data[i*2 - 1] = il.cpool_add(str)
             end
             local cdata = cpool_add_uint_array(data, n*2)
             emit = function(o, res, varmap)
@@ -747,13 +747,13 @@ if r.v[%s].uval >= %d then rt_err_value(r, %s) end]],
                                    pos, n, pos))
                 if is_sparse then
                     insert(res, format([[
-if %s[r.v[%s].ival*2] == 0 then rt_err_value(r, %s, true) end]],
+if (%s)[r.v[%s].ival*2] == 0 then rt_err_value(r, %s, true) end]],
                                        cdata, pos, pos))
                 end
                 local output = varref(0, o.offset, varmap)
                 insert(res, format([[
-r.ot[%s] = 18; r.ov[%s].xlen = %s[r.v[%s].ival*2];
-r.ov[%s].xoff = %s[r.v[%s].ival*2+1];]],
+r.ot[%s] = 18; r.ov[%s].xlen = (%s)[r.v[%s].ival*2];
+r.ov[%s].xoff = (%s)[r.v[%s].ival*2+1];]],
                                    output, output, cdata, pos,
                                    output, cdata, pos))
             end
@@ -784,44 +784,51 @@ r.ov[%s].xoff = %s[r.v[%s].ival*2+1];]],
             s[n] = k
             n = n + 1
         end
-        local hash_func
-        do
+        local hash_func = 0
+        if il.enable_fast_strings then
             local _s = ffi_new('const char * [?]', n)
             for i = 0, n-1 do
                 _s[i] = s[i]
             end
-            hash_func = il.enable_fast_strings and
-                        rt_C.create_hash_func(n, _s, random_bytes,
-                                              #random_bytes) or 0
+            hash_func = rt_C.create_hash_func(n, _s, random_bytes,
+                                              #random_bytes)
         end
         assert(hash_func ~= 0) -- fixme
-        local h = ffi.new('int32_t[?]', n)
+        -- only use phf if enum is large
+        local phf = n > il.phf_threshold and
+                    ffi.gc(ffi_new('struct schema_rt_phf'),
+                           rt_C.phf_destroy)
+        local h = ffi_new('int32_t[?]', n)
         for i = 0, n-1 do
             h[i] = rt_C.eval_hash_func(hash_func, s[i], #s[i])
         end
-        local phf = ffi.new('struct schema_rt_phf')
-        local res = rt_C.phf_init_uint32(phf, h, n, 4, 90, seed, 1)
-        if res ~= 0 then
-            error('internal error: phf: '..res)
+        local eval_phf_func, m
+        if phf then
+            local res = rt_C.phf_init_uint32(phf, h, n, 4, 90, seed, 1)
+            if res ~= 0 then error('internal error: phf: '..res) end
+            rt_C.phf_compact(phf)
+            local g_width = byte('#\1#\2#\4', phf.g_op) -- 2:int8 4:int16 6:int32
+            cpool_align(4)
+            local g_offset = cpool_add_raw(ffi_string(phf.g, phf.r*(g_width)))
+            local r
+            r, m = tonumber(phf.r), tonumber(phf.m)
+            eval_phf_func = format([[
+t = rt_C.phf_hash_uint32_band_raw%d(r.b2-%d, t, %d, %d, %d)]],
+                                   g_width*8, g_offset, seed, r, m)
+        else
+            local tab, tab_bits = cpool_add_uint_array(h, n)
+            m, eval_phf_func = n, format('t = rt_C.schema_rt_search%d(%s, t, %d)',
+                                         tab_bits, tab, n)
         end
-        rt_C.phf_compact(phf)
-        local g_width = byte('#\1#\2#\4', phf.g_op) -- 2:int8 4:int16 6:int32
-        cpool_align(4)
-        local g_offset = cpool_add_raw(ffi_string(phf.g, phf.r*(g_width)))
-        local r, m = tonumber(phf.r), tonumber(phf.m)
         local aux_table = {}
         for i = 0, n-1 do
             local str = s[i]
             local v   = tab[str]
-            local index = rt_C.phf_hash_uint32(phf, h[i])
-            aux_table[index*3 + 1] = #str
-            aux_table[index*3 + 2] = il.cpool_add(str)
-            aux_table[index*3 + 3] = v == -1 and v_max + 1 or v
+            local index = phf and rt_C.phf_hash_uint32(phf, h[i]) or i
+            aux_table[index*3    ] = #str
+            aux_table[index*3 + 1] = il.cpool_add(str)
+            aux_table[index*3 + 2] = v == -1 and v_max + 1 or v
         end
-        rt_C.phf_destroy(phf)
-        local eval_phf_func = format([[
-t = rt_C.phf_hash_uint32_band_raw%d(r.b2-%d, t, %d, %d, %d)]],
-                                     g_width*8, g_offset, seed, r, m)
         return hash_func, eval_phf_func, is_sparse and v_max,
                cpool_add_uint_array(aux_table, m*3)
     end
@@ -841,18 +848,18 @@ t = rt_C.phf_hash_uint32_band_raw%d(r.b2-%d, t, %d, %d, %d)]],
                 emit_compute_hash_func(hash_func, pos, res)
                 insert(res, eval_phf_func)
                 insert(res, format([[
-if rt_C.schema_rt_key_eq(r.b2-%s[t*3+1], r.b1-r.v[%s].xoff, %s[t*3], r.v[%s].xlen) ~= 0 then
+if rt_C.schema_rt_key_eq(r.b2-(%s)[t*3+1], r.b1-r.v[%s].xoff, (%s)[t*3], r.v[%s].xlen) ~= 0 then
     rt_err_value(r, %s)
 end]], aux_table, pos, aux_table, pos, pos))
                 if v_max then
                     insert(res, format([[
-if %s[t*3+2] > %d then
+if (%s)[t*3+2] > %d then
     rt_err_value(r, %s, true)
 end]], aux_table, v_max, pos))
                 end
                 local output = varref(0, o.offset, varmap)
                 insert(res, format([[
-r.ot[%s] = 4; r.ov[%s].ival = %s[t*3+2];]],
+r.ot[%s] = 4; r.ov[%s].ival = (%s)[t*3+2];]],
                                    output, output, aux_table))
             end
             s2i_cache[tab] = emit
@@ -873,6 +880,7 @@ r.ot[%s] = 4; r.ov[%s].ival = %s[t*3+2];]],
 
     il.enable_loop_peeling = (opts.enable_loop_peeling ~= false)
     il.enable_fast_strings = (opts.enable_fast_strings ~= false)
+    il.phf_threshold       = (opts.phf_threshold or 8)
 
     return il
 end

@@ -41,7 +41,11 @@ struct schema_rt_Regs {
                              *v_[1];
     };
     const uint8_t            *b1;
-    const uint8_t            *b2;
+    union {
+        const uint8_t        *b2;
+        const uint16_t       *b2_16;
+        const uint32_t       *b2_32;
+    };
     uint8_t                  *ot;
     struct schema_rt_Value
                              *ov;
@@ -81,6 +85,15 @@ eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
 
 int
 schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len);
+
+int32_t
+schema_rt_search8(const void *tab, int32_t k, size_t n);
+
+int32_t
+schema_rt_search16(const void *tab, int32_t k, size_t n);
+
+int32_t
+schema_rt_search32(const void *tab, int32_t k, size_t n);
 
 /* phf ***************************************************************/
 
