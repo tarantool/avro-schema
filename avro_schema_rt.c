@@ -96,9 +96,9 @@ create_fnv_func(int n, const unsigned char *strings[],
                 const unsigned char *random, size_t size_random,
                 void *mem);
 int
-schema_rt_key_eq(const char *key, size_t klen, const char *str, size_t len)
+schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len)
 {
-    return klen != 0 && klen == len && memcmp(key, str, klen) == 0;
+    return klen == 0 || klen != len ? -1 : memcmp(key, str, klen);
 }
 
 #if !(C_HAVE_BSWAP16)

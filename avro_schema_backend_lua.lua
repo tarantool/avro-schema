@@ -373,8 +373,8 @@ local function emit_strswitch_block(ctx, block, cc, res)
             insert(res, format('%s t == %d then', if_or_elseif,
                                 rt_C.eval_hash_func(func, str, #str)))
             insert(res, format([[
-if rt_C.schema_rt_key_eq(r.b2-%d, %d, r.b1-r.v[%s].xoff, r.v[%s].xlen) == 0 then]],
-                               il.cpool_add(str), #str, pos, pos))
+if rt_C.schema_rt_key_eq(r.b2-%d, r.b1-r.v[%s].xoff, %d, r.v[%s].xlen) ~= 0 then]],
+                               il.cpool_add(str), pos, #str, pos))
             insert(res, format('rt_err_value(r, %s)\nend', pos))
         else
             insert(res, format('%s t == %q then',
@@ -841,9 +841,9 @@ t = rt_C.phf_hash_uint32_mod_raw%d(r.b2-%d, t, %d, %d, %d)]],
                 emit_compute_hash_func(hash_func, pos, res)
                 insert(res, eval_phf_func)
                 insert(res, format([[
-if rt_C.schema_rt_key_eq(r.b2-%s[t*3+1], %s[t*3], r.b1-r.v[%s].xoff, r.v[%s].xlen) == 0 then
+if rt_C.schema_rt_key_eq(r.b2-%s[t*3+1], r.b1-r.v[%s].xoff, %s[t*3], r.v[%s].xlen) ~= 0 then
     rt_err_value(r, %s)
-end]], aux_table, aux_table, pos, pos, pos))
+end]], aux_table, pos, aux_table, pos, pos))
                 if v_max then
                     insert(res, format([[
 if %s[t*3+2] > %d then

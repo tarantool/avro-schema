@@ -80,7 +80,7 @@ int32_t
 eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
 
 int
-schema_rt_key_eq(const char *key, size_t klen, const char *str, size_t len);
+schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len);
 
 /* phf ***************************************************************/
 
