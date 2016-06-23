@@ -652,7 +652,7 @@ local function emit_func(il, func, res, opts)
         end
         insert(patch, conversion_init)
         res[patchpos1] = concat(patch, '\n')
-        res[tpos] = 'local t, s = 0'
+        res[tpos] = 'local t, s = 0, 0'
         insert(res, '::continue::')
         insert(res, 'end')
     end
