@@ -112,9 +112,15 @@ local function prepare_default(il, schema, val)
     local ilfunc = schema2ilfunc[schema]
     if ilfunc then
         return il[ilfunc], val
-    else
-        assert(false, 'NYI: complex default')
+    elseif schema.type == 'fixed' then
+        return il.putstrc, val
+    elseif schema.type == 'enum' then
+        local symbols = schema.symbols
+        for i = 1, #symbols do
+            if symbols[i] == val then return il.putintc, i-1 end
+        end
     end
+    assert(false, 'NYI: complex default')
 end
 
 local function prepare_flat_default(il, schema, val)
