@@ -747,7 +747,7 @@ if r.v[%s].uval >= %d then rt_err_value(r, %s) end]],
                                    pos, n, pos))
                 if is_sparse then
                     insert(res, format([[
-if %s[r.v[%s].ival*2] == 0 then rt_err_value(r, %s) end]],
+if %s[r.v[%s].ival*2] == 0 then rt_err_value(r, %s, true) end]],
                                        cdata, pos, pos))
                 end
                 local output = varref(0, o.offset, varmap)
@@ -847,12 +847,12 @@ end]], aux_table, aux_table, pos, pos, pos))
                 if v_max then
                     insert(res, format([[
 if %s[t*3+2] > %d then
-    rt_err_value(r, %s)
+    rt_err_value(r, %s, true)
 end]], aux_table, v_max, pos))
                 end
                 local output = varref(0, o.offset, varmap)
                 insert(res, format([[
-r.ot[%s] = 4; r.ov[%s].ival = %s[t*3+2] ]],
+r.ot[%s] = 4; r.ov[%s].ival = %s[t*3+2];]],
                                    output, output, aux_table))
             end
             s2i_cache[tab] = emit

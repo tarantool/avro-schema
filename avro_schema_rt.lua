@@ -9,6 +9,7 @@ local remove = table.remove
 local bor, band = bit.bor, bit.band
 
 local ffi_cast = ffi.cast
+local ffi_string = ffi.string
 local msgpacklib_encode = msgpacklib and msgpacklib.encode
 local msgpacklib_decode = msgpacklib and msgpacklib.decode
 
@@ -268,7 +269,7 @@ local function msgpack_encode(r, n)
     if r.rc < 0 then
         error('Internal error', 0)
     end
-    return ffi.string(r.t, r.rc)
+    return ffi_string(r.t, r.rc)
 end
 
 local function universal_decode(r, s)
@@ -287,7 +288,7 @@ local function lua_encode(r, n)
     if r.rc < 0 then
         error('Internal error', 0)
     end
-    return msgpacklib_decode(ffi.string(r.t, r.rc))
+    return msgpacklib_decode(ffi_string(r.t, r.rc))
 end
 
 local extract_location
@@ -306,7 +307,7 @@ extract_location = function(r, pos)
             if not ismap then
                 insert(res, counter)
             elseif counter % 2 == 0 and r.t[iter-1] == 8 then
-                insert(res, ffi.string(r.b1 - r.v[iter-1].xoff, r.v[iter-1].xlen))
+                insert(res, ffi_string(r.b1 - r.v[iter-1].xoff, r.v[iter-1].xlen))
             else
                 return res[1] and format('%s: ', concat(res, '/')) or
                        '', true -- bad key
@@ -369,14 +370,31 @@ local function err_duplicate(r, pos)
     error('duplicate', 0)
 end
 
-local function err_value(r, pos)
+-- err_value() is used to report:
+--   - unknown key in a JSON record;
+--   - bad ENUM value (both integer and string forms);
+--   - bad UNION discriminator.
+-- ver_error == true iff the value is correct according to the source
+-- schema, but no conversion into destination schema exist.
+local function err_value(r, pos, ver_error)
+    local tag = ver_error and ' (schema versioning)' or ''
     local location, iskerror = extract_location(r, pos)
     if iskerror and r.t[pos] == 8 then
-        error(format('%sUnknown Key: %s',
+        error(format('%sUnknown key: %q%s',
                      location,
-                     ffi.string(r.b1-r.v[pos].xoff, r.v[pos].xlen)), 0)
+                     ffi_string(r.b1-r.v[pos].xoff, r.v[pos].xlen), tag), 0)
     end
-    error(format('%sBad value: TBD', location), 0)
+    local val = 'TBD'
+    local t = r.t[pos]
+    if t == 4 then
+        val = tonumber(r.v[pos].ival)
+        val = val == r.v[pos].ival and val or r.v[pos].ival
+    elseif t == 6 or t == 7 then
+        val = r.v[pos].dval
+    elseif t == 8 then
+        val = format('%q', ffi_string(r.b1 - r.v[pos].xoff, r.v[pos].xlen))
+    end
+    error(format('%sBad value: %s%s', location, val, tag), 0)
 end
 
 return {
