@@ -86,6 +86,15 @@ eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
 int
 schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len);
 
+int32_t
+schema_rt_search8(const void *tab, int32_t k, size_t n);
+
+int32_t
+schema_rt_search16(const void *tab, int32_t k, size_t n);
+
+int32_t
+schema_rt_search32(const void *tab, int32_t k, size_t n);
+
 /* phf ***************************************************************/
 
 struct schema_rt_phf {

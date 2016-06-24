@@ -8,6 +8,9 @@ global:
     eval_hash_func;
     eval_fnv1a_func;
     schema_rt_key_eq;
+    schema_rt_search8;
+    schema_rt_search16;
+    schema_rt_search32;
     phf_init_uint32;
     phf_compact;
     phf_hash_uint32;
