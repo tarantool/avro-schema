@@ -151,34 +151,70 @@ local function prepare_flat_defaults_vec(il, schema, val)
 end
 
 -----------------------------------------------------------------------
+
+-- Emits code iterating a MAP or ARRAY at [$ipv + ipo].
+-- Generated code assumes that object type (MAP/ARRAY) was already checked.
+-- Handler emits the loop body; it receives the loop variable. 
+-- The body is responsible for incrementing the loop variable.
+-- Once the loop is complete, $ripv contains the position of
+-- an element following MAP/ARRAY.
+-- Nil $ripv or $ripv == $ipv are valid.
+local function objforeach(il, ripv, ipv, ipo, handler)
+    if ripv and ripv ~= ipv then
+        return {
+            {
+                il.objforeach(ripv, ipv, ipo),
+                (handler(ripv))
+            },
+            -- "loop variable has undefined value upon loop completion"
+            il.skip(ripv, ipv, ipo)
+        }
+    else
+        local lipv = il.id()
+        return {
+            il.beginvar(lipv),
+            {
+                il.objforeach(lipv, ipv, ipo),
+                (handler(lipv))
+            },
+            -- "loop variable has undefined value upon loop completion"
+            il.skip(ripv, ipv, ipo),
+            il.endvar(lipv)
+        }
+    end
+end
+
+-- This table makes several functions below simple.
 local ir2ilfuncs = {
-    NUL      = { 'isnul',    'putnulc' },
-    BOOL     = { 'isbool',   'putbool' },
-    INT      = { 'isint',    'putint' },
-    LONG     = { 'islong',   'putlong' },
-    FLT      = { 'isfloat',  'putfloat' },
-    DBL      = { 'isdouble', 'putdouble' },
-    BIN      = { 'isbin',    'putbin' },
-    STR      = { 'isstr',    'putstr' },
-    INT2LONG = { 'isint',    'putint2long' },
-    INT2FLT  = { 'isint',    'putint2flt' },
-    INT2DBL  = { 'isint',    'putint2dbl' },
-    LONG2FLT = { 'islong',   'putlong2flt'},
-    LONG2DBL = { 'islong',   'putlong2dbl' },
-    FLT2DBL  = { 'isfloat',  'putflt2dbl' },
-    BIN2STR  = { 'isbin',    'putbin2str' },
-    STR2BIN  = { 'isstr',    'putstr2bin' }
+    NUL      = { is = 'isnul',    put = 'putnulc' },
+    BOOL     = { is = 'isbool',   put = 'putbool' },
+    INT      = { is = 'isint',    put = 'putint' },
+    LONG     = { is = 'islong',   put = 'putlong' },
+    FLT      = { is = 'isfloat',  put = 'putfloat' },
+    DBL      = { is = 'isdouble', put = 'putdouble' },
+    BIN      = { is = 'isbin',    put = 'putbin' },
+    STR      = { is = 'isstr',    put = 'putstr' },
+    INT2LONG = { is = 'isint',    put = 'putint2long' },
+    INT2FLT  = { is = 'isint',    put = 'putint2flt' },
+    INT2DBL  = { is = 'isint',    put = 'putint2dbl' },
+    LONG2FLT = { is = 'islong',   put = 'putlong2flt'},
+    LONG2DBL = { is = 'islong',   put = 'putlong2dbl' },
+    FLT2DBL  = { is = 'isfloat',  put = 'putflt2dbl' },
+    BIN2STR  = { is = 'isbin',    put = 'putbin2str' },
+    STR2BIN  = { is = 'isstr',    put = 'putstr2bin' }
 }
 
-local emit_patch
-emit_patch = function(il, ir, ripv, ipv, ipo, opo)
+-- Process an object at [$ipv + ipo] and store result at [$0 + opo].
+-- Doesn't update $0. The function assumes that CHECKOBUF isn't necessary.
+-- Stores next element's position in $ripv (if passed).
+-- The only user is emit_rec_flatten(); never used with complex types.
+local function emit_patch(il, ir, ripv, ipv, ipo, opo)
     local irt = ir_type(ir)
     local ilfuncs = ir2ilfuncs[irt]
     if ilfuncs then
-        local isfunc, putfunc = unpack(ilfuncs)
         return {
-            il[isfunc]  (ipv, ipo),
-            il[putfunc] (opo, ipv, ipo),
+            il[ilfuncs.is]  (ipv, ipo),
+            il[ilfuncs.put] (opo, ipv, ipo),
             il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'FIXED' then
@@ -195,14 +231,16 @@ emit_patch = function(il, ir, ripv, ipv, ipo, opo)
     end
 end
 
-local emit_check
-emit_check = function(il, ir, ripv, ipv, ipo)
+-- Check if an object's type at [$ipv + ipo] matches the IR.
+-- This is a shallow check (
+--   Ex: ir = {'ARRAY', ...}, check [$ipv + ipo] is an array, skip contents.)
+-- Stores next element's position in $ripv (if passed).
+local function emit_check(il, ir, ripv, ipv, ipo)
     local irt = ir_type(ir)
     local ilfuncs = ir2ilfuncs[irt]
     if ilfuncs then
-        local isfunc = unpack(ilfuncs)
         return {
-            il[isfunc]  (ipv, ipo),
+            il[ilfuncs.is] (ipv, ipo),
             il.move(ripv, ipv, ipo + 1)
         }
     elseif irt == 'FIXED' then
@@ -232,40 +270,24 @@ emit_check = function(il, ir, ripv, ipv, ipo)
     end
 end
 
-local emit_validate
-emit_validate = function(il, ir, ripv, ipv, ipo)
+-- Unlike emit_check, performs deep validation (NYI).
+-- The rules are the same.
+local function emit_validate(il, ir, ripv, ipv, ipo)
     return emit_check(il, ir, ripv, ipv, ipo) -- XXX
 end
 
-local function objforeach(il, ripv, ipv, ipo, handler)
-    if ripv and ripv ~= ipv then
-        return {
-            il.objforeach(ripv, ipv, ipo),
-            handler(ripv)
-        }
-    else
-        local lipv = il.id()
-        return {
-            il.beginvar(lipv),
-            {
-                il.objforeach(lipv, ipv, ipo),
-                handler(lipv)
-            },
-            il.endvar(lipv)
-        }
-    end
-end
-
+-- Process an object at [$ipv + ipo] and store result at [$0].
+-- Update $0. CHECKOBUF is necessary.
+-- Stores next element's position in $ripv (if passed).
 local emit_convert
 emit_convert = function(il, ir, ripv, ipv, ipo)
     local irt = ir_type(ir)
     local ilfuncs = ir2ilfuncs[irt]
     if ilfuncs then
-        local isfunc, putfunc = unpack(ilfuncs)
         return {
-            il[isfunc]  (ipv, ipo),
+            il[ilfuncs.is]  (ipv, ipo),
             il.checkobuf(1),
-            il[putfunc] (0, ipv, ipo),
+            il[ilfuncs.put] (0, ipv, ipo),
             il.move(0, 0, 1),
             il.move(ripv, ipv, ipo + 1)
         }
@@ -285,8 +307,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
             il.move(0, 0, 1),
             objforeach(il, ripv, ipv, ipo, function(xipv)
                 return emit_convert(il, ir[2], xipv, xipv, 0)
-            end),
-            il.skip(ripv, ipv, ipo)
+            end)
         }
     elseif irt == 'MAP' then
         return {
@@ -302,8 +323,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
                     il.move(0, 0, 1),
                     emit_convert(il, ir[2], xipv, xipv, 1)
                 }
-            end),
-            il.skip(ripv, ipv, ipo)
+            end)
         }
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
@@ -316,8 +336,9 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
     end
 end
 
-local emit_convert_unchecked
-emit_convert_unchecked = function(il, ir, ripv, ipv, ipo)
+-- Like emit_convert(), but may omit some checks since the element
+-- was already checked (the check was shallow).
+local function emit_convert_unchecked(il, ir, ripv, ipv, ipo)
     local res = emit_convert(il, ir, ripv, ipv, ipo)
     -- get rid of checks - emit_convert must cooperate
     -- also exploited by emit_rec_xflatten_pass2
@@ -454,7 +475,7 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     local inames, i2o = ir_record_inames(ir), ir_record_i2o(ir)
     local code = {
         il.ismap(ipv, ipo),
-        '' -- the function passed to objforeach() below appends to code
+        il.nop() -- the function passed to objforeach() below appends to code
     }
     code[2] = objforeach(il, ripv, ipv, ipo, function(xipv)
             local bc = ir_record_bc(ir)
@@ -502,7 +523,6 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
             end -- for i = 1, #inames do
             return { il.isstr(xipv, 0), switch }
     end)
-    insert(code, il.skip(ripv, ipv, ipo))
     return code
 end
 
@@ -888,8 +908,7 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                 switch[i + 1] = branch
             end -- for i = 1, #inames do
             return { il.isstr(xipv, 0), switch }
-        end),
-        il.skip(ripv, ipv, ipo)
+        end)
     }
 end
 
