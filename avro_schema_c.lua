@@ -634,11 +634,25 @@ local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
     return {
         il.move(ripv, ipv, ipo),
         emit_rec_unflatten_pass1(context, ir, tree, 1, false),
-        emit_rec_unflatten_pass2(context, ir, tree, 1) and
-            emit_rec_unflatten_pass3(context, ir, tree, 1)
+        emit_rec_unflatten_pass2(context, ir, tree) and
+            emit_rec_unflatten_pass3(context, ir, tree)
     }, context.maxcell - 1
 end
 
+-- Pass1 generates code to check types in the input *flat* record.
+-- The code also allocates variables to save positions of some
+-- elements in the input. If there's a run of fixed size elements,
+-- we save only the first element's postion (base); later ones
+-- are accessed via base + offset. Variable names and offsets are
+-- stored in ctx.fieldv/ctx.fieldo.
+--
+-- Both are keyed by *cellid* - i.e. the element's index in the flat
+-- record. The routine also build a *tree* — a mapping from I (element's
+-- IR index) to cellid.
+--
+-- Sometimes a field is *hidden*, i.e. excluded from the output.
+-- In that case a slightly different logic applies (and often
+-- fewer variables are needed).
 emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
     local bc, inames = ir_record_bc(ir), ir_record_inames(ir)
     local i2o = ir_record_i2o(ir)
@@ -680,8 +694,8 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
         else
             insert(code, emit_validate(context.il, fieldir,
                                        ipv, ipv, 0))
-            curcell = curcell + 1
-            if not ir2ilfuncs[fieldirt] then
+            curcell = curcell + 1 -- XXX union
+            if not ir2ilfuncs[fieldirt] then -- XXX enum, fixed
                 context.lastcell = nil -- VLO
             end
         end
@@ -690,35 +704,37 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
     return code
 end
 
-emit_rec_unflatten_pass2 = function(context, ir, tree, curfield)
+-- Walk the *tree* in the output order and fill *lastref*.
+-- Lastref is the last cell that needs a variable. Once it's reached,
+-- we ENDVAR the variable.
+-- Note: we assume that if an elements is hidden, the fieldv/tree
+-- entry is missing, hence it's unnecessary to check if it's hidden here.
+emit_rec_unflatten_pass2 = function(context, ir, tree)
+    if not tree then return end
     local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
     local o2i = ir_record_o2i(ir)
     local fieldv = context.fieldv
     local lastref = context.lastref
     for o = 1, #onames do
         local i = o2i[o]
-        if ir_record_ohidden(ir, o) or not i then
-            curfield = curfield + 1
-        else
+        if i then
             local fieldir = bc[i]
-            local fieldirt = ir_type(fieldir)
-            if fieldirt == 'RECORD' then
-                curfield = emit_rec_unflatten_pass2(context, fieldir, tree[i],
-                                                    curfield)
-            elseif fieldirt == 'UNION' then
-                assert(false, 'NYI: union')
+            if ir_type(fieldir) == 'RECORD' then
+                emit_rec_unflatten_pass2(context, fieldir, tree[i])
             else
                 local curcell = tree[i]
                 local fieldvar = fieldv[curcell]
-                lastref[fieldvar] = curfield
-                curfield = curfield + 1
+                if fieldvar then
+                    lastref[fieldvar] = curcell
+                end
             end
         end
     end
-    return curfield
+    return true
 end
 
-emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
+-- Emit the code producing the result. Straightforward.
+emit_rec_unflatten_pass3 = function(context, ir, tree)
     local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
     local o2i = ir_record_o2i(ir)
     local il, fieldv, fieldo = context.il, context.fieldv, context.fieldo
@@ -728,7 +744,7 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
     for o = 1, #onames do
         local i = o2i[o]
         if ir_record_ohidden(ir, o) then
-            curfield = curfield + 1
+            -- skip it
         elseif not i then
             -- put defaults
             local schema, val = ir_record_odefault(ir, o)
@@ -740,7 +756,6 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
                 il.move(0, 0, 2)
             })
             maplen = maplen + 1
-            curfield = curfield + 1
         else
             local fieldir = bc[i]
             local fieldirt = ir_type(fieldir)
@@ -750,9 +765,7 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
                 il.move(0, 0, 1)
             })
             if fieldirt == 'RECORD' then
-                insert(code, emit_rec_unflatten_pass3(context, fieldir, tree[i],
-                                                      curfield))
-                curfield = context.maxfield
+                insert(code, emit_rec_unflatten_pass3(context, fieldir, tree[i]))
             elseif fieldirt == 'UNION' then
                 assert(false, 'NYI: union')
             else
@@ -761,15 +774,13 @@ emit_rec_unflatten_pass3 = function(context, ir, tree, curfield)
                 insert(code, emit_convert_unchecked(il, fieldir, nil,
                                                     fieldvar,
                                                     fieldo[curcell]))
-                if lastref[fieldvar] == curfield then
+                if lastref[fieldvar] == curcell then
                     insert(code, il.endvar(fieldvar))
                 end
-                curfield = curfield + 1
             end
             maplen = maplen + 1
         end
     end
-    context.maxfield = curfield
     code[2] = il.putmapc(0, maplen)
     return code
 end
