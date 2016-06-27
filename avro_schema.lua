@@ -234,6 +234,11 @@ x%d = ffi_string(r.b1-r.v[%d].xoff, r.v[%d].xlen)]], i, i, i))
 end
 
 local function gen_lua_xflatten(il, il_code, res)
+    local func = il_code[3]
+    if #func == 1 then -- dummy xflatten, root type probably not a RECORD
+        insert(res, 'local xflatten')
+        return
+    end
     il.emit_lua_func(il_code[3], res, {
         func_decl = 'local function xflatten(data)',
         func_locals = 'local r, v0, v1',

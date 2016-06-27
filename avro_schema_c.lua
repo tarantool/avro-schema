@@ -175,7 +175,7 @@ local ir2ilfuncs = {
 -- Process an object at [$ipv + ipo] and store result at [$0 + opo].
 -- Doesn't update $0. The function assumes that CHECKOBUF isn't necessary.
 -- Stores next element's position in $ripv (if passed).
--- The only user is emit_rec_flatten(); never used with complex types.
+-- The only user is do_convert_record_flatten(); never used with complex types.
 local function emit_patch(il, ir, ripv, ipv, ipo, opo)
     local irt = ir_type(ir)
     local ilfuncs = ir2ilfuncs[irt]
@@ -248,7 +248,7 @@ end
 -- Update $0. CHECKOBUF is necessary.
 -- Stores next element's position in $ripv (if passed).
 local emit_convert
-emit_convert = function(il, ir, ripv, ipv, ipo)
+emit_convert = function(il, ir, ripv, ipv, ipo, nowrap)
     local irt = ir_type(ir)
     local ilfuncs = ir2ilfuncs[irt]
     if ilfuncs then
@@ -296,7 +296,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo)
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
     elseif irt == 'RECORD' then
-        return il.do_record('convert', il, ir, ripv, ipv, ipo)
+        return il.do_convert_record(il, ir, ripv, ipv, ipo, nowrap)
     elseif irt == 'ENUM' then
         return il.do_convert_enum(il, ir, ripv, ipv, ipo)
     else
@@ -306,8 +306,8 @@ end
 
 -- Like emit_convert(), but may omit some checks since the element
 -- was already checked (the check was shallow).
-local function emit_convert_unchecked(il, ir, ripv, ipv, ipo)
-    local res = emit_convert(il, ir, ripv, ipv, ipo)
+local function emit_convert_unchecked(il, ir, ripv, ipv, ipo, nowrap)
+    local res = emit_convert(il, ir, ripv, ipv, ipo, nowrap)
     -- get rid of checks - emit_convert must cooperate
     -- also exploited by emit_rec_xflatten_pass2
     res[1] = il.nop()
@@ -315,12 +315,22 @@ local function emit_convert_unchecked(il, ir, ripv, ipv, ipo)
 end
 
 -----------------------------------------------------------------------
--- emit_rec_flatten(il, ir, ripv, ipv, ipo) -> code
-local emit_rec_flatten_pass1
-local emit_rec_flatten_pass2
-local emit_rec_flatten_pass3
-local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
+-- RECORD, flatten
+
+local do_convert_record_flatten_pass1
+local do_convert_record_flatten_pass2
+local do_convert_record_flatten_pass3
+local function do_convert_record_flatten(il, ir, ripv, ipv, ipo, nowrap)
     assert(ir_type(ir) == 'RECORD')
+    if nowrap ~= 'nowrap' then
+        local code = emit_convert(il, ir, ripv, ipv, ipo, 'nowrap')
+        return {
+            il.checkobuf(0),
+            il.putarrayc(0, il.ir_width[ir]),
+            il.move(0, 0, 1),
+            code
+        }
+    end
     local var_block, defaults = {}, {}
     local context = {
         il = il,
@@ -335,7 +345,7 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
     -- after 2nd - stores input vars
     -- (either directly or in [0] of a nested table)
     local tree = {}
-    emit_rec_flatten_pass1(context, ir, tree, 1)
+    do_convert_record_flatten_pass1(context, ir, tree, 1)
     local init_block = {}
     for i = 1, context.vlocell - 1 do
         local ilfunc = defaults[i * 2 - 1]
@@ -343,15 +353,16 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
             insert(init_block, ilfunc(i - 1, defaults[i * 2]))
         end
     end
-    local parser_block = emit_rec_flatten_pass2(context, ir, tree,
+    local parser_block = do_convert_record_flatten_pass2(context, ir, tree,
                                                 nil, ipv, ipo)
-    local generator_block = emit_rec_flatten_pass3(context, ir, tree, 1,
+    local generator_block = do_convert_record_flatten_pass3(context, ir, tree, 1,
                                                    ipv, ipo)
     local vlocell = context.vlocell
     local maxcell = context.maxcell
     if vlocell == maxcell then -- update $0
         insert(generator_block, il.move(0, 0, vlocell - 1))
     end
+    il.ir_width[ir] = maxcell - 1
     return {
         var_block,
         il.checkobuf(vlocell),
@@ -359,7 +370,7 @@ local function emit_rec_flatten(il, ir, ripv, ipv, ipo)
         parser_block,
         generator_block,
         il.skip(ripv, ipv, ipo)
-    }, maxcell - 1
+    }
 end
 
 -- A subset of cells in the resulting flattened record
@@ -371,7 +382,7 @@ end
 -- Also compute default values to store in cells beforehand.
 -- Computes context.vlocell - the index of the first cell hosting
 -- a VLO.
-emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
+do_convert_record_flatten_pass1 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
     local defaults = context.defaults
@@ -408,7 +419,7 @@ emit_rec_flatten_pass1 = function(context, ir, tree, curcell)
             elseif fieldirt == 'RECORD' then
                 local childtree = {}
                 tree[o] = childtree
-                if emit_rec_flatten_pass1(context, fieldir,
+                if do_convert_record_flatten_pass1(context, fieldir,
                                           childtree, curcell) then
                     return true
                 end
@@ -438,7 +449,7 @@ end
 -- Emit a parser code, uses offsets computed during pass1.
 -- Allocates a variable to store position of each input field value.
 -- Puts variable names in tree, replacing offsets (which are no longer needed).
-emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
+do_convert_record_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     local il = context.il
     local inames, i2o = ir_record_inames(ir), ir_record_i2o(ir)
     local code = {
@@ -468,8 +479,9 @@ emit_rec_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                         tree[o] = childtree
                     end
                     childtree[0] = fieldvar
-                    insert(branch, emit_rec_flatten_pass2(context, fieldir, childtree,
-                                                          xipv, xipv, 1))
+                    insert(branch,
+                           do_convert_record_flatten_pass2(context, fieldir, childtree,
+                                                           xipv, xipv, 1))
                 elseif fieldirt == 'UNION' then
                     assert(false, 'NYI')
                 elseif targetcell then
@@ -499,7 +511,7 @@ end
 -- filled at this point (defaults and/or values stored by the parser),
 -- however $0 wasn't incremented yet.
 -- Computes context.maxcell - total number of cells, plus 1.
-emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
+do_convert_record_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
     local defaults = context.defaults
@@ -576,7 +588,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
             local fieldirt
             fieldirt = ir_type(fieldir)
             if fieldirt == 'RECORD' then
-                insert(tbranch, emit_rec_flatten_pass3(context, fieldir,
+                insert(tbranch, do_convert_record_flatten_pass3(context, fieldir,
                                                        tree[o], curcell,
                                                        fieldvar, 0))
                 curcell = context.maxcell
@@ -599,17 +611,28 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
 end
 
 -----------------------------------------------------------------------
-local emit_rec_unflatten_pass1
-local emit_rec_unflatten_pass2
-local emit_rec_unflatten_pass3
-local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
+-- RECORD, unflatten
+
+local do_convert_record_unflatten_pass1
+local do_convert_record_unflatten_pass2
+local do_convert_record_unflatten_pass3
+local function do_convert_record_unflatten(il, ir, ripv, ipv, ipo, nowrap)
     assert(ir_type(ir) == 'RECORD')
+    if nowrap ~= 'nowrap' then
+        local code = emit_convert(il, ir, ripv, ipv, ipo+1, 'nowrap')
+        return {
+            il.isarray(ipv, ipo),
+            il.lenis(ipv, ipo, il.ir_width[ir]),
+            code
+        }
+    end
     if not ripv then
         ripv = il.id()
-        local code, width = emit_rec_unflatten(il, ir, ripv, ipv, ipo)
         return {
-            il.beginvar(ripv), code, il.endvar(ripv)
-        }, width
+            il.beginvar(ripv),
+            do_convert_record_unflatten(il, ir, ripv, ipv, ipo, 'nowrap'),
+            il.endvar(ripv)
+        }
     end
     local context = {
         il = il,
@@ -619,12 +642,14 @@ local function emit_rec_unflatten(il, ir, ripv, ipv, ipo)
         lastref = {}
     }
     local tree = {}
-    return {
+    local code = {
         il.move(ripv, ipv, ipo),
-        emit_rec_unflatten_pass1(context, ir, tree, 1, false),
-        emit_rec_unflatten_pass2(context, ir, tree) and
-            emit_rec_unflatten_pass3(context, ir, tree)
-    }, context.maxcell - 1
+        do_convert_record_unflatten_pass1(context, ir, tree, 1, false),
+        do_convert_record_unflatten_pass2(context, ir, tree) and
+            do_convert_record_unflatten_pass3(context, ir, tree)
+    }
+    il.ir_width[ir] = context.maxcell - 1
+    return code
 end
 
 -- Pass1 generates code to check types in the input *flat* record.
@@ -641,7 +666,7 @@ end
 -- Sometimes a field is *hidden*, i.e. excluded from the output.
 -- In that case a slightly different logic applies (and often
 -- fewer variables are needed).
-emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
+do_convert_record_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
     local bc, inames = ir_record_bc(ir), ir_record_inames(ir)
     local i2o = ir_record_i2o(ir)
     local il, ipv = context.il, context.ipv
@@ -654,9 +679,10 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
         if fieldirt == 'RECORD' then
             local childtree = {}
             tree[i] = childtree
-            insert(code, emit_rec_unflatten_pass1(context, fieldir,
-                                                  childtree, curcell,
-                                                  hidden or ir_record_ohidden(ir, o)))
+            insert(code,
+                   do_convert_record_unflatten_pass1(context, fieldir,
+                                                     childtree, curcell,
+                                                     hidden or ir_record_ohidden(ir, o)))
             curcell = context.maxcell
         elseif fieldirt == 'UNION' then
             assert(false, 'NYI: union')
@@ -698,7 +724,7 @@ end
 -- we ENDVAR the variable.
 -- Note: we assume that if an elements is hidden, the fieldv/tree
 -- entry is missing, hence it's unnecessary to check if it's hidden here.
-emit_rec_unflatten_pass2 = function(context, ir, tree)
+do_convert_record_unflatten_pass2 = function(context, ir, tree)
     if not tree then return end
     local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
     local o2i = ir_record_o2i(ir)
@@ -709,7 +735,7 @@ emit_rec_unflatten_pass2 = function(context, ir, tree)
         if i then
             local fieldir = bc[i]
             if ir_type(fieldir) == 'RECORD' then
-                emit_rec_unflatten_pass2(context, fieldir, tree[i])
+                do_convert_record_unflatten_pass2(context, fieldir, tree[i])
             else
                 local curcell = tree[i]
                 local fieldvar = fieldv[curcell]
@@ -723,7 +749,7 @@ emit_rec_unflatten_pass2 = function(context, ir, tree)
 end
 
 -- Emit the code producing the result. Straightforward.
-emit_rec_unflatten_pass3 = function(context, ir, tree)
+do_convert_record_unflatten_pass3 = function(context, ir, tree)
     local bc, onames = ir_record_bc(ir), ir_record_onames(ir)
     local o2i = ir_record_o2i(ir)
     local il, fieldv, fieldo = context.il, context.fieldv, context.fieldo
@@ -754,7 +780,7 @@ emit_rec_unflatten_pass3 = function(context, ir, tree)
                 il.move(0, 0, 1)
             })
             if fieldirt == 'RECORD' then
-                insert(code, emit_rec_unflatten_pass3(context, fieldir, tree[i]))
+                insert(code, do_convert_record_unflatten_pass3(context, fieldir, tree[i]))
             elseif fieldirt == 'UNION' then
                 assert(false, 'NYI: union')
             else
@@ -775,6 +801,96 @@ emit_rec_unflatten_pass3 = function(context, ir, tree)
 end
 
 -----------------------------------------------------------------------
+-- ENUM, flatten
+
+-- Prepare a mapping table for PUTENUMS2I.
+-- Do it once for each IR node, hence the cache.
+local enum_flatten_cache = setmetatable({}, {__mode = 'k' })
+local function enum_flatten_cache_get(ir)
+    local tab = enum_flatten_cache[ir]
+    if not tab then
+        tab = {}
+        local inames, i2o = ir[3], ir[4]
+        for i = 1, #inames do
+            tab[inames[i]] = (i2o[i] or 0) - 1
+        end
+        enum_flatten_cache[ir] = tab
+    end
+    return tab
+end
+
+local function do_patch_enum_flatten(il, ir, ripv, ipv, ipo, opo)
+    return {
+        il.isstr(ipv, ipo),
+        il.putenums2i(opo, ipv, ipo, enum_flatten_cache_get(ir)),
+        il.move(ripv, ipv, ipo + 1)
+    }
+end
+
+local function do_check_enum_flatten(il, ir, ripv, ipv, ipo)
+    return {
+        il.isstr(ipv, ipo),
+        il.move(ripv, ipv, ipo + 1)
+    }
+end
+
+local function do_convert_enum_flatten(il, ir, ripv, ipv, ipo)
+    return {
+        il.isstr(ipv, ipo), -- MUST be #1, see emit_convert_unchecked()
+        il.checkobuf(1),
+        il.putenums2i(0, ipv, ipo, enum_flatten_cache_get(ir)),
+        il.move(0, 0, 1),
+        il.move(ripv, ipv, ipo + 1)
+    }
+end
+
+-----------------------------------------------------------------------
+-- ENUM, unflatten
+
+-- Prepare a mapping table for PUTENUMI2S.
+-- Do it once for each IR node, hence the cache.
+local enum_unflatten_cache = setmetatable({}, {__mode = 'k' })
+local function enum_unflatten_cache_get(ir)
+    local tab = enum_unflatten_cache[ir]
+    if not tab then
+        tab = {}
+        local n, i2o, onames = #ir[3], ir[4], ir[5]
+        for i = 1, n do
+            local o = i2o[i]
+            tab[i] = o and onames[o] or ''
+        end
+        enum_unflatten_cache[ir] = tab
+    end
+    return tab
+end
+
+local function do_patch_enum_unflatten(il, ir, ripv, ipv, ipo, opo)
+    return {
+        il.isint(ipv, ipo),
+        il.putenumi2s(opo, ipv, ipo, enum_unflatten_cache_get()),
+        il.move(ripv, ipv, ipo + 1)
+    }
+end
+
+local function do_check_enum_unflatten(il, ir, ripv, ipv, ipo)
+    return {
+        il.isint(ipv, ipo),
+        il.move(ripv, ipv, ipo + 1)
+    }
+end
+
+local function do_convert_enum_unflatten(il, ir, ripv, ipv, ipo)
+    return {
+        il.isint(ipv, ipo), -- MUST be #1, see emit_convert_unchecked()
+        il.checkobuf(1),
+        il.putenumi2s(0, ipv, ipo, enum_unflatten_cache_get(ir)),
+        il.move(0, 0, 1),
+        il.move(ripv, ipv, ipo + 1)
+    }
+end
+
+-----------------------------------------------------------------------
+
 local emit_rec_xflatten_pass1
 local emit_rec_xflatten_pass2
 
@@ -888,143 +1004,49 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     }
 end
 
------------------------------------------------------------------------
-
-local function do_record_flatten(_, il, ir, ripv, ipv, ipo)
-    local flatten, width_out = emit_rec_flatten(il, ir, ripv, ipv, ipo)
-    return {
-        il.checkobuf(1),
-        il.putarrayc(0, width_out),
-        il.move(0, 0, 1),
-        flatten
-    }
-end
-
------------------------------------------------------------------------
--- ENUM, flatten
-
--- Prepare a mapping table for PUTENUMS2I.
--- Do it once for each IR node, hence the cache.
-local enum_flatten_cache = setmetatable({}, {__mode = 'k' })
-local function enum_flatten_cache_get(ir)
-    local tab = enum_flatten_cache[ir]
-    if not tab then
-        tab = {}
-        local inames, i2o = ir[3], ir[4]
-        for i = 1, #inames do
-            tab[inames[i]] = (i2o[i] or 0) - 1
-        end
-        enum_flatten_cache[ir] = tab
-    end
-    return tab
-end
-
-local function do_patch_enum_flatten(il, ir, ripv, ipv, ipo, opo)
-    return {
-        il.isstr(ipv, ipo),
-        il.putenums2i(opo, ipv, ipo, enum_flatten_cache_get(ir)),
-        il.move(ripv, ipv, ipo + 1)
-    }
-end
-
-local function do_check_enum_flatten(il, ir, ripv, ipv, ipo)
-    return {
-        il.isstr(ipv, ipo),
-        il.move(ripv, ipv, ipo + 1)
-    }
-end
-
-local function do_convert_enum_flatten(il, ir, ripv, ipv, ipo)
-    return {
-        il.isstr(ipv, ipo), -- MUST be #1, see emit_convert_unchecked()
-        il.checkobuf(1),
-        il.putenums2i(0, ipv, ipo, enum_flatten_cache_get(ir)),
-        il.move(0, 0, 1),
-        il.move(ripv, ipv, ipo + 1)
-    }
-end
-
------------------------------------------------------------------------
--- ENUM, unflatten
-
--- Prepare a mapping table for PUTENUMI2S.
--- Do it once for each IR node, hence the cache.
-local enum_unflatten_cache = setmetatable({}, {__mode = 'k' })
-local function enum_unflatten_cache_get(ir)
-    local tab = enum_unflatten_cache[ir]
-    if not tab then
-        tab = {}
-        local n, i2o, onames = #ir[3], ir[4], ir[5]
-        for i = 1, n do
-            local o = i2o[i]
-            tab[i] = o and onames[o] or ''
-        end
-        enum_unflatten_cache[ir] = tab
-    end
-    return tab
-end
-
-local function do_patch_enum_unflatten(il, ir, ripv, ipv, ipo, opo)
-    return {
-        il.isint(ipv, ipo),
-        il.putenumi2s(opo, ipv, ipo, enum_unflatten_cache_get()),
-        il.move(ripv, ipv, ipo + 1)
-    }
-end
-
-local function do_check_enum_unflatten(il, ir, ripv, ipv, ipo)
-    return {
-        il.isint(ipv, ipo),
-        il.move(ripv, ipv, ipo + 1)
-    }
-end
-
-local function do_convert_enum_unflatten(il, ir, ripv, ipv, ipo)
-    return {
-        il.isint(ipv, ipo), -- MUST be #1, see emit_convert_unchecked()
-        il.checkobuf(1),
-        il.putenumi2s(0, ipv, ipo, enum_unflatten_cache_get(ir)),
-        il.move(0, 0, 1),
-        il.move(ripv, ipv, ipo + 1)
-    }
-end
-
------------------------------------------------------------------------
-
-local function do_record_unflatten(_, il, ir, ripv, ipv, ipo)
-    local unflatten, width_in = emit_rec_unflatten(il, ir, ripv, ipv, ipo + 1)
-    return {
-        il.isarray(ipv, ipo),
-        il.lenis(ipv, ipo, width_in),
-        unflatten
-    }
-end
-
-
 local function emit_code(il, ir, n_svc_fields)
+    local flatten = { il.declfunc(1, 1) }
+    local unflatten = { il.declfunc(2, 1) }
+    local xflatten = { il.declfunc(3,1) }
+    local il_funcs = { flatten, unflatten, xflatten } -- backends expect this
+                                                      -- particular order
+    il.il_funcs = il_funcs
     -- configure for unflatten
-    il.do_record = do_record_unflatten
+    local ir_width_unflatten = {}
+    il.ir_width = ir_width_unflatten
+    il.do_convert_record = do_convert_record_unflatten
     il.do_patch_enum = do_patch_enum_unflatten
     il.do_check_enum = do_check_enum_unflatten
     il.do_convert_enum = do_convert_enum_unflatten
-    local unflatten, width_in = emit_rec_unflatten(il, ir, 1, 1, 0)
+    unflatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     -- configure for flatten / xflatten
-    il.do_record = do_record_flatten
+    local ir_width_flatten = {}
+    il.ir_width = ir_width_flatten
+    il.do_convert_record = do_convert_record_flatten
     il.do_patch_enum = do_patch_enum_flatten
     il.do_check_enum = do_check_enum_flatten
     il.do_convert_enum = do_convert_enum_flatten
-    local flatten, width_out = emit_rec_flatten(il, ir, nil, 1, 0)
-    return il.cleanup({
-        { il.declfunc(1, 1), flatten },
-        { il.declfunc(2, 1), unflatten },
-        { il.declfunc(3, 1), emit_rec_xflatten (il, ir, n_svc_fields, 1) }
-    }), width_in, width_out
+    flatten[2] = emit_convert(il, ir, nil, 1, 0, 'nowrap')
+    if ir_type(ir) == 'RECORD' then
+        xflatten[2] = emit_rec_xflatten(il, ir, n_svc_fields, 1)
+    end
+    -- remove cruft
+    il.il_funcs = nil
+    il.ir_width = nil
+    il.do_convert_record = nil
+    il.do_patch_enum = nil
+    il.do_check_enum = nil
+    il.do_convert_enum = nil
+
+    return il.cleanup(il_funcs),
+           ir_width_unflatten[ir] or 1,
+           ir_width_flatten[ir] or 1
 end
 
 -----------------------------------------------------------------------
 return {
     emit_code          = emit_code, 
-    emit_rec_flatten   = emit_rec_flatten,
-    emit_rec_unflatten = emit_rec_unflatten,
+    do_convert_record_flatten   = do_convert_record_flatten,
+    do_convert_record_unflatten = do_convert_record_unflatten,
     emit_rec_xflatten  = emit_rec_xflatten
 }
