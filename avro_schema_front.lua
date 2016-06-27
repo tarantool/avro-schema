@@ -1046,70 +1046,8 @@ build_ir_error = function(offset, fmt, ...)
     end
 end
 
--- Fix IR inplace, removing duplicate equivalent IR instances,
--- e.g. if there were multiple int arrays mapped to double arrays,
---      we are going to have multiple {'ARRAY', 'INT2DOUBLE'} blocks
-local function dedup_ir(ir, cache)
-    local k
-    if     type(ir) == 'string' or ir[1] == 'ENUM' then
-        return ir
-    elseif ir[1] == 'RECORD' then
-        -- records are already reasonably unique; dedup fields once
-        if not cache[ir] then
-            cache[ir] = true
-            local bc = ir[2]
-            for i = 1, #bc do
-                bc[i] = dedup_ir(bc[i], cache)
-            end
-        end
-        return ir
-    elseif ir[1] == 'FIXED'  then
-        k = ir[2]
-    elseif ir[1] == 'ARRAY'  then
-        ir[2] = dedup_ir(ir[2], cache)
-        k = format('A.%p', ir[2])
-    elseif ir[1] == 'MAP'    then
-        ir[2] = dedup_ir(ir[2], cache)
-        k = format('M.%p', ir[2])
-    elseif ir[1] == 'UNION'  then
-        local bc        = ir[2]
-        local mm        = ir[4]
-        local fromunion = not not ir[3]
-        local tounion   = not not ir[5]
-        local kc  = { (fromunion and 'U' or 'u') .. (tounion and 'U' or 'u') }
-        for i = 1, #bc do
-            local bir = bc[i]
-            bc[i] = dedup_ir(bir, cache)
-            if type(bir) ~= 'table' or bir[1] ~= 'FIXED' then
-                bir = bc[i]
-            end
-            kc[i + 1] = format('%s%p', mm[i] and '' or '-', bir)
-        end
-        -- Does the key capture all the relevant information about the UNION?
-        -- Well, apparently it does. The following info is captured:
-        --  (1) whether the source is a union or not;
-        --  (2) whether the dest is a union or not;
-        --  (3) source/dest type for every mapped branch;
-        --  (4) does the branch produce output or if it is validate only.
-        k = concat(kc, '.')
-    end
-    -- return existing instance if present; update cache 
-    local res = cache[k]
-    if res then
-        return res
-    else
-        cache[k] = ir
-        return ir
-    end
-end
-
 local function create_ir(from, to, imatch)
-    local ir, err = build_ir(from, to, {}, imatch)
-    if ir then
-        return dedup_ir(ir, {})
-    else
-        return nil, err
-    end
+    return build_ir(from, to, {}, imatch)
 end
 
 return {
