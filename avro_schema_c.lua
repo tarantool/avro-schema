@@ -621,7 +621,7 @@ emit_rec_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
                 insert(tbranch, emit_convert_unchecked(il, fieldir,
                                                        nil, fieldvar, 0))
                 curcell = curcell + 1
-            else
+            else -- curcell < vlocell, value already *patch*-ed in
                 curcell = curcell + 1
             end
         end
@@ -680,6 +680,7 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
     local fieldv, fieldo = context.fieldv, context.fieldo
     local code = {}
     for i = 1, #inames do
+        local o = i2o[i]
         local fieldir = bc[i]
         local fieldirt = ir_type(fieldir)
         if fieldirt == 'RECORD' then
@@ -687,11 +688,11 @@ emit_rec_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
             tree[i] = childtree
             insert(code, emit_rec_unflatten_pass1(context, fieldir,
                                                   childtree, curcell,
-                                                  hidden or ir_record_ohidden(ir, i2o[i])))
+                                                  hidden or ir_record_ohidden(ir, o)))
             curcell = context.maxcell
         elseif fieldirt == 'UNION' then
             assert(false, 'NYI: union')
-        elseif i2o[i] and not ir_record_ohidden(ir, i2o[i]) and not hidden then
+        elseif o and not hidden and not ir_record_ohidden(ir, o) then
             tree[i] = curcell
             local lastcell = context.lastcell
             if lastcell then
@@ -829,6 +830,9 @@ local function emit_rec_xflatten(il, ir, n_svc_fields, ipv)
     }
 end
 
+-- Creates the *tree*. Each node is keyed by the field number in
+-- the output schema. For each key, a node stores the ID for UPDATE
+-- or a nested node.
 emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
@@ -857,6 +861,9 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
     return curcell
 end
 
+-- Process input; output parts of the UPDATE statement immediately
+-- after we encouter an object attribute (i.e. no reordering).
+-- Fetches ID-s for UPDATE from the tree.
 emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
     local il = context.il
     return {
@@ -888,7 +895,8 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                 elseif o then
                     -- Note: this code motion is harmless
                     -- (see emit_conver/emit_convert_unchecked);
-                    -- allows to keep CHECKOBUF optimiser simple.
+                    -- allows to keep CHECKOBUF optimiser simple
+                    -- (CHECKOBUF can't move past typecheck.)
                     local convert = emit_convert(il, fieldir, xipv, xipv, 1)
                     local typecheck = convert[1]
                     convert[1] = il.nop()
