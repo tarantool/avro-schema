@@ -174,6 +174,9 @@ r.ot[%d] = %d; r.ov[%d].xlen = #a%d; r.ov[%d].xoff = 0xffffffff]],
             assert(false)
         end
     end
+    -- Buf has space for 128 items, but if more are to be written,
+    -- CHECKOBUF is needed
+    if pos > 127 then error('Too many service fields', 0) end
     insert(init, 'v0 = '..pos)
     il.emit_lua_func(il_code[1], res, {
         func_decl = format('local function flatten(data%s)', param_list(n)),
@@ -267,11 +270,11 @@ local rt         = require('avro_schema_rt')
 local pcall      = pcall
 local bor, band  = bit.bor, bit.band
 local lshift     = bit.lshift
-local ffi_C      = ffi.C
 local ffi_cast   = ffi.cast
 local ffi_string = ffi.string
 local rt_C       = ffi.load(rt.C_path)
 local rt_regs          = rt.regs
+local rt_buf_grow      = rt.buf_grow
 local rt_err_type      = rt.err_type
 local rt_err_length    = rt.err_length
 local rt_err_missing   = rt.err_missing

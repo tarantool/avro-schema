@@ -58,24 +58,32 @@ struct Value {
  * MapValue         - xlen, xoff
  */
 
-ssize_t
-parse_msgpack(const uint8_t *msgpack_in,
-              size_t         msgpack_size,
-              size_t         stock_buf_size_or_hint,
-              uint8_t       *stock_typeid_buf,
-              struct Value  *stock_value_buf,
-              uint8_t      **typeid_out,
-              struct Value **value_out);
+struct State {
+    size_t             t_capacity;   // capacity of t/v   bufs (items)
+    size_t             ot_capacity;  // capacity of ot/ov bufs (items)
+    size_t             res_capacity; // capacity of res   buf
+    size_t             res_size;
+    uint8_t           *res;      // filled by unparse_msgpack, others
+    const uint8_t     *b1;       // bank1: input data
+    const uint8_t     *b2;       // bank2: program constants
+    uint8_t           *t;        // filled by parse_msgpack
+    struct Value      *v;        // .......................
+    uint8_t           *ot;       // consumed by unparse_msgpack
+    struct Value      *ov;       // ...........................
+};
 
-ssize_t
-unparse_msgpack(size_t             nitems,
-               const uint8_t     *typeid,
-               const struct Value*value,
-               const uint8_t     *bank1,
-               const uint8_t     *bank2,
-               size_t             stock_buf_size_or_hint,
-               uint8_t           *stock_buf,
-               uint8_t          **msgpack_out);
+int
+parse_msgpack(struct State  *state,
+              const uint8_t *msgpack_in,
+              size_t         msgpack_size);
+
+int
+unparse_msgpack(struct State *state,
+                size_t        nitems);
+
+int
+schema_rt_buf_grow(struct State *state,
+                   size_t min_capacity);
 
 uint32_t
 create_hash_func(int n, const unsigned char *strings[],
@@ -156,51 +164,67 @@ struct unaligned_storage
 }
 __attribute__((__packed__));
 
-static void *realloc_wrap(void *buf, size_t size,
-                          void *stock_buf, size_t old_size)
+static inline size_t next_capacity(size_t min_capacity)
 {
-    if (buf != stock_buf)
-        return realloc(buf, size);
-    buf = malloc(size);
-    if (buf == NULL)
-        return NULL;
-    return memcpy(buf, stock_buf, old_size);
+    size_t capacity = 128;
+    while (capacity < min_capacity)
+        capacity = capacity + capacity / 2;
+    return capacity;
 }
 
-ssize_t parse_msgpack(const uint8_t * restrict mi,
-                      size_t        ms,
-                      size_t        sz_or_hint,
-                      uint8_t      *stock_typeid_buf,
-                      struct Value *stock_value_buf,
-                      uint8_t     **typeid_out,
-                      struct Value **value_out)
+static int buf_grow(uint8_t **t,
+                    size_t *capacity,
+                    size_t new_capacity)
+{
+    uint8_t      *new_t;
+
+    new_t = realloc(*t, new_capacity * sizeof(new_t[0]));
+    if (new_t == NULL)
+        return -1;
+
+    *t = new_t;
+    *capacity = new_capacity;
+    return 0;
+}
+
+static int buf_grow_tv(uint8_t **t,
+                       struct Value **v,
+                       size_t *capacity,
+                       size_t new_capacity)
+{
+    struct Value *new_v;
+
+    new_v = realloc(*v, new_capacity * sizeof(new_v[0]));
+    if (new_v == NULL)
+        return -1;
+    *v = new_v;
+
+    return buf_grow(t, capacity, new_capacity);
+}
+
+int parse_msgpack(struct State *state,
+                  const uint8_t * restrict mi,
+                  size_t        ms)
 {
     const uint8_t *me = mi + ms;
-    uint8_t       * restrict typeid, *typeid_max, *typeid_buf;
-    struct Value  * restrict value, *value_buf = NULL;
+    uint8_t       * restrict typeid;
+    struct Value  * restrict value, *value_max, *value_buf;
     uint32_t       todo = 1, patch = -1;
-    uint32_t       auto_stack_buf[32];
-    uint32_t      *stack_buf = auto_stack_buf, *stack_max = auto_stack_buf + 32;
-    uint32_t      *stack = stack_buf;
+    uint32_t      * restrict stack, *stack_max, *stack_buf;
     uint32_t       len;
 
-    if (stock_typeid_buf != NULL && stock_value_buf != NULL) {
-        typeid = typeid_buf = stock_typeid_buf;
-        typeid_max = stock_typeid_buf + sz_or_hint * sizeof(typeid[0]);
-        value = value_buf = stock_value_buf;
-    } else {
-        size_t ic = 32; /* initial capacity */
-        if (sz_or_hint > ic)
-            ic = sz_or_hint;
-
-        typeid_max = (typeid = typeid_buf = malloc(ic * sizeof(typeid[0]))) + ic;
-        if (typeid_buf == NULL)
-            goto error_alloc;
-
-        value = value_buf = malloc(ic * sizeof(value[0]));
-        if (value_buf == NULL)
-            goto error_alloc;
-    }
+    /* Initialising ptrs with NULL-s is correct, but that would
+     * harm branch prediction accuracy. Not checking the buf capacity,
+     * because that would hurt performance (there's enough capacity,
+     * except for the very first call). */
+    typeid    = state->t;
+    value     = state->v;
+    value_max = state->v + state->t_capacity;
+    value_buf = state->v;
+    /* reusing ov for the stack */
+    stack     = (void *)(state->ov);
+    stack_max = (void *)(state->ov + state->ot_capacity);
+    stack_buf = (void *)(state->ov);
 
     if (0) {
 repeat:
@@ -223,28 +247,18 @@ repeat:
         goto error_underflow;
 
     /* ensure output has capacity for 1 more item */
-    if (__builtin_expect(typeid == typeid_max, 0)) {
-        size_t          capacity = typeid_max - typeid_buf;
-        size_t          new_capacity = capacity + capacity / 2;
-        uint8_t        *new_typeid_buf;
-        struct Value   *new_value_buf;
+    if (__builtin_expect(value == value_max, 0)) {
 
-        new_typeid_buf = realloc_wrap(typeid_buf, new_capacity * sizeof(typeid[0]),
-                                      stock_typeid_buf, capacity * sizeof(typeid[0]));
-        if (new_typeid_buf == NULL)
+        size_t old_capacity = state->t_capacity;
+
+        if (buf_grow_tv(&state->t, &state->v, &state->t_capacity,
+                        next_capacity(old_capacity + 1)) != 0)
             goto error_alloc;
 
-        typeid     = new_typeid_buf + capacity;
-        typeid_buf = new_typeid_buf;
-        typeid_max = new_typeid_buf + new_capacity;
-
-        new_value_buf = realloc_wrap(value_buf, new_capacity * sizeof(value[0]),
-                                     stock_value_buf, capacity * sizeof(value[0]));
-        if (new_value_buf == NULL)
-            goto error_alloc;
-
-        value     = new_value_buf + capacity;
-        value_buf = new_value_buf;
+        typeid    = state->t + old_capacity;
+        value     = state->v + old_capacity;
+        value_max = state->v + state->t_capacity;
+        value_buf = state->v;
     }
 
     switch (*mi) {
@@ -269,20 +283,17 @@ setup_nested:
         value->xoff = patch;
         patch = value - value_buf;
         if (__builtin_expect(stack == stack_max, 0)) {
-            size_t      capacity = stack_max - stack_buf;
-            size_t      new_capacity = capacity + capacity/2;
-            uint32_t   *new_stack_buf;
 
-            new_stack_buf = realloc_wrap(
-                stack_buf, new_capacity * sizeof(stack[0]),
-                auto_stack_buf, capacity * sizeof(stack[0]));
+            size_t old_capacity = state->ot_capacity;
 
-            if (new_stack_buf == NULL)
+            if (buf_grow_tv(&state->ot, &state->ov, &state->ot_capacity,
+                            next_capacity(old_capacity + 1)) != 0)
                 goto error_alloc;
 
-            stack     = new_stack_buf + capacity;
-            stack_buf = new_stack_buf;
-            stack_max = new_stack_buf + new_capacity;
+            /* reusing ov for the stack */
+            stack     = (void *)(state->ov + old_capacity);
+            stack_max = (void *)(state->ov + state->ot_capacity);
+            stack_buf = (void *)(state->ov);
         }
         *stack++ = todo;
         todo = len;
@@ -548,50 +559,30 @@ do_xdata:
     }
 
 done:
-    if (stack_buf != auto_stack_buf)
-        free(stack_buf);
-    *typeid_out = typeid_buf;
-    *value_out = value_buf;
-    return typeid - typeid_buf;
+    state->b1 = me;
+    return 0;
 
 error_underflow:
 error_c1:
 error_alloc:
-    if (stack_buf != auto_stack_buf)
-        free(stack_buf);
-    if (typeid_buf != stock_typeid_buf)
-        free(typeid_buf);
-    if (value_buf != stock_value_buf);
-        free(value_buf);
+    /* TODO put error message in res */
     return -1;
 }
 
-ssize_t unparse_msgpack(size_t nitems,
-                        const uint8_t * restrict typeid,
-                        const struct Value * restrict value,
-                        const uint8_t * restrict bank1,
-                        const uint8_t * restrict bank2,
-                        size_t    sz_or_hint,
-                        uint8_t  *stock_buf,
-                        uint8_t **msgpack_out)
+int unparse_msgpack(struct State *state,
+                    size_t        nitems)
 {
-    const uint8_t *typeid_max = typeid + nitems;
-    uint8_t * restrict out, *out_max, *out_buf;
-    const uint8_t * restrict copy_from = bank1;
+    const uint8_t      * restrict typeid = state->ot - 1;
+    const struct Value * restrict value = state->ov - 1;
+    const uint8_t      * restrict bank1 = state->b1;
+    const uint8_t      * restrict bank2 = state->b2;
+    const uint8_t      * typeid_max = state->ot + nitems;
+    uint8_t            * restrict out, *out_max;
+    const uint8_t      * restrict copy_from = bank1;
 
-    if (stock_buf != NULL) {
-        out = out_buf = stock_buf;
-        out_max = stock_buf + sz_or_hint;
-    } else {
-        size_t initial_capacity = nitems > 128 ? nitems : 128;
-        if (sz_or_hint > initial_capacity)
-            initial_capacity = sz_or_hint;
-        out_buf = malloc(initial_capacity);
-        if (out_buf == NULL)
-            goto error_alloc;
-        out = out_buf;
-        out_max = out_buf + initial_capacity;
-    }
+    out = state->res;
+    out_max = state->res + state->res_capacity;
+    goto check_buf;
 
     for (; typeid != typeid_max; typeid++, value++) {
 
@@ -826,16 +817,13 @@ check_buf:
          * Restore invariant: at least 10 bytes available in out_buf.
          * Almost every switch branch ends up jumping here.
          */
-        if (out + 10 > out_max) {
-            size_t capacity = out_max - out_buf;
-            size_t new_capacity = capacity + capacity / 2;
-            uint8_t *new_out_buf = realloc_wrap(out_buf, new_capacity,
-                                                stock_buf, capacity);
-            if (new_out_buf == NULL)
+        if (__builtin_expect(out + 10 > out_max, 0)) {
+            uint8_t *old_res = state->res;
+            if (buf_grow(&state->res, &state->res_capacity,
+                         next_capacity(state->res_capacity + 10)) != 0)
                 goto error_alloc;
-            out     = new_out_buf + (out - out_buf);
-            out_buf = new_out_buf;
-            out_max = new_out_buf + new_capacity;
+            out = state->res + (out - old_res);
+            out_max = state->res + state->res_capacity;
         }
         continue;
 
@@ -845,16 +833,14 @@ copy_data:
          * 10 more bytes for the next iteration.
          * Some switch branches end up jumping here.
          */
-        if (out + value->xlen + 10 > out_max) {
-            size_t capacity = out_max - out_buf;
-            size_t new_capacity = capacity + capacity / 2;
-            uint8_t *new_out_buf = realloc_wrap(out_buf, new_capacity,
-                                                stock_buf, capacity);
-            if (new_out_buf == NULL)
+        if (__builtin_expect(out + value->xlen + 10 > out_max, 0)) {
+            uint8_t *old_res = state->res;
+            size_t old_capacity = state->res_capacity;
+            if (buf_grow(&state->res, &state->res_capacity,
+                         next_capacity(old_capacity + value->xlen + 10)) != 0)
                 goto error_alloc;
-            out     = new_out_buf + (out - out_buf);
-            out_buf = new_out_buf;
-            out_max = new_out_buf + new_capacity;
+            out = state->res + (out - old_res);
+            out_max = state->res + state->res_capacity;
         }
         if (__builtin_expect(value->xoff == UINT32_MAX, 0)) {
             /* Offset is too big; next item contains explicit ptr. */
@@ -870,14 +856,19 @@ copy_data:
         continue;
     }
 
-    *msgpack_out = out_buf;
-    return out - out_buf;
+    state->res_size = out - state->res;
+    return 0;
 
 error_alloc:
 error_badcode:
-    if (out_buf != stock_buf)
-        free(out_buf);
     return -1;
+}
+
+int schema_rt_buf_grow(struct State *state,
+                       size_t min_capacity)
+{
+    return buf_grow_tv(&state->ot, &state->ov, &state->ot_capacity,
+                       next_capacity(min_capacity));
 }
 
 /*

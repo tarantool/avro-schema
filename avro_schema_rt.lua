@@ -28,50 +28,36 @@ struct schema_rt_Value {
     };
 };
 
-struct schema_rt_Regs {
-    ssize_t                   rc;
-    union {
-        uint8_t              *t;
-        uint8_t              *t_[1];
-    };
-    union {
-        struct schema_rt_Value
-                             *v;
-        struct schema_rt_Value
-                             *v_[1];
-    };
+struct schema_rt_State {
+    size_t                    t_capacity;
+    size_t                    ot_capacity;
+    size_t                    res_capacity;
+    size_t                    res_size;
+    uint8_t                  *res;
     const uint8_t            *b1;
     union {
         const uint8_t        *b2;
         const uint16_t       *b2_16;
         const uint32_t       *b2_32;
     };
+    uint8_t                  *t;
+    struct schema_rt_Value   *v;
     uint8_t                  *ot;
-    struct schema_rt_Value
-                             *ov;
+    struct schema_rt_Value   *ov;
 };
 
-ssize_t
-parse_msgpack(const uint8_t *msgpack_in,
-              size_t         msgpack_size,
-              size_t         stock_buf_size_or_hint,
-              uint8_t       *stock_typeid_buf,
-              struct schema_rt_Value
-                            *stock_value_buf,
-              uint8_t      **typeid_out,
-              struct schema_rt_Value
-                           **value_out);
+int
+schema_rt_buf_grow(struct schema_rt_State *state,
+                   size_t                  min_capacity);
 
-ssize_t
-unparse_msgpack(size_t            nitems,
-                const uint8_t    *typeid,
-                const struct schema_rt_Value
-                                 *value,
-                const uint8_t    *bank1,
-                const uint8_t    *bank2,
-                size_t            stock_buf_size_or_hint,
-                uint8_t          *stock_buf,
-                uint8_t         **msgpack_out);
+int
+parse_msgpack(struct schema_rt_State *state,
+              const uint8_t          *msgpack_in,
+              size_t                  msgpack_size);
+
+int
+unparse_msgpack(struct schema_rt_State *state,
+                size_t                  nitems);
 
 int32_t
 create_hash_func(int n, const char *strings[],
@@ -135,18 +121,52 @@ phf_hash_uint32_band_raw16(const void *g, int32_t k, int32_t seed, size_t r, siz
 int32_t
 phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 
-/* libc **************************************************************/
-
-void *malloc(size_t);
-void  free(void *);
-int   memcmp(const void *, const void *, size_t);
-
 ]]
 
 local null        = ffi_cast('void *', 0)
 local rt_C_path   = package.searchpath('avro_schema_rt_c',
-                                     package.cpath)
+                                        package.cpath)
 local rt_C        = ffi.load(rt_C_path)
+local regs        = ffi.new('struct schema_rt_State')
+
+local function buf_grow(r, min_capacity)
+    if rt_C.schema_rt_buf_grow(r, min_capacity) ~= 0 then
+        error('Out of memory', 0)
+    end
+end
+
+-- Buf has space for at least 128 items.
+buf_grow(regs, 128)
+
+local function msgpack_decode(r, s)
+    if rt_C.parse_msgpack(r, s, #s) ~= 0 then
+        error('Malformed msgpack data', 0)
+    end
+end
+
+local function msgpack_encode(r, n)
+    if rt_C.unparse_msgpack(r, n) ~= 0 then
+        error('Internal error', 0)
+    end
+    return ffi_string(r.res, r.res_size)
+end
+
+local function universal_decode(r, s)
+    local r = regs
+    if type(s) ~= 'string' then
+        s = msgpacklib_encode(s)
+    end
+    if rt_C.parse_msgpack(r, s, #s) ~= 0 then
+        error('Malformed msgpack data', 0)
+    end
+end
+
+local function lua_encode(r, n)
+    if rt_C.unparse_msgpack(r, n) ~= 0 then
+        error('Internal error', 0)
+    end
+    return msgpacklib_decode(ffi_string(r.res, r.res_size))
+end
 
 --
 -- vis_msgpack
@@ -209,20 +229,13 @@ local valuevis = {
 }
 
 local function vis_msgpack(input)
-    local typeid_out = ffi.new('uint8_t *[1]');
-    local value_out  = ffi.new('struct schema_rt_Value *[1]')
-    
-    local rc = rt_C.parse_msgpack(
-        input, #input, 0, null, null, typeid_out, value_out)
 
-    if rc < 0 then
-        error('schema_rt_C.parse_msgpack: -1')
-    end
+    universal_decode(rs, input)
 
     local st, res = pcall(function()
 
-        local typeid = typeid_out[0]
-        local value  = value_out[0]
+        local typeid = r.t
+        local value  = r.v
 
         local output = {}
         local todos = {}
@@ -254,55 +267,15 @@ local function vis_msgpack(input)
 
     end)
 
-    ffi.C.free(typeid_out[0])
-    ffi.C.free(value_out[0])
-
     if not st then
         error(res)
     end
     return res
 end
 
-local regs = ffi.new('struct schema_rt_Regs')
-regs.t  = ffi.C.malloc(4096)
-regs.v  = ffi.C.malloc(4096*8)
-regs.ot = ffi.C.malloc(512)
-regs.ov = ffi.C.malloc(512*8)
-
-local function msgpack_decode(r, s)
-    local r = regs
-    if rt_C.parse_msgpack(s, #s, 4096, r.t, r.v, r.t_, r.v_) < 0 then
-        error('Malformed msgpack data', 0)
-    end
-    r.b1 = ffi_cast("const uint8_t *", s) + #s
-end
-
-local function msgpack_encode(r, n)
-    r.rc = rt_C.unparse_msgpack(n, r.ot, r.ov, r.b1, r.b2, 4096, r.t, r.t_)
-    if r.rc < 0 then
-        error('Internal error', 0)
-    end
-    return ffi_string(r.t, r.rc)
-end
-
-local function universal_decode(r, s)
-    local r = regs
-    if type(s) ~= 'string' then
-        s = msgpacklib_encode(s)
-    end
-    if rt_C.parse_msgpack(s, #s, 4096, r.t, r.v, r.t_, r.v_) < 0 then
-        error('Malformed msgpack data', 0)
-    end
-    r.b1 = ffi_cast("const uint8_t *", s) + #s
-end
-
-local function lua_encode(r, n)
-    r.rc = rt_C.unparse_msgpack(n, r.ot, r.ov, r.b1, r.b2, 4096, r.t, r.t_)
-    if r.rc < 0 then
-        error('Internal error', 0)
-    end
-    return msgpacklib_decode(ffi_string(r.t, r.rc))
-end
+--
+-- err_*
+--
 
 local extract_location
 extract_location = function(r, pos)
@@ -417,6 +390,7 @@ return {
 
     vis_msgpack      = vis_msgpack,
     regs             = regs,
+    buf_grow         = buf_grow,
     msgpack_encode   = msgpack_encode,
     msgpack_decode   = msgpack_decode,
     lua_encode       = lua_encode,

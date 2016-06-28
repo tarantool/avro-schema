@@ -295,19 +295,18 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
     -----------------------------------------------------------
     elseif o.op == opcode.ENDVAR    then
     -----------------------------------------------------------
-    elseif o.op == opcode.CHECKOBUF then --[[
-        if     o.ipv == opcode.NILREG then
-            insert(res, format('t = v0+%d', o.offset))
-        elseif o.scale == 1 then
-            insert(res, format('t = v0+%d+r.v[%s].xlen',
-                                o.offset, varref(o.ipv, o.ipo, varmap)))
+    elseif o.op == opcode.CHECKOBUF then
+        local expr
+        if o.ipv == opcode.NILREG then
+            expr = varref(0, o.offset, varmap)
         else
-            insert(res, format('t = v0+%d+r.v[%s].xlen*%d',
-                                o.offset, varref(o.ipv, o.ipo, varmap),
-                                o.scale))
+            expr = format('%s+r.v[%s].xlen%s',
+                          varref(0, o.offset, varmap),
+                          varref(o.ipv, o.ipo, varmap),
+                          o.scale == 1 and '' or '*'..o.scale)
         end
-        -- TODO
-        insert(res, '-- checkobuf(t) ')]]
+        insert(res, format('if %s > r.ot_capacity then rt_buf_grow(r, %s) end',
+                            expr, expr))
     -----------------------------------------------------------
     elseif o.op == opcode.ISSET     then
         insert(res, format('if %s == 0 then rt_err_missing(r, %s, "%s") end',
