@@ -280,7 +280,8 @@ local rt_err_value     = rt.err_value
 local cpool      = digest.base64_decode([[
 ${cpool_data}
 ]])
-
+${outter_protos}
+${outter_decls}
 local function linker(decode_proc, encode_proc)
     decode_proc = decode_proc or rt.msgpack_decode
     encode_proc = encode_proc or rt.msgpack_encode
@@ -299,14 +300,28 @@ ${inner_decls}
 end
 return linker
 ]=])
+    local outter_protos = {}
+    local outter_decls = {}
     local inner_decls = {}
+
     gen_lua_flatten(width_out, service_fields, il, il_code, inner_decls)
     gen_lua_unflatten(width_in, service_fields, il, il_code, inner_decls)
     gen_lua_xflatten(il, il_code, inner_decls)
 
+    for i = 1, #il_code do
+        local func = il_code[i]
+        local name = func[1].name
+        if name > 3 then -- entry point vs. callable func 
+            insert(outter_protos, format('local f%d', name))
+            il.emit_lua_func(func, outter_decls)
+        end
+    end
+
     return expand_lua_template({
         cpool_data = base64_encode(il.cpool_get_data()),
         extra_params = param_list(#service_fields),
+        outter_protos = outter_protos,
+        outter_decls = outter_decls,
         inner_decls = inner_decls
     })
 end

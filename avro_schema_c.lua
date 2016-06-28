@@ -296,7 +296,43 @@ emit_convert = function(il, ir, ripv, ipv, ipo, nowrap)
     elseif irt == 'UNION' then
         assert(false, 'NYI: union')
     elseif irt == 'RECORD' then
-        return il.do_convert_record(il, ir, ripv, ipv, ipo, nowrap)
+        if nowrap == 'nowrap' then
+            -- recursive types
+            local active_ir = il.active_ir
+            if active_ir[ir] then
+                -- recursion detected
+                local il_funcs, ir_2_func = il.il_funcs, il.ir_2_func
+                local func = ir_2_func[ir]
+                if func then
+                    if func < 3 then
+                        -- change function name to indicate that it's not
+                        -- only an entry point, but also called by other funcs
+                        local new_name = il.id()
+                        il_funcs[func][1].name = new_name
+                        ir_2_func[ir] = new_name
+                        func = new_name
+                    end
+                else
+                    func = il.id()
+                    ir_2_func[ir] = func
+                    il.active_ir = { [ir] = true }
+                    insert(il_funcs, {
+                        il.declfunc(func, 1),
+                        il.do_convert_record(il, ir, ripv, ipv, ipo, 'nowrap')
+                    })
+                    il.active_ir = active_ir
+                end
+                return il.callfunc(ripv, ipv, ipo, func)
+            else
+                active_ir[ir] = true
+                local res = il.do_convert_record(il, ir,
+                                                 ripv, ipv, ipo, 'nowrap')
+                active_ir[ir] = nil
+                return res
+            end
+        else
+            return il.do_convert_record(il, ir, ripv, ipv, ipo)
+        end
     elseif irt == 'ENUM' then
         return il.do_convert_enum(il, ir, ripv, ipv, ipo)
     else
@@ -345,7 +381,9 @@ local function do_convert_record_flatten(il, ir, ripv, ipv, ipo, nowrap)
     -- after 2nd - stores input vars
     -- (either directly or in [0] of a nested table)
     local tree = {}
-    do_convert_record_flatten_pass1(context, ir, tree, 1)
+    local width = do_convert_record_flatten_pass1(context, ir, tree, 1) - 1
+    il.ir_width[ir] = width
+    context.vlocell = context.vlocell or width
     local init_block = {}
     for i = 1, context.vlocell - 1 do
         local ilfunc = defaults[i * 2 - 1]
@@ -354,15 +392,14 @@ local function do_convert_record_flatten(il, ir, ripv, ipv, ipo, nowrap)
         end
     end
     local parser_block = do_convert_record_flatten_pass2(context, ir, tree,
-                                                nil, ipv, ipo)
+                                                         nil, ipv, ipo)
     local generator_block = do_convert_record_flatten_pass3(context, ir, tree, 1,
-                                                   ipv, ipo)
+                                                            ipv, ipo)
     local vlocell = context.vlocell
     local maxcell = context.maxcell
     if vlocell == maxcell then -- update $0
         insert(generator_block, il.move(0, 0, vlocell - 1))
     end
-    il.ir_width[ir] = maxcell - 1
     return {
         var_block,
         il.checkobuf(vlocell),
@@ -377,7 +414,7 @@ end
 -- are at fixed offsets. Compute offsets allowing the parser
 -- to store a value immediately instead of postponing until
 -- the generation phase (important for optional fields -
--- eliminates one IF). Stop once we hit a VLO, like array.
+-- eliminates one IF). Also computes *flat width*.
 --
 -- Also compute default values to store in cells beforehand.
 -- Computes context.vlocell - the index of the first cell hosting
@@ -386,6 +423,7 @@ do_convert_record_flatten_pass1 = function(context, ir, tree, curcell)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
     local defaults = context.defaults
+    local vlocell = context.vlocell
     for o = 1, #onames do
         local ds, dv = ir_record_odefault(ir, o)
         local dcells
@@ -410,40 +448,29 @@ do_convert_record_flatten_pass1 = function(context, ir, tree, curcell)
             assert(dcells)
             curcell = curcell + dcells
         else
-            local fieldirt
-::restart::
-            fieldirt = ir_type(fieldir)
+            local fieldirt = ir_type(fieldir)
             if type(fieldir) ~= 'table' or fieldirt == 'FIXED' or fieldirt == 'ENUM' then
-                tree[o] = curcell - 1
+                if not vlocell then
+                    tree[o] = curcell - 1
+                end
                 curcell = curcell + 1
             elseif fieldirt == 'RECORD' then
                 local childtree = {}
                 tree[o] = childtree
-                if do_convert_record_flatten_pass1(context, fieldir,
-                                          childtree, curcell) then
-                    return true
-                end
-                curcell = context.vlocell
-            elseif fieldirt == 'UNION' then
-                assert(false, 'NYI')
-                if ir_union_osimple(fieldir) then
-                    -- union in source schema mapped to a simple type in target
-                    fieldir = nil -- XXX
-                    goto restart
-                else
-                    -- consider it VLO for simplicity (XXX simple optional fields?)
-                    context.vlocell = curcell
-                    return true
-                end
+                curcell = do_convert_record_flatten_pass1(context, fieldir,
+                                                          childtree, curcell)
+                vlocell = context.vlocell
             else
-                -- ARRAY or MAP, it's a VLO
-                context.vlocell = curcell
-                return true
+                -- ARRAY or MAP or a UNION, it's a VLO
+                if not vlocell then
+                    vlocell = curcell
+                    context.vlocell = curcell
+                end
+                curcell = curcell + 1 -- XXX union
             end
         end
     end
-    context.vlocell = curcell
-    return false
+    return curcell
 end
 
 -- Emit a parser code, uses offsets computed during pass1.
@@ -510,7 +537,6 @@ end
 -- Note: a subset of cells until the first VLO are already
 -- filled at this point (defaults and/or values stored by the parser),
 -- however $0 wasn't incremented yet.
--- Computes context.maxcell - total number of cells, plus 1.
 do_convert_record_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
     local o2i, onames = ir_record_o2i(ir), ir_record_onames(ir)
     local bc = ir_record_bc(ir)
@@ -588,10 +614,11 @@ do_convert_record_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
             local fieldirt
             fieldirt = ir_type(fieldir)
             if fieldirt == 'RECORD' then
-                insert(tbranch, do_convert_record_flatten_pass3(context, fieldir,
-                                                       tree[o], curcell,
-                                                       fieldvar, 0))
-                curcell = context.maxcell
+                local code
+                code, curcell = do_convert_record_flatten_pass3(context, fieldir,
+                                                               tree[o], curcell,
+                                                               fieldvar, 0)
+                insert(tbranch, code)
             elseif fieldirt == 'UNION' then
                 assert(false, 'NYI: union')
             elseif curcell >= vlocell then -- append
@@ -606,8 +633,7 @@ do_convert_record_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
             end
         end
     end
-    context.maxcell = curcell
-    return code
+    return code, curcell
 end
 
 -----------------------------------------------------------------------
@@ -642,14 +668,15 @@ local function do_convert_record_unflatten(il, ir, ripv, ipv, ipo, nowrap)
         lastref = {}
     }
     local tree = {}
-    local code = {
-        il.move(ripv, ipv, ipo),
-        do_convert_record_unflatten_pass1(context, ir, tree, 1, false),
-        do_convert_record_unflatten_pass2(context, ir, tree) and
-            do_convert_record_unflatten_pass3(context, ir, tree)
-    }
+    local parser_block = do_convert_record_unflatten_pass1(context, ir, tree,
+                                                           1, false)
     il.ir_width[ir] = context.maxcell - 1
-    return code
+    do_convert_record_unflatten_pass2(context, ir, tree)
+    local generator_block = do_convert_record_unflatten_pass3(context, ir,
+                                                              tree)
+    return {
+        il.move(ripv, ipv, ipo), parser_block, generator_block
+    }
 end
 
 -- Pass1 generates code to check types in the input *flat* record.
@@ -1007,12 +1034,14 @@ end
 local function emit_code(il, ir, n_svc_fields)
     local flatten = { il.declfunc(1, 1) }
     local unflatten = { il.declfunc(2, 1) }
-    local xflatten = { il.declfunc(3,1) }
+    local xflatten = { il.declfunc(3, 1) }
     local il_funcs = { flatten, unflatten, xflatten } -- backends expect this
                                                       -- particular order
     il.il_funcs = il_funcs
+    il.active_ir = {}
     -- configure for unflatten
     local ir_width_unflatten = {}
+    il.ir_2_func = { [ir] = 2 } -- unflatten: FUNC #2
     il.ir_width = ir_width_unflatten
     il.do_convert_record = do_convert_record_unflatten
     il.do_patch_enum = do_patch_enum_unflatten
@@ -1021,17 +1050,20 @@ local function emit_code(il, ir, n_svc_fields)
     unflatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     -- configure for flatten / xflatten
     local ir_width_flatten = {}
+    il.ir_2_func = { [ir] = 1 } -- flatten: FUNC #1
     il.ir_width = ir_width_flatten
     il.do_convert_record = do_convert_record_flatten
     il.do_patch_enum = do_patch_enum_flatten
     il.do_check_enum = do_check_enum_flatten
     il.do_convert_enum = do_convert_enum_flatten
-    flatten[2] = emit_convert(il, ir, nil, 1, 0, 'nowrap')
+    flatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     if ir_type(ir) == 'RECORD' then
         xflatten[2] = emit_rec_xflatten(il, ir, n_svc_fields, 1)
     end
     -- remove cruft
     il.il_funcs = nil
+    il.active_ir = nil
+    il.ir_2_func = nil
     il.ir_width = nil
     il.do_convert_record = nil
     il.do_patch_enum = nil

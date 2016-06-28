@@ -22,7 +22,6 @@ struct schema_il_Opcode {
         uint32_t offset;
         uint32_t name;
         uint32_t len;
-        uint32_t func;
     };
     union {
         struct {
@@ -195,19 +194,13 @@ end
 local function opcode_ctor_offset_ci(op)
     return function(offset, ci)
         local o = ffi_new('struct schema_il_Opcode')
-        o.op = op; o.offset = offset; o.ci = ci
+        o.op = op; o.offset = offset; o.ci = ci or 42
         return o
     end
 end
 
 local il_methods = {
     nop = function() return opcode_NOP end,
-    ----------------------------------------------------------------
-    callfunc = function(func, ipv, ipo)
-        local o = opcode_new(opcode.CALLFUNC)
-        o.func = func; o.ipv = ipv; o.ipo = ipo
-        return o
-    end,
     ----------------------------------------------------------------
     declfunc = function(name, ipv)
         local o = opcode_new(opcode.DECLFUNC)
@@ -302,7 +295,8 @@ local il_methods = {
         return o
     end
     ----------------------------------------------------------------
-    -- sbranch, putstrc, putbinc, putxc and isset are instance methods
+    -- callfunc, sbranch, putstrc, putbinc, putxc and isset
+    -- are instance methods
 }
 
 -- visualize register
@@ -342,8 +336,8 @@ local function opcode_vis(o, extra)
     if o == opcode_NOP then
         return 'NOP'
     elseif o.op == opcode.CALLFUNC then
-        return format('%s %d,\t%s', opname,
-                      o.func, rvis(o.ipv, o.ipo))
+        return format('%s %s,\t%s,\tFUNC<%s>', opname,
+                      rvis(o.ripv), rvis(o.ipv, o.ipo), extra[o])
     elseif o.op == opcode.DECLFUNC then
         return format('%s %d,\t%s', opname, o.name, rvis(o.ipv))
     elseif o.op == opcode.IBRANCH then
@@ -587,7 +581,8 @@ local function vexecute(il, scope, o, res)
     o.ipo = o.ipo + fixipo
     o.offset = o.offset + fixoffset
     insert(res, o)
-    if o.op >= opcode.OBJFOREACH and o.op <= opcode.PSKIP and
+    if (o.op == opcode.CALLFUNC or
+        o.op >= opcode.OBJFOREACH and o.op <= opcode.PSKIP) and
        o.ripv ~= opcode.NILREG then
         local vinfo = vcreate(scope, o.ripv)
         vinfo.gen = il.id()
@@ -947,6 +942,9 @@ local function voptimizefunc(il, func)
     if r0.inc > 0 then
         insert(res, il.move(0, 0, r0.inc))
     end
+    if r1.inc > 0 then
+        insert(res, il.move(head.ipv, head.ipv, r1.inc))
+    end
     return res
 end
 
@@ -965,6 +963,13 @@ local function il_create()
 
     local il
     il = setmetatable({
+        callfunc = function(ripv, ipv, ipo, func)
+            local o = opcode_new(opcode.CALLFUNC)
+            o.ripv = ripv; o.ipv = ipv; o.ipo = ipo
+            extra[o] = func
+            return o
+        end,
+        ----------------------------------------------------------------
         sbranch = function(cs)
             local o = opcode_new(opcode.SBRANCH)
             extra[o] = cs

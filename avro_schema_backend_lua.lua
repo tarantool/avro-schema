@@ -190,8 +190,10 @@ end
 local function emit_instruction(il, o, res, varmap)
     local tab = emit_instruction_tab -- a shorter alias
     if     o.op == opcode.CALLFUNC  then
-        insert(res, format('v0 = f%d(r, v0, %s)',
-                            o.func, varref(o.ipv, o.ipo, varmap)))
+        insert(res, format('v0%s = f%d(r, v0, %s)',
+                            o.ripv == opcode.NILREG and '' or
+                            ', '..varref(o.ripv, 0, varmap),
+                            il.get_extra(o), varref(o.ipv, o.ipo, varmap)))
     elseif o.op == opcode.MOVE      then
         insert(res, format('%s = %s',
                             varref(o.ripv, 0,     varmap),
@@ -620,7 +622,7 @@ local function emit_func(il, func, res, opts)
                       format('f%d = function(r, v0, v%d)', head.name, head.ipv)
     local func_locals = opts and opts.func_locals
     local func_return = opts and opts.func_return or
-                        format('do return v0 end', head.ipv)
+                        format('do return v0, v%d end', head.ipv)
     local conversion_init     = opts and opts.conversion_init
     local conversion_complete = opts and opts.conversion_complete
     local iter_prolog = opts and opts.iter_prolog
