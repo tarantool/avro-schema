@@ -59,6 +59,9 @@ int
 unparse_msgpack(struct schema_rt_State *state,
                 size_t                  nitems);
 
+int schema_rt_extract_location(struct schema_rt_State *state,
+                               intptr_t                pos);
+
 int32_t
 create_hash_func(int n, const char *strings[],
                  const char *random, size_t size_random);
@@ -248,37 +251,8 @@ end
 
 local extract_location
 extract_location = function(r, pos)
-    if pos == 0 then
-        return '', false
-    end
-    local res = {}
-    local iter = 1
-    local counter = 1
-    local ismap = r.t[0] == 12
-    while true do
-        local t = r.t[iter]
-        local xoff = t < 11 and 1 or r.v[iter].xoff
-        if iter + xoff > pos then
-            if not ismap then
-                insert(res, counter)
-            elseif counter % 2 == 0 and r.t[iter-1] == 8 then
-                insert(res, ffi_string(r.b1 - r.v[iter-1].xoff, r.v[iter-1].xlen))
-            else
-                return res[1] and format('%s: ', concat(res, '/')) or
-                       '', true -- bad key
-            end
-            if iter == pos then
-                return res[1] and format('%s: ', concat(res, '/')) or
-                       '', false
-            end
-            iter = iter + 1
-            counter = 1
-            ismap = t == 12
-        else
-            iter = iter + xoff
-            counter = counter + 1
-        end
-    end
+    local key_error = rt_C.schema_rt_extract_location(r, pos)
+    return ffi.string(r.res, r.res_size), key_error ~= 0
 end
 
 local etype2typename = {
@@ -322,7 +296,7 @@ local function err_missing(r, pos, missing_name)
 end
 
 local function err_duplicate(r, pos)
-    error('duplicate', 0)
+    error(format('%sDuplicate Key', extract_location(r, pos)), 0)
 end
 
 -- err_value() is used to report:

@@ -4,6 +4,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
+#include <inttypes.h>
+#include <stdio.h>
 
 enum TypeId {
     NilValue         = 1,
@@ -887,6 +889,78 @@ int schema_rt_buf_grow(struct State *state,
 {
     return buf_grow_tv(&state->ot, &state->ov, &state->ot_capacity,
                        next_capacity(min_capacity));
+}
+
+/*
+ * Render location info in res buf.
+ * *Pos* is the posiotion of offending element.
+ * Ex: "Foo/Bar/32: "
+ *
+ * @returns 1 if the position is a map key, 0 otherwise.
+ */
+int schema_rt_extract_location(struct State *state,
+                               intptr_t pos)
+{
+    intptr_t i = 1;
+    int      ismap, need_sep = 0;
+    uint32_t counter = 1;
+
+    state->res_size = 0;
+    if (pos == 0) return 0; /* the very root element */
+
+    ismap = state->t[0] == MapValue;
+    while (1) {
+        char         buf[16]; /* PRId32 */
+        const  void *item;
+        size_t       item_size;
+        int          type = state->t[i];
+        intptr_t     next = i + (type == ArrayValue || type == MapValue ?
+                                 state->v[i].xoff : 1);
+
+        if (next <= pos) { /* skip it */
+            i = next; counter++; continue;
+        }
+        if (need_sep) { /* invariant: there's space for sep in buf */
+            state->res[state->res_size] = '/';
+            state->res_size++;
+        }
+        if (ismap) {
+            if ((counter & 1) || state->t[i-1] != StringValue) {
+                /* the issue was with a key */
+                if (need_sep) { /* overwrite /, hence -1 */
+                    memcpy(state->res + state->res_size - 1, ": ", 2);
+                    state->res_size++;
+                }
+                return 1;
+            }
+            item = state->b1 - state->v[i-1].xoff;
+            item_size = state->v[i-1].xlen;
+        } else {
+            item = buf;
+            item_size = sprintf(buf, "%"PRIu32, counter);
+        }
+        /* maintain invariant: there's space for sep in buf */
+        if (state->res_capacity < state->res_size + item_size + 2 &&
+            buf_grow(&state->res, &state->res_capacity,
+                     next_capacity(state->res_size + item_size + 2)) != 0) {
+
+            /* allocation failure (unlikely); discard incomplete message */
+            state->res_size = 0;
+            return 0;
+        }
+        memcpy(state->res + state->res_size, item, item_size);
+        state->res_size += item_size;
+        if (i == pos) {
+            memcpy(state->res + state->res_size, ": ", 2);
+            state->res_size += 2;
+            return 0;
+        }
+        /* descent into map or array */
+        need_sep = 1;
+        i++;
+        counter = 1;
+        ismap = type == MapValue;
+    }
 }
 
 /*

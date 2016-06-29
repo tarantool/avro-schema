@@ -7,6 +7,7 @@ global:
     create_hash_func;
     eval_hash_func;
     eval_fnv1a_func;
+    schema_rt_extract_location;
     schema_rt_buf_grow;
     schema_rt_key_eq;
     schema_rt_search8;
