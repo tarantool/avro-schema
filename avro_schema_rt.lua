@@ -123,7 +123,6 @@ phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, siz
 
 ]]
 
-local null        = ffi_cast('void *', 0)
 local rt_C_path   = package.searchpath('avro_schema_rt_c',
                                         package.cpath)
 local rt_C        = ffi.load(rt_C_path)
@@ -142,6 +141,7 @@ local function msgpack_decode(r, s)
     if rt_C.parse_msgpack(r, s, #s) ~= 0 then
         error(ffi.string(r.res, r.res_size), 0)
     end
+    return tonumber(r.res_size)
 end
 
 local function msgpack_encode(r, n)
@@ -159,6 +159,7 @@ local function universal_decode(r, s)
     if rt_C.parse_msgpack(r, s, #s) ~= 0 then
         error(ffi.string(r.res, r.res_size), 0)
     end
+    return tonumber(r.res_size)
 end
 
 local function lua_encode(r, n)
@@ -172,105 +173,73 @@ end
 -- vis_msgpack
 --
 
-local function esc(s)
-    if find(s, '[A-Za-z0-9_]') then
-        return s
-    else
-        return format('\\%0d', string.byte(s))
-    end
-end
-
 local typenames = {
     [1] = 'NIL', [2] = 'FALSE', [3] = 'TRUE', [4] = 'LONG', [5] = 'ULONG',
     [6] = 'FLOAT', [7] = 'DOUBLE', [8] = 'STR', [9] = 'BIN',
     [10] = 'EXT', [11] = 'ARRAY', [12] = 'MAP'
 }
 
-local valuevis = {
-    [4] = function(i, val)
-        return nil, format(' %4s', val.ival)
+local vis_value_funcs = {
+    [4] = function(r, i)
+        return format(' %4s', r.v[i].ival)
     end,
-    [5] = function(i, val)
-        return nil, format(' %4s', val.uval)
+    [5] = function(r, i)
+        return format(' %4s', r.v[i].uval)
     end,
-    [6] = function(i,val)
-        return nil, format(' %4s', val.dval)
+    [6] = function(r, i)
+        return format(' %4s', r.v[i].dval)
     end,
-    [7] = function(i, val)
-        return nil, format(' %4s', val.dval)
+    [7] = function(r, i)
+        return format(' %4s', r.v[i].dval)
     end,
-    [8] = function(i, val, bank)
-        local sample
-        if type(bank) == 'string' then
-            sample = {}
-            local i = #bank - val.xoff + 1
-            while #sample < val.xlen do
-                if #sample == 10 then
-                    sample[8], sample[9], sample[10] = '.', '.', '.'
-                    break
-                end
-                insert(sample, esc(sub(bank, i, i)))
-                i = i + 1
-            end
-            sample = concat(sample)
-        else
-            sample = format('-%d', val.xoff)
-        end
-        return nil, format(' %4s %s', val.xlen, sample or '')
+    [8] = function(r, i)
+        local v = r.v[i]
+        return format(' %q', ffi_string(r.b1-v.xoff, v.xlen))
     end,
-    [11] = function(i, val)
-        return val.xlen, format(
-            ' %4s ->%05d', val.xlen, i+val.xoff)
+    [11] = function(r, i)
+        local v = r.v[i]
+        return format(
+            ' %4s ->%05d', v.xlen, i+v.xoff), v.xlen
     end,
-    [12] = function(i, val)
-        return val.xlen * 2, format(
-            ' %4s ->%05d', val.xlen, i+val.xoff)
+    [12] = function(r, i)
+        local v = r.v[i]
+        return format(
+            ' %4s ->%05d', v.xlen, v.xoff), 2*v.len
     end
 }
 
+local function vis_value(r, i)
+    local t = r.t[i]
+    local tname = typenames[t]
+    local func = vis_value_funcs[t]
+    if func then return tname, func(r, i) end
+    return (tname or '????'), ''
+end
+
 local function vis_msgpack(input)
 
-    universal_decode(rs, input)
+    local n = universal_decode(regs, input)
+    local typeid = regs.t
+    local value  = regs.v
 
-    local st, res = pcall(function()
-
-        local typeid = r.t
-        local value  = r.v
-
-        local output = {}
-        local todos = {}
-        local todo = 1
-        for i = 0, tonumber(rc) - 1 do
-            local indent
-            local xid, xval = typeid[i], value[i]
-            local vis = valuevis[xid]
-            local len, info
-            if vis then
-                len, info = vis(i, xval, input)
-            end
-            local line = format(
-                '%05d%s %-06s%s', i, string.rep('....', #todos),
-                typenames[xid] or '???', info or '')
-            insert(output, line)
-            todo = todo - 1
-            if len then
-                insert(todos, todo)
-                todo = len
-            end
-            while todo == 0 and todos[1] do
-                todo = remove(todos)
-            end
+    local output = {}
+    local todos = {}
+    local todo = 1
+    for i = 0, n - 1 do
+        local a, b, len = vis_value(regs, i)
+        insert(output, format('%05d%s %-06s%s',
+                              i, string.rep('....', #todos), a, b))
+        todo = todo - 1
+        if len then
+            insert(todos, todo)
+            todo = len
         end
-
-        insert(output, format('%05d', tonumber(rc)))
-        return concat(output, '\n')
-
-    end)
-
-    if not st then
-        error(res)
+        while todo == 0 and todos[1] do
+            todo = remove(todos)
+        end
     end
-    return res
+    insert(output, format('%05d', n))
+    return concat(output, '\n')
 end
 
 --
@@ -370,13 +339,11 @@ local function err_value(r, pos, ver_error)
                      location,
                      ffi_string(r.b1-r.v[pos].xoff, r.v[pos].xlen), tag), 0)
     end
-    local val = 'TBD'
     local t = r.t[pos]
+    local val
     if t == 4 then
         val = tonumber(r.v[pos].ival)
         val = val == r.v[pos].ival and val or r.v[pos].ival
-    elseif t == 6 or t == 7 then
-        val = r.v[pos].dval
     elseif t == 8 then
         val = format('%q', ffi_string(r.b1 - r.v[pos].xoff, r.v[pos].xlen))
     end

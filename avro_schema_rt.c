@@ -574,6 +574,7 @@ do_xdata:
     }
 
 done:
+    state->res_size = value - state->v;
     state->b1 = me;
     return 0;
 
