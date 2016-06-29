@@ -46,7 +46,11 @@ add_definitions(-D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS)
 set (CMAKE_SHARED_LINKER_FLAGS
     "-Wl,--version-script,${CMAKE_SOURCE_DIR}/exports -Wl,--gc-sections -nodefaultlibs")
 
-add_library(avro_schema_rt_c SHARED avro_schema_rt.c lib/phf/phf.cc)
+add_library(avro_schema_rt_c SHARED
+            rt/pipeline.c
+            rt/hash.c
+            rt/misc.c
+            lib/phf/phf.cc)
 set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
                      "avro_schema_rt_c")
 

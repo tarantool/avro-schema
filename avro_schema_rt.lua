@@ -13,8 +13,8 @@ local ffi_string = ffi.string
 local msgpacklib_encode = msgpacklib and msgpacklib.encode
 local msgpacklib_decode = msgpacklib and msgpacklib.decode
 
+-- pipeline -----------------------------------------------------------
 ffi.cdef[[
-
 struct schema_rt_Value {
     union {
         void          *p;
@@ -47,10 +47,6 @@ struct schema_rt_State {
 };
 
 int
-schema_rt_buf_grow(struct schema_rt_State *state,
-                   size_t                  min_capacity);
-
-int
 parse_msgpack(struct schema_rt_State *state,
               const uint8_t          *msgpack_in,
               size_t                  msgpack_size);
@@ -59,9 +55,16 @@ int
 unparse_msgpack(struct schema_rt_State *state,
                 size_t                  nitems);
 
+int
+schema_rt_buf_grow(struct schema_rt_State *state,
+                   size_t                  min_capacity);
+
 int schema_rt_extract_location(struct schema_rt_State *state,
                                intptr_t                pos);
+]]
 
+-- hash ---------------------------------------------------------------
+ffi.cdef[[
 int32_t
 create_hash_func(int n, const char *strings[],
                  const char *random, size_t size_random);
@@ -71,7 +74,10 @@ eval_hash_func(int32_t func, const unsigned char *str, size_t len);
 
 int32_t
 eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
+]]
 
+-- misc ---------------------------------------------------------------
+ffi.cdef[[
 int
 schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len);
 
@@ -83,9 +89,10 @@ schema_rt_search16(const void *tab, int32_t k, size_t n);
 
 int32_t
 schema_rt_search32(const void *tab, int32_t k, size_t n);
+]]
 
-/* phf ***************************************************************/
-
+-- phf ----------------------------------------------------------------
+ffi.cdef[[
 struct schema_rt_phf {
     bool                      nodiv;
     int32_t                   seed;
@@ -123,7 +130,6 @@ phf_hash_uint32_band_raw16(const void *g, int32_t k, int32_t seed, size_t r, siz
 
 int32_t
 phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
-
 ]]
 
 local rt_C_path   = package.searchpath('avro_schema_rt_c',
