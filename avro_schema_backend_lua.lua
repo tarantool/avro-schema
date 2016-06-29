@@ -164,7 +164,7 @@ local emit_compute_hash_func_tab = {
 local function emit_compute_hash_func(func, pos, res)
     if func == 0 then
         assert(false)
-    elseif func > 0x0f000000 then
+    elseif band(func, 0xf0000000) ~= 0 then
         insert(res, format([[
 t = rt_C.eval_fnv1a_func(%d, r.b1-r.v[%s].xoff, r.v[%s].xlen)]],
                       rt_C.eval_hash_func(func, '', 0), pos, pos))
