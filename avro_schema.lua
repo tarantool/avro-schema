@@ -2,7 +2,7 @@ local digest      = require('digest')
 local front       = require('avro_schema_front')
 local c           = require('avro_schema_c')
 local il          = require('avro_schema_il')
-local backend_lua = require('avro_schema_backend_lua')
+local backend_lua = require('avro_schema_back')
 local rt          = require('avro_schema_rt')
 
 local format, find, sub = string.format, string.find, string.sub

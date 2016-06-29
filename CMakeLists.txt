@@ -68,15 +68,15 @@ add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_il_.lua
                    COMMAND ${CMAKE_SOURCE_DIR}/il_filt.sh
                    ${CMAKE_SOURCE_DIR}/avro_schema_il.lua avro_schema_il_.lua)
 
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_backend_lua_.lua
-                   DEPENDS avro_schema_backend_lua.lua ${CMAKE_BINARY_DIR}/il_filt
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_back_.lua
+                   DEPENDS avro_schema_back.lua ${CMAKE_BINARY_DIR}/il_filt
                    COMMAND ${CMAKE_SOURCE_DIR}/il_filt.sh
-                   ${CMAKE_SOURCE_DIR}/avro_schema_backend_lua.lua
-                   avro_schema_backend_lua_.lua)
+                   ${CMAKE_SOURCE_DIR}/avro_schema_back.lua
+                   avro_schema_back_.lua)
 
 add_custom_target(postprocess_lua ALL DEPENDS
     ${CMAKE_BINARY_DIR}/avro_schema_il_.lua
-    ${CMAKE_BINARY_DIR}/avro_schema_backend_lua_.lua)
+    ${CMAKE_BINARY_DIR}/avro_schema_back_.lua)
 
 # Install module
 install(FILES avro_schema.lua avro_schema_c.lua avro_schema_front.lua
@@ -86,8 +86,8 @@ install(FILES avro_schema.lua avro_schema_c.lua avro_schema_front.lua
 install(FILES ${CMAKE_BINARY_DIR}/avro_schema_il_.lua RENAME avro_schema_il.lua
         DESTINATION ${TARANTOOL_INSTALL_LUADIR})
 
-install(FILES ${CMAKE_BINARY_DIR}/avro_schema_backend_lua_.lua
-        RENAME avro_schema_backend_lua.lua
+install(FILES ${CMAKE_BINARY_DIR}/avro_schema_back_.lua
+        RENAME avro_schema_back.lua
         DESTINATION ${TARANTOOL_INSTALL_LUADIR})
 
 install(TARGETS avro_schema_rt_c LIBRARY
