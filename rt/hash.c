@@ -5,15 +5,15 @@
 #include <string.h>
 
 uint32_t
-eval_fnv1a_func(uint32_t seed, const unsigned char *str, size_t len);
+eval_fnv1a_func(uint32_t seed, const char *str, size_t len);
 
 static int
-collisions_found(uint32_t func, int n, const unsigned char *strings[],
+collisions_found(uint32_t func, int n, const char *strings[],
                  void *mem);
 
 static uint32_t
-create_fnv_func(int n, const unsigned char *strings[],
-                const unsigned char *random, size_t size_random,
+create_fnv_func(int n, const char *strings[],
+                const char *random, size_t size_random,
                 void *mem);
 
 /*
@@ -44,8 +44,8 @@ create_fnv_func(int n, const unsigned char *strings[],
  * A chunk of random data is passed explicitly (i.e. random/size_random.)
  * The function gets n ASCII-Z strings.
  */
-uint32_t create_hash_func(int n, const unsigned char *strings[],
-                          const unsigned char *random, size_t size_random)
+uint32_t create_hash_func(int n, const char *strings[],
+                          const char *random, size_t size_random)
 {
     /*
      * Select sampling positions with a simple greedy algorithm:
@@ -206,7 +206,7 @@ sort_sample_pos:
             const uint32_t idx = indices[j];
             const char * const str = strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
-                              (0x7f & strlen(str)) : str[best_pos]);
+                              (0x7f & strlen(str)) : (unsigned)str[best_pos]);
             map |= (uint64_t)1 << (probe / 2);
             probes[probe]++;
             if (idx & DOMAIN_END_BIT) {
@@ -237,7 +237,7 @@ sort_sample_pos:
             const uint32_t idx = indices[j];
             const char * const str = strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
-                              (0x7f & strlen(str)) : str[best_pos]);
+                              (0x7f & strlen(str)) : (unsigned)str[best_pos]);
             next_indices[--probes[probe]] = idx;
         }
         i = end;
@@ -253,11 +253,11 @@ sort_sample_pos:
     goto pick_next_sample;
 }
 
-static uint32_t create_fnv_func(int n, const unsigned char *strings[],
-                                const unsigned char *random, size_t size_random,
+static uint32_t create_fnv_func(int n, const char *strings[],
+                                const char *random, size_t size_random,
                                 void *mem)
 {
-    const unsigned char *last_random;
+    const char *last_random;
     uint32_t func = 0;
     if (size_random < sizeof(uint32_t)) goto done;
     for (last_random = random + size_random - sizeof(uint32_t);
@@ -277,13 +277,13 @@ done:
 }
 
 uint32_t
-eval_hash_func(uint32_t func, const unsigned char *str, size_t len)
+eval_hash_func(uint32_t func, const char *str, size_t len)
 {
     int family = func >> 24, a, b, c;
     if (family > 0xf) {
         uint32_t prefix = func;
         uint32_t seed = eval_fnv1a_func(0x811c9dc5,
-                                        (const unsigned char *)&prefix,
+                                        (const char *)&prefix,
                                         sizeof(prefix));
         return eval_fnv1a_func(seed, str, len);
     }
@@ -327,11 +327,11 @@ eval_hash_func(uint32_t func, const unsigned char *str, size_t len)
 }
 
 uint32_t
-eval_fnv1a_func(uint32_t seed, const unsigned char *str, size_t len)
+eval_fnv1a_func(uint32_t seed, const char *str, size_t len)
 {
     uint32_t res = seed;
     const unsigned char *i, *e;
-    for (i = str, e = str + len; i < e; i++) {
+    for (i = (const unsigned char *)str, e = i + len; i < e; i++) {
         res ^= *i;
         res *= 0x1000193;
     }
@@ -339,7 +339,7 @@ eval_fnv1a_func(uint32_t seed, const unsigned char *str, size_t len)
 }
 
 static int
-collisions_found(uint32_t func, int n, const unsigned char *strings[],
+collisions_found(uint32_t func, int n, const char *strings[],
                  void *mem)
 {
     int i;
@@ -348,10 +348,10 @@ collisions_found(uint32_t func, int n, const unsigned char *strings[],
     if (n < 2) return 0;
 
     /* bucket_count = 2 ** K, important! */
-    while (bucket_count <= n)
+    while ((int)bucket_count <= n)
         bucket_count *= 2;
 
-    assert(bucket_count <= n * 2); /* mem has capacity for n * 2 buckets */
+    assert((int)bucket_count <= n * 2); /* mem has capacity for n * 2 buckets */
 
     uint32_t * const buckets = mem;
     uint64_t * const bitmap  = (void *)(buckets + bucket_count);
