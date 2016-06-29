@@ -140,13 +140,13 @@ buf_grow(regs, 128)
 
 local function msgpack_decode(r, s)
     if rt_C.parse_msgpack(r, s, #s) ~= 0 then
-        error('Malformed msgpack data', 0)
+        error(ffi.string(r.res, r.res_size), 0)
     end
 end
 
 local function msgpack_encode(r, n)
     if rt_C.unparse_msgpack(r, n) ~= 0 then
-        error('Internal error', 0)
+        error(ffi.string(r.res, r.res_size), 0)
     end
     return ffi_string(r.res, r.res_size)
 end
@@ -157,13 +157,13 @@ local function universal_decode(r, s)
         s = msgpacklib_encode(s)
     end
     if rt_C.parse_msgpack(r, s, #s) ~= 0 then
-        error('Malformed msgpack data', 0)
+        error(ffi.string(r.res, r.res_size), 0)
     end
 end
 
 local function lua_encode(r, n)
     if rt_C.unparse_msgpack(r, n) ~= 0 then
-        error('Internal error', 0)
+        error(ffi.string(r.res, r.res_size), 0)
     end
     return msgpacklib_decode(ffi_string(r.res, r.res_size))
 end

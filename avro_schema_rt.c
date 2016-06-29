@@ -202,6 +202,21 @@ static int buf_grow_tv(uint8_t **t,
     return buf_grow(t, capacity, new_capacity);
 }
 
+static int set_error(struct State *state,
+                     const char *msg)
+{
+    size_t len = strlen(msg);
+    if (state->res_capacity < len &&
+        buf_grow(&state->res, &state->res_capacity, next_capacity(len)) != 0) {
+
+        state->res_size = 0;
+        return -1;
+    }
+    state->res_size = len;
+    memcpy(state->res, msg, len);
+    return -1; /* always returns -1, see invocation */
+}
+
 int parse_msgpack(struct State *state,
                   const uint8_t * restrict mi,
                   size_t        ms)
@@ -563,10 +578,11 @@ done:
     return 0;
 
 error_underflow:
+    return set_error(state, "Truncated data");
 error_c1:
+    return set_error(state, "Invalid data");
 error_alloc:
-    /* TODO put error message in res */
-    return -1;
+    return set_error(state, "Out of memory");
 }
 
 int unparse_msgpack(struct State *state,
@@ -860,8 +876,9 @@ copy_data:
     return 0;
 
 error_alloc:
+    return set_error(state, "Out of memory");
 error_badcode:
-    return -1;
+    return set_error(state, "Internal error: unknown code");
 }
 
 int schema_rt_buf_grow(struct State *state,
