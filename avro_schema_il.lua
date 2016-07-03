@@ -38,7 +38,9 @@ struct schema_il_Opcode {
     static const int DECLFUNC    = 0xc1;
     static const int IBRANCH     = 0xc2;
     static const int SBRANCH     = 0xc3;
-    static const int IFSET       = 0xc4; // c5, c6 reserved
+    static const int IFSET       = 0xc4;
+    static const int IFNUL       = 0xc5;
+    static const int INTSWITCH   = 0xc6;
     static const int STRSWITCH   = 0xc7;
     // ripv ipv ipo
     static const int OBJFOREACH  = 0xc8; // last block
@@ -90,15 +92,18 @@ struct schema_il_Opcode {
     static const int ISARRAY     = 0xf1;
     static const int ISMAP       = 0xf2;
     static const int ISNUL       = 0xf3;
+    static const int ISNULORMAP  = 0xf4;
 
-    static const int LENIS       = 0xf4;
+    static const int LENIS       = 0xf5;
 
-    static const int ISSET       = 0xf5;
-    static const int ISNOTSET    = 0xf6;
-    static const int BEGINVAR    = 0xf7;
-    static const int ENDVAR      = 0xf8;
+    static const int ISSET       = 0xf6;
+    static const int ISNOTSET    = 0xf7;
+    static const int BEGINVAR    = 0xf8;
+    static const int ENDVAR      = 0xf9;
 
-    static const int CHECKOBUF   = 0xf9;
+    static const int CHECKOBUF   = 0xfa;
+
+    static const int ERRVALUEV   = 0xfb;
 
     static const unsigned NILREG  = 0xffffffff;
 };
@@ -122,7 +127,8 @@ local opcode = ffi_new('struct schema_il_Opcode')
 local op2str = {
     [opcode.CALLFUNC   ] = 'CALLFUNC   ',   [opcode.DECLFUNC   ] = 'DECLFUNC   ',
     [opcode.IBRANCH    ] = 'IBRANCH    ',   [opcode.SBRANCH    ] = 'SBRANCH    ',
-    [opcode.IFSET      ] = 'IFSET      ',   [opcode.STRSWITCH  ] = 'STRSWITCH  ',
+    [opcode.IFSET      ] = 'IFSET      ',   [opcode.IFNUL      ] = 'IFNUL      ',
+    [opcode.INTSWITCH  ] = 'INTSWITCH  ',   [opcode.STRSWITCH  ] = 'STRSWITCH  ',
     [opcode.OBJFOREACH ] = 'OBJFOREACH ',   [opcode.MOVE       ] = 'MOVE       ',
     [opcode.SKIP       ] = 'SKIP       ',   [opcode.PSKIP      ] = 'PSKIP      ',
     [opcode.PUTBOOLC   ] = 'PUTBOOLC   ',   [opcode.PUTINTC    ] = 'PUTINTC    ',
@@ -145,9 +151,10 @@ local op2str = {
     [opcode.ISDOUBLE   ] = 'ISDOUBLE   ',   [opcode.ISSTR      ] = 'ISSTR      ',
     [opcode.ISBIN      ] = 'ISBIN      ',   [opcode.ISARRAY    ] = 'ISARRAY    ',
     [opcode.ISMAP      ] = 'ISMAP      ',   [opcode.ISNUL      ] = 'ISNUL      ',
-    [opcode.LENIS      ] = 'LENIS      ',   [opcode.ISSET      ] = 'ISSET      ',
-    [opcode.ISNOTSET   ] = 'ISNOTSET   ',   [opcode.BEGINVAR   ] = 'BEGINVAR   ',
-    [opcode.ENDVAR     ] = 'ENDVAR     ',   [opcode.CHECKOBUF  ] = 'CHECKOBUF  '
+    [opcode.ISNULORMAP ] = 'ISNULORMAP ',   [opcode.LENIS      ] = 'LENIS      ',
+    [opcode.ISSET      ] = 'ISSET      ',   [opcode.ISNOTSET   ] = 'ISNOTSET   ',
+    [opcode.BEGINVAR   ] = 'BEGINVAR   ',   [opcode.ENDVAR     ] = 'ENDVAR     ',
+    [opcode.CHECKOBUF  ] = 'CHECKOBUF  ',   [opcode.ERRVALUEV  ] = 'ERRVALUEV  '
 }
 
 local function opcode_new(op)
@@ -213,6 +220,8 @@ local il_methods = {
         return o
     end,
     ifset       = opcode_ctor_ipv         (opcode.IFSET),
+    ifnul       = opcode_ctor_ipv_ipo     (opcode.IFNUL),
+    intswitch   = opcode_ctor_ipv_ipo     (opcode.INTSWITCH),
     strswitch   = opcode_ctor_ipv_ipo     (opcode.STRSWITCH),
     objforeach  = opcode_ctor_ripv_ipv_ipo(opcode.OBJFOREACH),
     ----------------------------------------------------------------
@@ -277,6 +286,7 @@ local il_methods = {
     isarray     = opcode_ctor_ipv_ipo(opcode.ISARRAY),
     ismap       = opcode_ctor_ipv_ipo(opcode.ISMAP),
     isnul       = opcode_ctor_ipv_ipo(opcode.ISNUL),
+    isnulormap  = opcode_ctor_ipv_ipo(opcode.ISNULORMAP),
     ----------------------------------------------------------------
     lenis = function(ipv, ipo, len)
         local o = opcode_new(opcode.LENIS)
@@ -293,7 +303,8 @@ local il_methods = {
         o.offset = offset; o.ipv = ipv or opcode.NILREG
         o.ipo = ipo or 0; o.scale = scale or 1
         return o
-    end
+    end,
+    errvaluev  = opcode_ctor_ipv_ipo(opcode.ERRVALUEV)
     ----------------------------------------------------------------
     -- callfunc, sbranch, putstrc, putbinc, putxc and isset
     -- are instance methods
@@ -347,8 +358,9 @@ local function opcode_vis(o, extra)
     elseif o.op == opcode.IFSET or (
            o.op >= opcode.ISNOTSET and o.op <= opcode.ENDVAR) then
         return format('%s %s', opname, rvis(o.ipv))
-    elseif o.op == opcode.STRSWITCH or (
-           o.op >= opcode.ISBOOL and o.op <= opcode.ISNUL) then
+    elseif (o.op >= opcode.IFNUL and o.op <= opcode.STRSWITCH) or
+           (o.op >= opcode.ISBOOL and o.op <= opcode.ISNULORMAP) or
+           o.op == opcode.ERRVALUEV then
         return format('%s [%s]', opname, rvis(o.ipv, o.ipo))
     elseif o.op == opcode.OBJFOREACH then
         return format('%s %s,\t[%s],\t%d', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), o.step)
@@ -553,9 +565,10 @@ local function vexecute(il, scope, o, res)
     end
     local fixipo = 0
     if (o.op == opcode.CALLFUNC or
-       o.op >= opcode.STRSWITCH and o.op <= opcode.PSKIP or
-       o.op >= opcode.PUTBOOL and o.op <= opcode.ISSET or
-       o.op == opcode.CHECKOBUF) and o.ipv ~= opcode.NILREG then
+        o.op >= opcode.IFNUL and o.op <= opcode.PSKIP or
+        o.op >= opcode.PUTBOOL and o.op <= opcode.ISSET or
+        o.op == opcode.CHECKOBUF or o.op == opcode.ERRVALUEV) and
+       o.ipv ~= opcode.NILREG then
 
         local vinfo = vlookup(scope, o.ipv)
         fixipo = vinfo.inc
@@ -785,7 +798,7 @@ voptimizeblock = function(il, scope, block, res)
             end
         else
             local head = o[1]
-            if head.op == opcode.IFSET or head.op == opcode.STRSWITCH then
+            if head.op >= opcode.IFSET and head.op <= opcode.STRSWITCH then
                 -- branchy things: conditions and switches
                 local bscopes = {0}
                 local bblocks = {head}
@@ -809,7 +822,8 @@ voptimizeblock = function(il, scope, block, res)
                 -- a condition has 2 branches, though empty ones are omitted;
                 -- if it's the case temporary restore the second branch
                 -- for the vmergebranches() to consider this execution path
-                if #o == 2 and head.op == opcode.IFSET then
+                if #o == 2 and (head.op == opcode.IFSET or
+                                head.op == opcode.IFNUL) then
                     bscopes[3] = { parent = scope }
                 end
                 vmergebranches(il, bscopes, bblocks)

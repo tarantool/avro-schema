@@ -264,7 +264,7 @@ end
 local etype2typename = {
     [0xea] = 'BOOL', [0xeb] = 'INT', [0xec] = 'FLOAT', [0xed] = 'DOUBLE',
     [0xee] = 'LONG', [0xef] = 'STR', [0xf0] = 'BIN',   [0xf1] = 'ARRAY',
-    [0xf2] = 'MAP',  [0xf3] = 'NIL'
+    [0xf2] = 'MAP',  [0xf3] = 'NIL', [0xf4] = 'NIL or MAP'
 }
 
 local function err_type(r, pos, etype)

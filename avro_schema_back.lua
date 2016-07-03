@@ -136,6 +136,9 @@ local emit_instruction_tab = {
     [opcode.PUTSTR2BIN ] = {  9, 'uval',  'uval' },
     [opcode.PUTBIN2STR ] = {  8, 'uval',  'uval' },
     ----------------------- T
+    [opcode.ISBOOL     ] = '\0\0\1\1\0\0\0\0\0\0\0\0\0',
+    [opcode.ISNULORMAP ] = '\0\1\0\0\0\0\0\0\0\0\0\0\1',
+    ----------------------- T
     [opcode.ISLONG     ] =  4,
     [opcode.ISSTR      ] =  8,
     [opcode.ISBIN      ] =  9,
@@ -260,13 +263,13 @@ r.ot[%s] = %d; r.ov[%s].xlen = %d; r.ov[%s].xoff = %d]],
     elseif o.op == opcode.PUTENUMS2I then
         il.emit_putenums2i(o, res, varmap)
     -----------------------------------------------------------
-    elseif o.op == opcode.ISBOOL    then
+    elseif o.op == opcode.ISBOOL or o.op == opcode.ISNULORMAP   then
         local pos = varref(o.ipv, o.ipo, varmap)
         insert(res, format([[
 if r.b2[r.t[%s]-%d] == 0 then rt_err_type(r, %s, 0x%x) end]],
                             pos,
-                            il.cpool_add('\0\0\1\1\0\0\0\0\0\0\0\0\0'),
-                            pos, opcode.ISBOOL))
+                            il.cpool_add(tab[o.op]),
+                            pos, o.op))
     elseif o.op == opcode.ISINT     then
         local pos = varref(o.ipv, o.ipo, varmap)
         insert(res, format([[
@@ -308,6 +311,10 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
         insert(res, format('if %s > r.ot_capacity then rt_buf_grow(r, %s) end',
                             expr, expr))
     -----------------------------------------------------------
+    elseif o.op == opcode.ERRVALUEV then
+        insert(res, format('rt_err_value(r, %s, 1)',
+                           varref(o.ipv, o.ipo, varmap)))
+    -----------------------------------------------------------
     elseif o.op == opcode.ISSET     then
         insert(res, format('if %s == 0 then rt_err_missing(r, %s, "%s") end',
                             varref(o.ripv, 0, varmap),
@@ -325,9 +332,15 @@ local function emit_if_block(ctx, block, cc, res)
     local varmap  = ctx.varmap
     local head, branch1, branch2 = block[1], block[2], block[3]
     assert(branch1[1].op == opcode.IBRANCH)
-    insert(res, format('if %s %s 0 then',
-                        varref(head.ipv, 0, varmap),
-                        branch1[1].ci == 0 and '==' or '~='))
+    if head.op == opcode.IFNUL then
+        insert(res, format('if r.t[%s] %s 1 then',
+                            varref(head.ipv, head.ipo, varmap),
+                            branch1[1].ci == 0 and '~=' or '=='))
+    else
+        insert(res, format('if %s %s 0 then',
+                            varref(head.ipv, head.ipo, varmap),
+                            branch1[1].ci == 0 and '==' or '~='))
+    end
     emit_nested_block(ctx, branch1, cc, res)
     if branch2 then
         assert(branch2[1].op == opcode.IBRANCH)
@@ -335,6 +348,25 @@ local function emit_if_block(ctx, block, cc, res)
         insert(res, 'else')
         emit_nested_block(ctx, branch2, cc, res)
     end
+    insert(res, 'end')
+end
+
+local function emit_intswitch_block(ctx, block, cc, res)
+    local varmap = ctx.varmap
+    local head   = block[1]
+    local pos    = varref(head.ipv, head.ipo, varmap)
+    for i = 2, #block do
+        local branch = block[i]
+        local branch_head = branch[1]
+        assert(branch_head.op == opcode.IBRANCH)
+        local if_or_elseif = i == 2 and 'if' or 'elseif'
+
+        insert(res, format('%s r.v[%s].ival == %d then',
+                            if_or_elseif, pos, branch_head.ci))
+        emit_nested_block(ctx, branch, cc, res)
+    end
+    insert(res, 'else')
+    insert(res, format('rt_err_value(r, %s)', pos))
     insert(res, 'end')
 end
 
@@ -509,8 +541,10 @@ local function emit_block(ctx, block, cc, res)
             if o.break_jit_trace then break_jit_trace(ctx, res) end
             local head = o[1]
             local link = block[i+1] or cc
-            if     head.op == opcode.IFSET then
+            if     head.op == opcode.IFSET or head.op == opcode.IFNUL then
                 emit_if_block(ctx, o, link, res)
+            elseif head.op == opcode.INTSWITCH then
+                emit_intswitch_block(ctx, o, link, res)
             elseif head.op == opcode.STRSWITCH then
                 emit_strswitch_block(ctx, o, link, res)
             elseif head.op == opcode.OBJFOREACH then
