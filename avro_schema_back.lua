@@ -139,6 +139,7 @@ local emit_instruction_tab = {
     [opcode.ISBOOL     ] = '\0\0\1\1\0\0\0\0\0\0\0\0\0',
     [opcode.ISNULORMAP ] = '\0\1\0\0\0\0\0\0\0\0\0\0\1',
     ----------------------- T
+    [opcode.ISNUL      ] =  1,
     [opcode.ISLONG     ] =  4,
     [opcode.ISSTR      ] =  8,
     [opcode.ISBIN      ] =  9,
