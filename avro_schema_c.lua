@@ -69,6 +69,34 @@ local function ir_fixed_size(ir)
     return ir[2]
 end
 
+local function ir_union_bc(ir)
+    return ir[2]
+end
+
+local function ir_union_inames(ir)
+    return ir[3]
+end
+
+local function ir_union_i2o(ir)
+    return ir[4]
+end
+
+local function ir_union_onames(ir)
+    return ir[5]
+end
+
+-- UNION->?
+local function ir_union_iunion(ir)
+    assert(ir_type(ir) == 'UNION')
+    return not not ir[3]
+end
+
+-- ?->UNION
+local function ir_union_ounion(ir)
+    assert(ir_type(ir) == 'UNION')
+    return not not ir[5]
+end
+
 -----------------------------------------------------------------------
 local schema2ilfunc = {
     null = 'putnulc', boolean = 'putboolc', int = 'putintc',
@@ -228,7 +256,7 @@ local function emit_check(il, ir, ripv, ipv, ipo)
             il.skip(ripv, ipv, ipo)
         }
     elseif irt == 'UNION' then
-        assert(false, 'NYI: union')
+        return il.do_check_union(il, ir, ripv, ipv, ipo)
     elseif irt == 'RECORD' then
         assert(false, 'check record') -- should not happen
     elseif irt == 'ENUM' then
@@ -294,7 +322,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo, nowrap)
             end)
         }
     elseif irt == 'UNION' then
-        assert(false, 'NYI: union')
+        return il.do_convert_union(il, ir, ripv, ipv, ipo, nowrap)
     elseif irt == 'RECORD' then
         if nowrap == 'nowrap' then
             -- recursive types
@@ -917,6 +945,147 @@ local function do_convert_enum_unflatten(il, ir, ripv, ipv, ipo)
 end
 
 -----------------------------------------------------------------------
+-- UNION, flatten
+
+local function flatten_union_branch(il, ir, branchno, ripv, ipv, ipo,
+                                    nowrap, xgap)
+    local bc, i2o     = ir_union_bc(ir), ir_union_i2o(ir)
+    local o, branchbc = i2o[branchno], bc[branchno]
+    if not o then -- branch doesn't exists in target schema
+        return {
+            il.nop(), -- MUST be #1, see emit_convert_unchecked()
+            il.errvaluev(ipv, ir_union_inames(ir)[branchno]~='null' and
+                         (ipo-1) or ipo)
+        }
+    elseif not ir_union_ounion(ir) then
+        local result = emit_convert(il, branchbc, ripv, ipv, ipo, nowrap)
+        il.ir_width[ir] = il.ir_width[branchbc]
+        return result
+    end
+    il.ir_width[ir] = 2
+    local convert = emit_convert(il, branchbc, ripv, ipv, ipo)
+    local code = {
+        convert[1], -- move typecheck up
+        il.checkobuf(1),
+        il.putintc(0, o - 1),
+        il.move(0, 0, xgap or 1),
+        convert
+    }
+    convert[1] = il.nop() -- kill typecheck
+    if nowrap == 'nowrap' then
+        return code
+    else
+        local result = {
+            code[1], -- move typecheck up
+            il.checkobuf(1),
+            il.putarrayc(0, 2),
+            il.move(0, 0, 1),
+            code
+        }
+        code[1] = il.nop() -- kill typecheck
+        return result
+    end
+end
+
+local function do_convert_union_flatten(il, ir, ripv, ipv, ipo, nowrap, xgap)
+    if ir_union_iunion(ir) then -- a UNION mapped to ?
+        local inames = ir_union_inames(ir)
+        local strswitch = { il.strswitch(ipv, ipo+1) }
+        local nulbranch
+        for i = 1,#inames do
+            local iname = inames[i]
+            if iname == 'null' then -- encoded as null
+                nulbranch = {
+                    il.ibranch(1),
+                    (flatten_union_branch(il, ir, i, ripv, ipv, ipo,
+                                          nowrap, xgap))
+                }
+                nulbranch[2][1] = il.nop() -- kill typecheck
+            else -- encoded as { <iname> = ... }
+                insert(strswitch, {
+                    il.sbranch(iname),
+                    (flatten_union_branch(il, ir, i, ripv, ipv, ipo+2,
+                                          nowrap, xgap))
+                })
+            end
+        end
+        if #strswitch == 1 then -- no branches in strswitch
+            assert(null_branch)
+            nulbranch[1] = il.isnul(ipv, ipo)
+            return nulbranch
+        else
+            local code = {
+                il.ismap(ipv, ipo), -- MUST be #1, see emit_convert_unchecked()
+                il.lenis(ipv, ipo, 1),
+                il.isstr(ipv, ipo+1),
+                strswitch
+            }
+            if nulbranch then
+                code[1] = il.nop() -- kill typecheck
+                return {
+                    il.isnulormap(ipv, ipo),-- MUST be #1, see emit_convert_unchecked()
+                    { il.ifnul(ipv, ipo), { il.ibranch(0), code }, nulbranch }
+                }
+            else
+                return code
+            end
+        end
+    else -- not a UNION mapped to a UNION
+        return flatten_union_branch(il, ir, 1, ripv, ipv, ipo, nowrap, xgap)
+    end
+end
+
+-----------------------------------------------------------------------
+-- UNION, unflatten
+
+local function unflatten_union_branch(il, ir, branchno, ripv, ipv, ipo, nowrap)
+    local bc, i2o     = ir_union_bc(ir), ir_union_i2o(ir)
+    local o, branchbc = i2o[branchno], bc[branchno]
+    if not o then -- branch doesn't exists in target schema
+        return il.errvaluev(ipv, ipo - 1)
+    end
+    local convert = emit_convert(il, branchbc, ripv, ipv, ipo, nowrap)
+    if branchbc == 'NUL' or not ir_union_ounion(ir) then
+        return convert
+    end
+    local result = {
+        convert[1], -- move typecheck up
+        il.checkobuf(2),
+        il.putmapc(0, 1),
+        il.putstrc(1, ir_union_onames(ir)[o]),
+        il.move(0, 0, 2),
+        convert
+    }
+    convert[1] = il.nop() -- kill typecheck
+    return result
+end
+
+local function do_convert_union_unflatten(il, ir, ripv, ipv, ipo, nowrap)
+    if ir_union_iunion(ir) then -- a UNION mapped to ?
+        if nowrap ~= 'nowrap' then
+            return {
+                il.isarray(ipv, ipo),
+                il.lenis(ipv, ipo, 2),
+                do_convert_union_unflatten(il, ir, ripv, ipv, ipo+1, 'nowrap')
+            }
+        end
+        il.ir_width[ir] = 2
+        local intswitch = { il.intswitch(ipv, ipo) }
+        for i = 1,#ir_union_inames(ir) do
+            insert(intswitch, {
+                il.ibranch(i-1),
+                unflatten_union_branch(il, ir, i, ripv, ipv, ipo+1)
+            })
+        end
+        return { il.isint(ipv, ipo), intswitch }
+    else -- not a UNION mapped to a UNION
+        local result = unflatten_union_branch(il, ir, 1, ripv, ipv, ipo, nowrap)
+        il.ir_width[ir] = il.ir_width[ir_union_bc(ir)[1]]
+        return result
+    end
+end
+
+-----------------------------------------------------------------------
 
 local emit_rec_xflatten_pass1
 local emit_rec_xflatten_pass2
@@ -1047,6 +1216,7 @@ local function emit_code(il, ir, n_svc_fields)
     il.do_patch_enum = do_patch_enum_unflatten
     il.do_check_enum = do_check_enum_unflatten
     il.do_convert_enum = do_convert_enum_unflatten
+    il.do_convert_union = do_convert_union_unflatten
     unflatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     -- configure for flatten / xflatten
     local ir_width_flatten = {}
@@ -1056,6 +1226,7 @@ local function emit_code(il, ir, n_svc_fields)
     il.do_patch_enum = do_patch_enum_flatten
     il.do_check_enum = do_check_enum_flatten
     il.do_convert_enum = do_convert_enum_flatten
+    il.do_convert_union = do_convert_union_flatten
     flatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     if ir_type(ir) == 'RECORD' then
         xflatten[2] = emit_rec_xflatten(il, ir, n_svc_fields, 1)
@@ -1069,6 +1240,7 @@ local function emit_code(il, ir, n_svc_fields)
     il.do_patch_enum = nil
     il.do_check_enum = nil
     il.do_convert_enum = nil
+    il.do_convert_union = nil
 
     return il.cleanup(il_funcs),
            ir_width_unflatten[ir] or 1,
