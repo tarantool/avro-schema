@@ -97,6 +97,17 @@ local function ir_union_ounion(ir)
     return not not ir[5]
 end
 
+local function ir_union_nested_record(ir)
+    assert(ir_type(ir) == 'UNION')
+    local bc = ir[2]
+    for branch = 1, #ir[3] do
+        local branchir = bc[i]
+        if ir_type(branchir) == 'RECORD' then
+            return branchir
+        end
+    end
+end
+
 -----------------------------------------------------------------------
 local schema2ilfunc = {
     null = 'putnulc', boolean = 'putboolc', int = 'putintc',
@@ -276,7 +287,7 @@ end
 -- Update $0. CHECKOBUF is necessary.
 -- Stores next element's position in $ripv (if passed).
 local emit_convert
-emit_convert = function(il, ir, ripv, ipv, ipo, nowrap)
+emit_convert = function(il, ir, ripv, ipv, ipo, nowrap, xgap)
     local irt = ir_type(ir)
     local ilfuncs = ir2ilfuncs[irt]
     if ilfuncs then
@@ -322,7 +333,7 @@ emit_convert = function(il, ir, ripv, ipv, ipo, nowrap)
             end)
         }
     elseif irt == 'UNION' then
-        return il.do_convert_union(il, ir, ripv, ipv, ipo, nowrap)
+        return il.do_convert_union(il, ir, ripv, ipv, ipo, nowrap, xgap)
     elseif irt == 'RECORD' then
         if nowrap == 'nowrap' then
             -- recursive types
@@ -494,7 +505,18 @@ do_convert_record_flatten_pass1 = function(context, ir, tree, curcell)
                     vlocell = curcell
                     context.vlocell = curcell
                 end
-                curcell = curcell + 1 -- XXX union
+                if fieldirt ~= 'UNION' then
+                    curcell = curcell + 1
+                elseif ir_union_ounion(fieldir) then
+                    curcell = curcell + 2
+                else -- UNION mapped to a non-UNION, check if it's a RECORD
+                    local recordir = ir_union_nested_record(fieldir)
+                    curcell = recordir and
+                              do_convert_record_flatten_pass1(context,
+                                                              recordir,
+                                                              {}, curcell) or
+                              curcell + 1
+                end
             end
         end
     end
@@ -537,8 +559,6 @@ do_convert_record_flatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     insert(branch,
                            do_convert_record_flatten_pass2(context, fieldir, childtree,
                                                            xipv, xipv, 1))
-                elseif fieldirt == 'UNION' then
-                    assert(false, 'NYI')
                 elseif targetcell then
                     tree[o] = fieldvar
                     insert(branch, emit_patch(il, fieldir, xipv, xipv, 1,
@@ -647,14 +667,17 @@ do_convert_record_flatten_pass3 = function(context, ir, tree, curcell, ipv, ipo)
                                                                tree[o], curcell,
                                                                fieldvar, 0)
                 insert(tbranch, code)
-            elseif fieldirt == 'UNION' then
-                assert(false, 'NYI: union')
             elseif curcell >= vlocell then -- append
                 if curcell == vlocell then -- update $0
                     insert(tbranch, il.move(0, 0, vlocell - 1))
                 end
                 insert(tbranch, emit_convert_unchecked(il, fieldir,
-                                                       nil, fieldvar, 0))
+                                                       nil, fieldvar, 0,
+                                                       'nowrap'))
+                -- Note: curcell only necessary to determine if we've
+                --       reached vlocell yet. The statement below yields
+                --       wrong results for UNION-s, but that's fine since
+                --       UNIONS are VLO-s.
                 curcell = curcell + 1
             else -- curcell < vlocell, value already *patch*-ed in
                 curcell = curcell + 1
@@ -731,6 +754,10 @@ do_convert_record_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
         local o = i2o[i]
         local fieldir = bc[i]
         local fieldirt = ir_type(fieldir)
+        if fieldirt == 'UNION' and not ir_union_iunion(fieldir) then
+            fieldir = ir_union_bc(fieldir)[1]
+            fieldirt = ir_type(fieldir)
+        end
         if fieldirt == 'RECORD' then
             local childtree = {}
             tree[i] = childtree
@@ -739,8 +766,6 @@ do_convert_record_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
                                                      childtree, curcell,
                                                      hidden or ir_record_ohidden(ir, o)))
             curcell = context.maxcell
-        elseif fieldirt == 'UNION' then
-            assert(false, 'NYI: union')
         elseif o and not hidden and not ir_record_ohidden(ir, o) then
             tree[i] = curcell
             local lastcell = context.lastcell
@@ -757,14 +782,14 @@ do_convert_record_unflatten_pass1 = function(context, ir, tree, curcell, hidden)
             end
             insert(code, emit_check(context.il, fieldir,
                                     ipv, ipv, 0))
-            curcell = curcell + 1
+            curcell = curcell + (fieldirt == 'UNION' and 2 or 1)
             if not ir2ilfuncs[fieldirt] then
                 context.lastcell = nil -- VLO
             end
         else
             insert(code, emit_validate(context.il, fieldir,
                                        ipv, ipv, 0))
-            curcell = curcell + 1 -- XXX union
+            curcell = curcell + (fieldirt == 'UNION' and 2 or 1)
             if not ir2ilfuncs[fieldirt] then -- XXX enum, fixed
                 context.lastcell = nil -- VLO
             end
@@ -789,7 +814,12 @@ do_convert_record_unflatten_pass2 = function(context, ir, tree)
         local i = o2i[o]
         if i then
             local fieldir = bc[i]
-            if ir_type(fieldir) == 'RECORD' then
+            local fieldirt = ir_type(fieldir)
+            if fieldirt == 'UNION' and not ir_union_iunion(fieldir) then
+                fieldir = ir_union_bc(fieldir)[1]
+                fieldirt = ir_type(fieldir)
+            end
+            if fieldirt == 'RECORD' then
                 do_convert_record_unflatten_pass2(context, fieldir, tree[i])
             else
                 local curcell = tree[i]
@@ -834,16 +864,28 @@ do_convert_record_unflatten_pass3 = function(context, ir, tree)
                 il.putstrc(0, onames[o]),
                 il.move(0, 0, 1)
             })
+            if fieldirt == 'UNION' and not ir_union_iunion(fieldir) then
+                local bc1 = ir_union_bc(fieldir)[1]
+                if ir_type(bc1) == 'RECORD' then
+                    insert(code, {
+                        il.checkobuf(2),
+                        il.putmapc(0, 1),
+                        il.putstrc(1, ir_union_onames(fieldir)[
+                            ir_union_i2o(fieldir)[1]]),
+                        il.move(0, 0, 2)
+                    })
+                    fieldir = bc1
+                    fieldirt = 'RECORD'
+                end
+            end
             if fieldirt == 'RECORD' then
                 insert(code, do_convert_record_unflatten_pass3(context, fieldir, tree[i]))
-            elseif fieldirt == 'UNION' then
-                assert(false, 'NYI: union')
             else
                 local curcell = tree[i]
                 local fieldvar = fieldv[curcell]
                 insert(code, emit_convert_unchecked(il, fieldir, nil,
                                                     fieldvar,
-                                                    fieldo[curcell]))
+                                                    fieldo[curcell], 'nowrap'))
                 if lastref[fieldvar] == curcell then
                     insert(code, il.endvar(fieldvar))
                 end
@@ -947,6 +989,27 @@ end
 -----------------------------------------------------------------------
 -- UNION, flatten
 
+local function do_check_union_flatten(il, ir, ripv, ipv, ipo)
+    if not ir_union_iunion(ir) then
+        return emit_check(il, ir_union_bc(ir)[1], ripv, ipv, ipo)
+    end
+    local accepts_nul
+    local inames = ir_union_inames(ir)
+    for i = 1,#inames do
+        if inames[i] == 'null' then
+            accepts_nul = true
+            break
+        end
+    end
+    return accepts_nul and {
+        il.isnulormap(ipv, ipo),
+        il.pskip(ripv, ipv, ipo)
+    } or {
+        il.ismap(ipv, ipo),
+        il.skip(ripv, ipv, ipo)
+    }
+end
+
 local function flatten_union_branch(il, ir, branchno, ripv, ipv, ipo,
                                     nowrap, xgap)
     local bc, i2o     = ir_union_bc(ir), ir_union_i2o(ir)
@@ -1038,6 +1101,17 @@ end
 -----------------------------------------------------------------------
 -- UNION, unflatten
 
+local function do_check_union_unflatten(il, ir, ripv, ipv, ipo)
+    if not ir_union_iunion(ir) then
+        return emit_check(il, ir_union_bc(ir)[1], ripv, ipv, ipo)
+    else
+        return {
+            il.isint(ipv, ipo),
+            il.pskip(ripv, ipv, ipo+1)
+        }
+    end
+end
+
 local function unflatten_union_branch(il, ir, branchno, ripv, ipv, ipo, nowrap)
     local bc, i2o     = ir_union_bc(ir), ir_union_i2o(ir)
     local o, branchbc = i2o[branchno], bc[branchno]
@@ -1123,16 +1197,15 @@ emit_rec_xflatten_pass1 = function(context, ir, tree, curcell)
             local ds, dv = ir_record_odefault(ir, o)
             curcell = curcell + prepare_flat_defaults_vec(context.il, ds, dv)
         else
-            local fieldirt
+            local fieldirt = ir_type(fieldir)
             tree[o] = curcell + n_svc_fields
-            fieldirt = ir_type(fieldir)
             if     fieldirt == 'RECORD' then
                 local ctree = {}
                 tree[o] = ctree
                 curcell = emit_rec_xflatten_pass1(context, fieldir,
                                                   ctree, curcell)
             elseif fieldirt == 'UNION' then
-                assert(false, 'NYI: union')
+                curcell = curcell + 2
             else
                 curcell = curcell + 1
             end
@@ -1166,34 +1239,52 @@ emit_rec_xflatten_pass2 = function(context, ir, tree, ripv, ipv, ipo)
                     il.isnotset(fieldvar),
                     il.move(fieldvar, xipv, 1)
                 }
+                switch[i + 1] = branch
+                if fieldirt == 'UNION' and not ir_union_ounion(fieldir) then
+                    -- Note: the operation is ill-defined and no one
+                    --       wants it yet.
+                    assert(ir_type(ir_union_bc(ir)[1]) ~= 'RECORD',
+                           'NYI: UNION->RECORD in xflatten')
+                end
                 if fieldirt == 'RECORD' and o then
                     insert(branch, emit_rec_xflatten_pass2(context, fieldir,
                                                            tree and tree[o],
                                                            xipv, fieldvar, 0))
-                elseif fieldirt == 'UNION' then
-                    assert(false, 'NYI')
-                elseif o then
+                elseif not o then
+                    insert(branch, emit_validate(il, fieldir, xipv, xipv, 1,
+                                                 'nowrap'))
+                else
                     -- Note: this code motion is harmless
-                    -- (see emit_conver/emit_convert_unchecked);
+                    -- (see emit_convert/emit_convert_unchecked);
                     -- allows to keep CHECKOBUF optimiser simple
                     -- (CHECKOBUF can't move past typecheck.)
-                    local convert = emit_convert(il, fieldir, xipv, xipv, 1)
+                    local convert = emit_convert(il, fieldir, xipv, xipv, 1,
+                                                 'nowrap', 4)
                     local typecheck = convert[1]
                     convert[1] = il.nop()
                     insert(branch, {
                         typecheck,
-                        il.checkobuf(3),
+                        il.checkobuf(7),
                         il.putarrayc(0, 3),
                         il.putstrc(1, '='),
                         il.putintc(2, tree[o]),
-                        il.move(counter, counter, 1),
-                        il.move(0, 0, 3),
-                        convert
+                        il.move(0, 0, 3)
                     })
-                else
-                    insert(branch, emit_validate(il, fieldir, xipv, xipv, 1))
+                    if fieldirt == 'UNION' then
+                        insert(branch, {
+                            il.putarrayc(1, 3),
+                            il.putstrc(2, '='),
+                            il.putintc(3, tree[o] + 1),
+                            il.move(counter, counter, 2),
+                            convert
+                        })
+                    else
+                        insert(branch, {
+                            il.move(counter, counter, 1),
+                            convert
+                        })
+                    end
                 end
-                switch[i + 1] = branch
             end -- for i = 1, #inames do
             return { il.isstr(xipv, 0), switch }
         end)
@@ -1217,6 +1308,7 @@ local function emit_code(il, ir, n_svc_fields)
     il.do_check_enum = do_check_enum_unflatten
     il.do_convert_enum = do_convert_enum_unflatten
     il.do_convert_union = do_convert_union_unflatten
+    il.do_check_union = do_check_union_unflatten
     unflatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     -- configure for flatten / xflatten
     local ir_width_flatten = {}
@@ -1227,6 +1319,7 @@ local function emit_code(il, ir, n_svc_fields)
     il.do_check_enum = do_check_enum_flatten
     il.do_convert_enum = do_convert_enum_flatten
     il.do_convert_union = do_convert_union_flatten
+    il.do_check_union = do_check_union_flatten
     flatten[2] = emit_convert(il, ir, 1, 1, 0, 'nowrap')
     if ir_type(ir) == 'RECORD' then
         xflatten[2] = emit_rec_xflatten(il, ir, n_svc_fields, 1)
@@ -1241,6 +1334,7 @@ local function emit_code(il, ir, n_svc_fields)
     il.do_check_enum = nil
     il.do_convert_enum = nil
     il.do_convert_union = nil
+    il.do_check_union = nil
 
     return il.cleanup(il_funcs),
            ir_width_unflatten[ir] or 1,
