@@ -598,9 +598,10 @@ local function emit_func_body(il, func, nlocals_min, res)
         peel_annotate(func, 0)
     end
     insert(res, '')
-    local patchpos1 = #res
+    local patchpos = #res
+    local donelabel = il.id()
     local head = func[1]
-    local labelmap, jit_trace_breaks = {}, {}
+    local labelmap, jit_trace_breaks = {[head] = donelabel}, {}
     local queue = { func, head }
     local ctx = {
         il = il,
@@ -609,7 +610,6 @@ local function emit_func_body(il, func, nlocals_min, res)
         jit_trace_breaks = jit_trace_breaks,
         queue = queue
     }
-    local patchpos2
     local emitpos = 0
     while emitpos ~= #queue do
         local n = emitpos + 1
@@ -619,17 +619,11 @@ local function emit_func_body(il, func, nlocals_min, res)
             local label = labelmap[entry]
             insert(res, label and format('::l%d::', label))
             emit_block(ctx, entry, cc, res)
-            label = labelmap[cc]
-            if cc == head then
-                insert(res, label and format('::l%d::', label))
-                insert(res, '')
-                patchpos2 = #res
-            else
-                insert(res, format('goto l%d', label))
-            end
+            insert(res, format('goto l%s', labelmap[cc]))
         end
     end
-    return patchpos1, patchpos2, jit_trace_breaks
+    insert(res, format('::l%d::', donelabel))
+    return patchpos, jit_trace_breaks
 end
 
 local function emit_jump_table(labels, res)
@@ -666,18 +660,19 @@ local function emit_func(il, func, res, opts)
     insert(res, func_locals)
     insert(res, 'local t = 0')
     local tpos = #res
-    local patchpos1, patchpos2, jit_trace_breaks =
+    local patchpos, jit_trace_breaks =
         emit_func_body(il, func, nlocals_min, res)
-    res[patchpos1] = conversion_init or ''
+    res[patchpos] = conversion_init or ''
     if not conversion_complete then
-        res[patchpos2] = func_return
+        insert(res, func_return)
     elseif il.enable_loop_peeling --[[ and conversion_complete ]] then
         local label = il.id()
         insert(jit_trace_breaks, 1, label)
-        res[patchpos2] = format('%s\ns = %d\ngoto continue', conversion_complete, label)
+        insert(res, format('%s\ns = %d\ngoto continue',
+                           conversion_complete, label))
     else --[[ not il.enable_loop_peeling and conversion_complete ]]
-        res[patchpos2] = conversion_complete
-        res[patchpos2+1] = func_return
+        insert(res, conversion_complete)
+        insert(res, func_return)
     end
     if next(jit_trace_breaks) then
         local patch = { 'for _ = 1, 1000000000 do' }
@@ -687,7 +682,7 @@ local function emit_func(il, func, res, opts)
             patch[#patch - 1] = func_return
         end
         insert(patch, conversion_init)
-        res[patchpos1] = concat(patch, '\n')
+        res[patchpos] = concat(patch, '\n')
         res[tpos] = 'local t, s = 0, 0'
         insert(res, '::continue::')
         insert(res, 'end')
