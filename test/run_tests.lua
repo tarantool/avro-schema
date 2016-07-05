@@ -48,7 +48,7 @@ local function create_stage(test, args)
     insert(s, args.schema1)
     insert(s, args.schema2)
     if #s == 0 then
-        ctx.FAILED = 'schema/schema1/schema2 missing'
+        test.FAILED = 'schema/schema1/schema2 missing'
         return
     end
     test.schema_key = concat(s, ';')

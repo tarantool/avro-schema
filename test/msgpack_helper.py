@@ -1,17 +1,45 @@
-#! /usr/bin/env python2.7
+#! /usr/bin/env python3
 # Order-preserving JSON->msgpack conversion.
+# Mongodb-inspired {"$binary": "FFFF"} representation for MsgPack BIN-s
 import sys
 import msgpack
 import simplejson as json
 from collections import OrderedDict
-from argparse import ArgumentParser
 from base64 import b64decode as base64_decode
+from binascii import hexlify
+
+def msgpack_pairs_hook(pairs):
+    return OrderedDict((
+        (k,{'$binary': hexlify(v)}) if isinstance(v, bytes) else (k,v))
+        for k, v in pairs)
+
+def msgpack_list_hook(items):
+    return list(({'$binary': hexlify(v)} if isinstance(v, bytes) else v)
+                for v in items)
+
+def json_pairs_hook(pairs):
+    for k,v in pairs:
+        if k == '$binary':
+            return bytes.fromhex(v)
+    return OrderedDict(pairs)
 
 def msgpack_to_json(data):
-    return json.dumps(msgpack.loads(data, object_pairs_hook=OrderedDict))
+    res = msgpack.loads(data, object_pairs_hook=msgpack_pairs_hook,
+                        list_hook=msgpack_list_hook,
+                        encoding='utf-8')
+    if isinstance(res, bytes):
+        res = { '$binary': hexlify(res) }
+    return json.dumps(res)
 
 def json_to_msgpack(data):
-    return msgpack.dumps(json.loads(data, object_pairs_hook=OrderedDict))
+    data = data.decode('utf-8') if isinstance(data, bytes) else data
+    single_precision = False
+    if data.startswith('!'):
+        data = data[1:]
+        single_precision = True
+    return msgpack.dumps(json.loads(data, encoding='utf-8',
+                                    object_pairs_hook=json_pairs_hook),
+                         use_bin_type=True, use_single_float=single_precision)
 
 def sanity_check():
     json_data = '{"a": 1, "b": 2, "c": 3}'
@@ -29,18 +57,22 @@ def sanity_check():
     for sample in ordered_map_samples:
         assert(sample == msgpack_to_json(json_to_msgpack(sample)))
 
-sanity_check()
-parser = ArgumentParser(description=
-                        'Order-preserving JSON->msgpack conversion.')
-parser.add_argument('-D', dest='func', action='store_const',
-                    const=msgpack_to_json, default=json_to_msgpack,
-                    help='decode msgpack (default: encode)')
-parser.add_argument('base64_input', nargs='?', help='if missing, reads stdin')
-args = parser.parse_args()
-try:
-    input = args.base64_input
-    sys.stdout.write(args.func(input and base64_decode(input) or
-                               sys.stdin.read()))
-except Exception as e:
-    sys.stderr.write(str(e)+'\n')
-    sys.exit(-1)
+if __name__ == '__main__':
+    sanity_check()
+    from argparse import ArgumentParser
+    parser = ArgumentParser(description=
+                            'Order-preserving JSON->msgpack conversion.')
+    parser.add_argument('-D', dest='func', action='store_const',
+                        const=msgpack_to_json, default=json_to_msgpack,
+                        help='decode msgpack (default: encode)')
+    parser.add_argument('base64_input', nargs='?',
+                        help='if missing, reads stdin')
+    args = parser.parse_args()
+    try:
+        res = args.func(args.base64_input and base64_decode(args.base64_input)
+                        or sys.stdin.buffer.read())
+        sys.stdout.buffer.write(res.encode('utf-8')
+                                if isinstance(res, str) else res)
+    except Exception as e:
+        sys.stderr.write(str(e)+'\n')
+        sys.exit(-1)

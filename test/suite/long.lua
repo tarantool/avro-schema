@@ -21,6 +21,13 @@ t {
     func = 'flatten', input = 'true'
 }
 
+-- ! is a hack to enable single-precision floating point
+t {
+    error  = 'Expecting LONG, encountered FLOAT',
+    schema = '"long"',
+    func = 'flatten', input = '! 42.0'
+}
+
 t {
     error  = 'Expecting LONG, encountered DOUBLE',
     schema = '"long"',
@@ -31,6 +38,12 @@ t {
     error  = 'Expecting LONG, encountered STR',
     schema = '"long"',
     func = 'flatten', input = '"Hello, world!"'
+}
+
+t {
+    error = 'Expecting LONG, encountered BIN',
+    schema = '"long"',
+    func = 'flatten', input = '{"$binary": "DEADBEEF"}'
 }
 
 t {
