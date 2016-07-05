@@ -283,7 +283,7 @@ local function err_type(r, pos, etype)
         error(format('%sValue exceeds INT range: %s',
                      location, r.v[pos].ival), 0)
     else
-        error(format('%sExpected %s, encountered %s',
+        error(format('%sExpecting %s, encountered %s',
                      location, etype2typename[etype],
                      typenames[r.t[pos]]), 0)
     end
