@@ -298,7 +298,7 @@ end
 
 local function err_missing(r, pos, missing_name)
     local location = extract_location(r, pos)
-    error(format('%sKey missing: %s', location, missing_name), 0)
+    error(format('%sKey missing: %q', location, missing_name), 0)
 end
 
 local function err_duplicate(r, pos)
