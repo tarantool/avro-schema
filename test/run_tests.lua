@@ -101,7 +101,8 @@ end
 --  service_fields - service fields in compile 
 --  downgrade      - downgrade flag
 --  compile_error  - if compile failed, error message
---  compile_only
+--  compile_only   - stop after compile
+--  compile_dump   - dump compilation artefacts
 local function compile_stage(test, args)
     local service_fields = args.service_fields or {}
     local downgrade      = args.downgrade or false
@@ -113,7 +114,15 @@ local function compile_stage(test, args)
     local compile_opts          = test.schema
     compile_opts.service_fields = service_fields
     compile_opts.downgrade      = downgrade
-    local ok, schema_c          = memoize(key, schema.compile, compile_opts)
+    local ok, schema_c
+    if args.compile_dump then
+        local path = gsub(test.id, '/', '_')
+        compile_opts.dump_il = path .. '.il'
+        compile_opts.dump_src = path .. '.lua'
+        ok, schema_c = schema.compile(compile_opts)
+    else
+        ok, schema_c = memoize(key, schema.compile, compile_opts)
+    end
     local status          = ok and '<OK>' or schema_c
     local expected_status = args.compile_error or '<OK>'  
     if status ~= expected_status then
@@ -121,7 +130,7 @@ local function compile_stage(test, args)
                              status, expected_status)
         return
     end
-    if args.compile_only then test.PASSED = true end
+    if args.compile_only or compile_error then test.PASSED = true end
     test.schema_c = schema_c
 end
 
@@ -211,7 +220,7 @@ end
 local tests_failed = {}
 local function t(args)
     local id = test_id(debug.getinfo(2, 'lS'))
-    local test = { id = test_id }
+    local test = { id = id }
     for i = 1, #stages do
         stages[i](test, args)
         if test.PASSED then
@@ -246,6 +255,6 @@ if #tests_failed == 0 then
     print('All tests passed!')
     os.exit(0)
 else
-    print('Some tests failed:\n\t'..concat(tests_failed, '\t\n'))
+    print('Some tests failed:\n\t'..concat(tests_failed, '\n\t'))
     os.exit(-1)
 end
