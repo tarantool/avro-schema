@@ -6,6 +6,7 @@ local io             = require('io')
 local digest         = require('digest')
 local debug          = require('debug')
 local json           = require('json')
+local msgpack        = require('msgpack')
 local fio            = require('fio')
 local schema         = require('avro_schema')
 local max            = math.max
@@ -23,6 +24,37 @@ local function msgpack_helper(data, opts)
     local res = handle:read('*a')
     handle:close()
     return res
+end
+
+local cvt_cache = {}
+
+local function cvt_cache_load(path)
+    local cache = io.open(path, 'rb')
+    if not cache then
+        cvt_cache = {}
+        return
+    end
+    cvt_cache = msgpack.decode(cache:read('*a'))
+    cache:close()
+end
+
+local function cvt_cache_save(path)
+    local cache = io.open(path, 'wb')
+    cache:write(msgpack.encode(cvt_cache))
+    cache:close()
+end
+
+local function json2msgpack(data)
+    local res = cvt_cache[data]
+    if not res then
+        res = msgpack_helper(data)
+        if res ~= '' then cvt_cache[data] = res end
+    end
+    return res
+end
+
+local function msgpack2json(data)
+    return msgpack_helper(data, '-D')
 end
 
 local cache = setmetatable({}, {__mode='v'})
@@ -116,7 +148,7 @@ local function convert_stage(test, args)
         input = { input }
     end
     local input_1 = input[1]
-    input[1] = msgpack_helper(input_1) -- JSON->msgpack
+    input[1] = json2msgpack(input_1)
     local ok, result = res_wrap(call_func(unpack(input)))
     local status          = ok and '<OK>' or result[1]
     local expected_status = args.error or '<OK>'  
@@ -132,12 +164,12 @@ local function convert_stage(test, args)
             local result_i = result[i]
             local output_i = output[i]
             if i == 1 then
-                output_i = msgpack_helper(output_i)
+                output_i = json2msgpack(output_i)
             end
             if result_i ~= output_i then
                 if i == 1 then
-                    result_i = msgpack_helper(result_i, '-D')
-                    output_i = msgpack_helper(output_i, '-D')
+                    result_i = msgpack2json(result_i)
+                    output_i = msgpack2json(output_i)
                 else
                     result_i = esc(result_i)
                     output_i = esc(output_i)
@@ -173,32 +205,47 @@ local function test_id(caller)
         insert(res, format('%s_%s', k, test_env[k]))
     end
     insert(res, caller.currentline)
-    return format('%32s', concat(res, '/'))
+    return concat(res, '/')
 end
 
+local tests_failed = {}
 local function t(args)
     local id = test_id(debug.getinfo(2, 'lS'))
     local test = { id = test_id }
     for i = 1, #stages do
         stages[i](test, args)
         if test.PASSED then
-            print(format('%s: PASSED', id))
+            print(format('%32s: PASSED', id))
             return
         end
         if test.FAILED then
-            print(format('%s: FAILED (%s)', id, test.FAILED))
+            print(format('%32s: FAILED (%s)', id, test.FAILED))
+            insert(tests_failed, id)
             return
         end
     end
 end
 
-for _, path in pairs(fio.glob('suite/*.lua')) do
-    local result, extra = loadfile(path)
-    if not result then error(extra) end
-    local test = result
-    test_env = { t = t, skip_t = function() end}
-    test_env._G = test_env
-    setfenv(test, test_env)
-    test_name = gsub(gsub(path, '.*/', ''), '%.lua$', '')
-    test()
+local function run_tests(dir)
+    for _, path in pairs(fio.glob(dir)) do
+        local result, extra = loadfile(path)
+        if not result then error(extra) end
+        local test = result
+        test_env = { t = t, skip_t = function() end}
+        test_env._G = test_env
+        setfenv(test, test_env)
+        test_name = gsub(gsub(path, '.*/', ''), '%.lua$', '')
+        test()
+    end
+end
+
+cvt_cache_load('.cvt_cache')
+run_tests('suite/*.lua')
+cvt_cache_save('.cvt_cache')
+if #tests_failed == 0 then
+    print('All tests passed!')
+    os.exit(0)
+else
+    print('Some tests failed:\n\t'..concat(tests_failed, '\t\n'))
+    os.exit(-1)
 end
