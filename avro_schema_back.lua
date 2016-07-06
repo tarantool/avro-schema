@@ -132,7 +132,7 @@ local emit_instruction_tab = {
     [opcode.PUTINT2DBL ] = {  7, 'dval',  'ival' },
     [opcode.PUTLONG2FLT] = {  6, 'dval',  'ival' },
     [opcode.PUTLONG2DBL] = {  7, 'dval',  'ival' },
-    [opcode.PUTFLT2DBL ] = {  7, 'dval',  'ival' },
+    [opcode.PUTFLT2DBL ] = {  7, 'dval',  'dval' },
     [opcode.PUTSTR2BIN ] = {  9, 'uval',  'uval' },
     [opcode.PUTBIN2STR ] = {  8, 'uval',  'uval' },
     ----------------------- T

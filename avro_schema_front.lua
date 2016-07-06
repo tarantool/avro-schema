@@ -35,8 +35,8 @@ local promotions = {
     int    = { long   = 'INT2LONG', float  = 'INT2FLT', double = 'INT2DBL' },
     long   = { float  = 'LONG2FLT', double = 'LONG2DBL' },
     float  = { double = 'FLT2DBL' },
-    string = { bytes  = 'BIN2STR' },
-    bytes  = { string = 'STR2BIN' }
+    string = { bytes  = 'STR2BIN' },
+    bytes  = { string = 'BIN2STR' }
 }
 
 -- more IR:
