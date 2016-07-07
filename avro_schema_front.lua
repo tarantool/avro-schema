@@ -109,7 +109,7 @@ local function checkaliases(schema, ns, scope)
         return
     end
     if type(xaliases) ~= 'table' then
-        copy_schema_error('Property "aliases" must be a table')
+        copy_schema_error('Property "aliases" must be a list')
     end
     if #xaliases == 0 then
         return
@@ -229,7 +229,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     copy_schema_error('Record type must have "fields"')
                 end
                 if type(xfields) ~= 'table' then
-                    copy_schema_error('Record "fields" must be a table')
+                    copy_schema_error('Record "fields" must be a list')
                 end
                 if #xfields == 0 then
                     copy_schema_error('Record type must have at least one field')
@@ -241,7 +241,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     local field = {}
                     res.fields[fieldno] = field
                     if type(xfield) ~= 'table' then
-                        copy_schema_error('Record field must be a table')
+                        copy_schema_error('Record field must be a list')
                     end
                     local xname = xfield.name
                     if not xname then
@@ -299,7 +299,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     local xaliases = xfield.aliases
                     if xaliases then
                         if type(xaliases) ~= 'table' then
-                            copy_schema_error('Property "aliases" must be a table')
+                            copy_schema_error('Property "aliases" must be a list')
                         end
                         local aliases = {}
                         for aliasno, alias in ipairs(xaliases) do
@@ -308,7 +308,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                                 copy_schema_error('Bad field alias name: %s', alias)
                             end
                             if fieldmap[alias] then
-                                copy_schema_error('Alias name already defined: %s', alias)
+                                copy_schema_error('Alias field name already defined: %s', alias)
                             end
                             fieldmap[alias] = fieldno
                             aliases[aliasno] = alias
@@ -333,7 +333,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     copy_schema_error('Enum type must have "symbols"')
                 end
                 if type(xsymbols) ~= 'table' then
-                    copy_schema_error('Enum "symbols" must be a table')
+                    copy_schema_error('Enum "symbols" must be a list')
                 end
                 if #xsymbols == 0 then
                     copy_schema_error('Enum type must contain at least one symbol')
@@ -379,7 +379,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                 res.name = name
                 res.aliases = checkaliases(schema, ns, scope)
                 local xsize = schema.size
-                if not xsize then
+                if xsize==nil then
                     copy_schema_error('Fixed type must have "size"')
                 end
                 if type(xsize) ~= 'number' or xsize < 1 or math.floor(xsize) ~= xsize then
