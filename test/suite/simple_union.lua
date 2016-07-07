@@ -114,13 +114,13 @@ for i = 1,2 do
         func   = 'unflatten', input = '[0, "42"]'
     }
 
-    skip_t {
+    t {
         error  = '2: Expecting STR, encountered LONG',
         schema = schema[i],
         func   = 'unflatten', input = '[1, 42]'
     }
 
-    skip_t {
+    t {
         error  = '2: Expecting DOUBLE, encountered STR',
         schema = schema[i],
         func   = 'unflatten', input = '[2, "42"]'
