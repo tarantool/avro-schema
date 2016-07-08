@@ -20,6 +20,11 @@ local function ir_record_i2o(ir)
     return ir[4]
 end
 
+local function ir_record_o2i(ir)
+    assert(ir_type(ir) == 'RECORD')
+    return ir[10]
+end
+
 local function ir_record_onames(ir)
     assert(ir_type(ir) == 'RECORD')
     return ir[5]
@@ -42,26 +47,6 @@ end
 local function ir_record_ioptional(ir, i)
     assert(ir_type(ir) == 'RECORD')
     return ir[4][i] == false
-end
-
-local ir_record_o2i_cache = setmetatable({}, { __mode = 'k' })
-
-local function ir_record_o2i(ir)
-    assert(ir_type(ir) == 'RECORD')
-    local o2i = ir_record_o2i_cache[ir]
-    if o2i then
-        return o2i
-    end
-    o2i = {}
-    local inames, i2o = ir[3], ir[4] 
-    for i = 1, #inames do
-        local o = i2o[i]
-        if o then
-            o2i[o] = i
-        end
-    end
-    ir_record_o2i_cache[ir] = o2i
-    return o2i
 end
 
 local function ir_fixed_size(ir)

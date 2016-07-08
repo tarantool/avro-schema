@@ -917,9 +917,11 @@ build_ir = function(from, to, mem, imatch)
                     mm[fi] = fieldmap[f.name]
                 end
             end
+            local mminv = {}
             for fi, f in ipairs(from.fields) do
                 local mi = mm[fi]
                 if mi then
+                    mminv[mi] = fi
                     local tf = to.fields[mi]
                     ptrfrom = fi
                     ptrto = mi
@@ -953,7 +955,7 @@ build_ir = function(from, to, mem, imatch)
                     defaults           = defaults or {}
                     defaults[bnot(fi)] = f.type
                     defaults[fi]       = f.default
-                elseif not bc[fi] then
+                elseif not mminv[fi] then
                     ptrfrom = nil
                     ptrto = nil
                     err = build_ir_error(nil, 'Field %s is missing in source schema, and no default value was provided',
@@ -975,6 +977,7 @@ build_ir = function(from, to, mem, imatch)
             res[7] = hidden
             res[8] = from.name
             res[9] = to.name
+            res[10] = mminv
         else -- enum
             local symmap     = create_enum_symbol_map(to)
             local mm         = {}
