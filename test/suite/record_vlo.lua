@@ -33,6 +33,20 @@ local vlo3 = [[{
     ]
 }]]
 
+local vlo4 = [[{
+    "type": "record",
+    "name": "vlo4",
+    "fields": [
+        {"name": "A", "type": "int", "default": 100},
+        {"name": "VLO", "type":{
+            "name": "nested", "type": "record", "fields":[
+                {"name": "_", "type": { "type": "array", "items": "int"}}
+            ]
+        }},
+        {"name": "B", "type": "int", "default": 101}
+    ]
+}]]
+
 --
 
 t {
@@ -99,3 +113,20 @@ t {
     func = 'flatten', input = '{"A":1, "B":2, "VL1": [1,2,3], "VL2": [4,5,6]}', output = '[[1,2,3],1,2,[4,5,6]]'
 }
 
+--
+
+t {
+    schema = vlo4,
+    func = 'flatten', input = '{"VLO": {"_":[1,2,3,4]}}', output = '[100,[1,2,3,4],101]'
+}
+
+t {
+    schema = vlo4,
+    func = 'flatten', input = '{"B":99, "VLO": {"_":[1,2,3,4]}}', output = '[100,[1,2,3,4],99]'
+}
+
+
+t {
+    schema = vlo4,
+    func = 'flatten', input = '{"A":1, "VLO": {"_":[1,2,3,4]}}', output = '[1,[1,2,3,4],101]'
+}
