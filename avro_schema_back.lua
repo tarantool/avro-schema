@@ -62,7 +62,7 @@ peel_annotate = function(block, k)
         local o = block[i]
         if type(o) == 'table' then
             local head = o[1]
-            if head.op == opcode.IFSET or head.op == opcode.STRSWITCH then
+            if head.op >= opcode.IFSET and head.op <= opcode.STRSWITCH then
                 -- too many conditionals in a row
                 if k >= 2 then o.break_jit_trace = true; k = 0; peel = true end
                 local nk = 0

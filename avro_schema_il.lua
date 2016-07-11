@@ -451,7 +451,7 @@ il_cleanup_helper = function(res, object)
                 il_cleanup_helper(res, object[i])
             end
         end
-    elseif object.op < opcode.MOVE and object.op > opcode.PSKIP or
+    elseif object.op < opcode.MOVE or object.op > opcode.PSKIP or
            object.ripv ~= opcode.NILREG then
         insert(res, object) -- elide NOPs (NOP is MOVE to NILREG)
     end
@@ -675,6 +675,7 @@ vvarschanged = function(block)
             end
         elseif item.op == opcode.CALLFUNC then
             res[0] = true
+            if item.ripv ~= opcode.NILREG then res[item.ripv] = true end
         elseif item.op >= opcode.OBJFOREACH and item.op <= opcode.PSKIP then
             res[item.ripv] = true
         elseif item.op == opcode.BEGINVAR then
@@ -979,7 +980,7 @@ local function il_create()
     il = setmetatable({
         callfunc = function(ripv, ipv, ipo, func)
             local o = opcode_new(opcode.CALLFUNC)
-            o.ripv = ripv; o.ipv = ipv; o.ipo = ipo
+            o.ripv = ripv or opcode.NILREG; o.ipv = ipv; o.ipo = ipo
             extra[o] = func
             return o
         end,
