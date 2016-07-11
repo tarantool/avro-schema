@@ -345,12 +345,12 @@ local function compile(...)
     end
     local service_fields = args.service_fields or {}
     if type(service_fields) ~= 'table' then
-        error('service_fields: expecting a table', 0)
+        error('service_fields: Expecting a table', 0)
     end
     for i = 1, #service_fields do
         local field = service_fields[i]
         if not service_types[field] then
-            error(format('service_fields[%d]: invalid type: %s', i, field), 0)
+            error(format('service_fields[%d]: Invalid type: %s', i, field), 0)
         end
     end
     local list = {}
