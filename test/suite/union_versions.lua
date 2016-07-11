@@ -57,6 +57,19 @@ t {
     func = 'flatten', input = '{"double": "42"}'
 }
 
+--
+
+t {
+    schema1 = '"int"', schema2 = union_v1,
+    func = 'flatten', input = '42', output = '[1, 42]'
+}
+
+t {
+    schema1 = union_v1, schema2 = '"int"',
+    func = 'flatten', input = '{"int":42}', output = '[42]'
+}
+
+
 -- unflatten
 
 t {
@@ -97,4 +110,16 @@ t {
     schema1 = union_v2,
     schema2 = union_v1,
     func = 'unflatten', input = '[2, 42]', output = '{"int": 42}'
+}
+
+--
+
+t {
+    schema1 = '"int"', schema2 = union_v1,
+    func = 'unflatten', input = '[42]', output = '{"int":42}'
+}
+
+t {
+    schema1 = union_v1, schema2 = '"int"',
+    func = 'unflatten', input = '[1,42]', output = '42'
 }
