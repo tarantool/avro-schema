@@ -517,6 +517,7 @@ local function fuse_skip(block, i, varmap)
             return i
         end
     end
+    return i
 end
 
 local function emit_block(ctx, block, cc, res)
