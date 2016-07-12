@@ -604,16 +604,26 @@ copy_data = function(schema, data, visited)
         end
         return data
     elseif schematype == 'int' then
-        if data < -0x80000000 or data > 0x7fffffff or floor(tonumber(data)) ~= data then
+        if data < -2147483648 or data > 2147483647 or floor(tonumber(data)) ~= data then
             error()
         end
         return data
     elseif schematype == 'long' then
-        if data > 0x7fffffffffffffffLL or (
-                floor(tonumber(data)) ~= data and tonumber(data) == data) then
+        if type(data) == 'cdata' then
+            -- note: number <-> cdata(int64) coercion is strange,
+            --       for this reason we check for cdata explicitly.
+            --       If data is a cdata(int64) it's definitely within
+            --       range, otherwize (data + 0LL) will produce an error
+            return data + 0LL
+        elseif data < -9223372036854775808 or data >= 9223372036854775808 or floor(data) ~= data then
+            -- note: if it's not a number, the expression above will
+            --       produce an error
+            -- note: boundaries above were carefully selected to avoid
+            --       losing precision; basically, both are 2**K.
             error()
+        else
+            return data
         end
-        return data
     elseif schematype == 'double' or schema == 'float' then
         return 0 + tonumber(data)
     elseif schematype == 'bytes' or schematype == 'string' then

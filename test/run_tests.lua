@@ -98,6 +98,27 @@ local function create_stage(test, args)
     if args.create_only or args.create_error then test.PASSED = true end
 end
 
+-- validate
+-- validate_error
+-- validate_only
+local function validate_stage(test, args)
+    local validate = args.validate
+    if validate ~= nil then
+        if type(validate)=='string' then
+            validate = json.decode(validate)
+        end
+        local ok, res = schema.validate(test.schema[1], validate)
+        local status          = ok and '<OK>' or res
+        local expected_status = args.validate_error or '<OK>'
+        if status ~= expected_status then
+            test.FAILED = format('schema.validate: %q instead of %q',
+                                 status, expected_status)
+            return
+        end
+        if args.validate_only or args.validate_error then test.PASSED = true end
+    end
+end
+
 --  service_fields - service fields in compile 
 --  downgrade      - downgrade flag
 --  compile_error  - if compile failed, error message
@@ -195,6 +216,7 @@ end
 
 local stages = {
     create_stage,
+    validate_stage,
     compile_stage,
     convert_stage,
     -- the last stage always fails
@@ -203,7 +225,7 @@ local stages = {
 
 -- test-id is <file-name>-<line>
 local test_name, test_env
-local test_env_ignore = {_G = true, t = true, skip_t = true}
+local test_env_ignore = {_G = true, t = true}
 local function test_id(caller)
     local keys = {}
     for k in pairs(test_env) do
@@ -241,7 +263,7 @@ local function run_tests(dir)
         local result, extra = loadfile(path)
         if not result then error(extra) end
         local test = result
-        test_env = { t = t, skip_t = function() end}
+        test_env = { t = t }
         test_env._G = test_env
         setfenv(test, test_env)
         test_name = gsub(gsub(path, '.*/', ''), '%.lua$', '')
