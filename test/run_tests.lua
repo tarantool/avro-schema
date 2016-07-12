@@ -6,7 +6,6 @@ local io             = require('io')
 local digest         = require('digest')
 local debug          = require('debug')
 local json           = require('json')
-local msgpack        = require('msgpack')
 local fio            = require('fio')
 local schema         = require('avro_schema')
 local max            = math.max
@@ -29,32 +28,50 @@ end
 local cvt_cache = {}
 
 local function cvt_cache_load(path)
-    local cache = io.open(path, 'rb')
-    if not cache then
-        cvt_cache = {}
-        return
+    cvt_cache = {}
+    local cache_file = io.open(path, 'rb')
+    if not cache_file then return end
+    local data = cache_file:read('*a')
+    local data_as_code = loadstring(data)
+    if data_as_code then
+        setfenv(data_as_code, {})
+        local ok, data  = pcall(data_as_code)
+        if ok and type(data) == 'table' then cvt_cache = data end
     end
-    cvt_cache = msgpack.decode(cache:read('*a'))
-    cache:close()
+    cache_file:close()
 end
 
 local function cvt_cache_save(path)
-    local cache = io.open(path, 'wb')
-    cache:write(msgpack.encode(cvt_cache))
-    cache:close()
+    local cache_file = io.open(path, 'wb')
+    local keys = {}
+    for key in pairs(cvt_cache) do
+        insert(keys, key)
+    end
+    sort(keys)
+    local data = {}
+    for _, key in ipairs(keys) do
+        insert(data, format('[%q] = %q', key, cvt_cache[key]))
+    end
+    cache_file:write(format([[
+-- run_tests.lua / cvt_cache contents (generated)
+return {
+%s
+}]], concat(data, ',\n')))
+    cache_file:close()
 end
 
 local function json2msgpack(data)
-    local res = cvt_cache[data]
+    local res = tostring(cvt_cache[data]) -- in case wrong data was loaded
     if not res then
         res = msgpack_helper(data)
-        if res ~= '' then cvt_cache[data] = res end
+        cvt_cache[data] = res
     end
     return res
 end
 
 local function msgpack2json(data)
-    return msgpack_helper(data, '-D')
+    local res = msgpack_helper(data, '-D')
+    return res~='' and res or base64_encode(res)
 end
 
 local cache = setmetatable({}, {__mode='v'})
