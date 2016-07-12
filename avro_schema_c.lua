@@ -1058,7 +1058,7 @@ local function do_convert_union_flatten(il, ir, ripv, ipv, ipo, nowrap, xgap)
             end
         end
         if #strswitch == 1 then -- no branches in strswitch
-            assert(null_branch)
+            assert(nulbranch)
             nulbranch[1] = il.isnul(ipv, ipo)
             return nulbranch
         else
