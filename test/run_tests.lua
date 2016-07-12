@@ -105,18 +105,19 @@ end
 --  compile_dump   - dump compilation artefacts
 local function compile_stage(test, args)
     local service_fields = args.service_fields or {}
-    local downgrade      = args.downgrade or false
+    local compile_downgrade = args.compile_downgrade or false
     local compile_error  = args.compile_error
 
     local key = format('%s;%s;%s',
-                       downgrade, concat(service_fields, ';'),
+                       compile_downgrade, concat(service_fields, ';'),
                        test.schema_key)
     local compile_opts          = test.schema
     compile_opts.service_fields = service_fields
-    compile_opts.downgrade      = downgrade
+    compile_opts.downgrade      = compile_downgrade
     local ok, schema_c
     if args.compile_dump then
         local path = gsub(test.id, '/', '_')
+        compile_opts.debug = args.compile_debug
         compile_opts.dump_il = path .. '.il'
         compile_opts.dump_src = path .. '.lua'
         ok, schema_c = schema.compile(compile_opts)
