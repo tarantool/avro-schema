@@ -1,6 +1,7 @@
 package.path  = package.path ..';avro/?.lua'
 package.cpath = package.cpath..';avro/?.so'
 
+local jutil          = require("jit.util")
 local math           = require('math')
 local io             = require('io')
 local digest         = require('digest')
@@ -34,9 +35,10 @@ local function cvt_cache_load(path)
     local data = cache_file:read('*a')
     local data_as_code = loadstring(data)
     if data_as_code then
-        setfenv(data_as_code, {})
-        local ok, data  = pcall(data_as_code)
-        if ok and type(data) == 'table' then cvt_cache = data end
+        -- funck() fetches a constant from a func prototype;
+        -- that way we avoid untrusted code execution
+        local data = jutil.funck(data_as_code, -1)
+        if type(data) == 'table' then cvt_cache = data end
     end
     cache_file:close()
 end
