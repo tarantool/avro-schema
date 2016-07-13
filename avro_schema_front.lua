@@ -671,7 +671,7 @@ copy_data = function(schema, data, visited)
                 elseif field.default then
                     res[field.name] = deepcopy(field.default)
                 else
-                    error(format('@Field %s mising', field.name), 0)
+                    error(format('@Field %s missing', field.name), 0)
                 end
             end
         elseif schematype == 'array'  then

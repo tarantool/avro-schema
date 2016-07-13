@@ -352,4 +352,98 @@ t {
 }
 
 -- enum
+
+local enum = '{"name":"foo","type":"enum","symbols":["A","B","C"]}'
+
+t {
+    schema = enum,
+    validate = '"A"',
+    validate_only = true
+}
+
+t {
+    schema = enum,
+    validate = '"B"',
+    validate_only = true
+}
+
+t {
+    schema = enum,
+    validate = '"C"',
+    validate_only = true
+}
+
+t {
+    schema = enum,
+    validate = 42,
+    validate_error = 'Not a foo: 42'
+}
+
+t {
+    schema = enum,
+    validate = '"X"',
+    validate_error = 'Not a foo: X'
+}
+
 -- record
+
+local records = {[[{
+    "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "string"},
+        {"name": "Y", "type": "int"}
+    ]
+}]],  [[{
+    "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "string"},
+        {"name": "Y", "type": "int", "default": 42}
+    ]
+}]]}
+
+for schema_no = 1,#records do
+
+    _G['schema_no'] = schema_no
+
+    t {
+        schema = records[schema_no],
+        validate = '{"X":"Hello, world!", "Y":100500}',
+        validate_only = true
+    }
+
+    t {
+        schema = records[schema_no],
+        validate = '{"X":"Hello, world!", "Y":100500, "Z":19}',
+        validate_error = 'Z: Unknown field'
+    }
+
+    t {
+        schema = records[schema_no],
+        validate = '{"X":42, "Y":100500}',
+        validate_error = 'X: Not a string: 42'
+    }
+
+    t {
+        schema = records[schema_no],
+        validate = '{"X":"", "Y":"Hello, world!"}',
+        validate_error = 'Y: Not a int: Hello, world!'
+    }
+
+    t {
+        schema = records[schema_no],
+        validate = '{"Y":100500}',
+        validate_error = 'Field X missing'
+    }
+
+    t {
+        schema = records[schema_no],
+        validate = '{"X":""}',
+        validate_error = (schema_no==1 and 'Field Y missing'),
+        validate_only = true,
+    }
+
+    t {
+        schema = records[schema_no],
+        validate = '42',
+        validate_error = 'Not a foo: 42'
+    }
+
+end
