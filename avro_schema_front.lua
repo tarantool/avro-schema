@@ -10,6 +10,7 @@ local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
 local clear = require('table.clear')
 local bnot  = bit.bnot
+local next, type = next, type
 
 local function deepcopy(v)
     if type(v) == 'table' then
@@ -581,6 +582,9 @@ end
 
 local copy_data
 
+local nojit = function() end -- workaround for LuaJIT crash
+require('jit').off(nojit)
+
 -- validate data against a schema; return a copy
 copy_data = function(schema, data, visited)
     -- error handler peeks into ptr using debug.getlocal();
@@ -594,6 +598,7 @@ copy_data = function(schema, data, visited)
     -- e.x. "attempt to perform arithmetic on a string value". Unless
     -- a message starts with '@', we replace it (see copy_data_eh).
     if     schematype == 'null' then
+        nojit() -- workaround for LuaJIT crash
         if data ~= null then
             error()
         end
@@ -683,22 +688,22 @@ copy_data = function(schema, data, visited)
                 res[k] = copy_data(schema.values, v, visited)
             end
         elseif not schematype then -- union
+            nojit() -- workaround for LuaJIT crash
             local tagmap = create_union_tag_map(schema)
             if data == null then
                 if not tagmap['null'] then
-                    error('@Unexpected type in union', 0)
+                    error('@Unexpected type in union: null', 0)
                 end
                 res = null
             else
-                local iter = pairs(data)
-                local k, v = iter(data)
+                local k, v = next(data)
                 local bpos = tagmap[k]
                 ptr = k
                 if not bpos then
-                    error('@Unexpected type in union', 0)
+                    error('@Unexpected key in union', 0)
                 end
                 res[k] = copy_data(schema[bpos], v, visited)
-                ptr = iter(data, k)
+                ptr = next(data, k)
                 if ptr then
                     error('@Unexpected key in union', 0)
                 end

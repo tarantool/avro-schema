@@ -148,12 +148,208 @@ t {
 }
 
 -- float
+
+t {
+    schema = '"float"',
+    validate = 42.1,
+    validate_only = true
+}
+
+t {
+    schema = '"float"',
+    validate = 42,
+    validate_only = true
+}
+
+t {
+    schema = '"float"',
+    validate = 42LL,
+    validate_only = true
+}
+
+t {
+    schema = '"float"',
+    validate = '"Hello!"',
+    validate_error = 'Not a float: Hello!'
+}
+
 -- double
+
+t {
+    schema = '"double"',
+    validate = 42.1,
+    validate_only = true
+}
+
+t {
+    schema = '"double"',
+    validate = 42,
+    validate_only = true
+}
+
+t {
+    schema = '"double"',
+    validate = 42LL,
+    validate_only = true
+}
+
+t {
+    schema = '"double"',
+    validate = '"Hello!"',
+    validate_error = 'Not a double: Hello!'
+}
+
 -- string
+
+t {
+    schema = '"string"',
+    validate = '"Hello, world!"',
+    validate_only = true
+}
+
+t {
+    schema = '"string"',
+    validate = 42,
+    validate_error = 'Not a string: 42'
+}
+
 -- bytes
+
+t {
+    schema = '"bytes"',
+    validate = '"Hello, world!"',
+    validate_only = true
+}
+
+t {
+    schema = '"bytes"',
+    validate = 42,
+    validate_error = 'Not a bytes: 42'
+}
+
 -- array
+
+local array = '{"type":"array","items":"int"}'
+
+t {
+    schema = array,
+    validate = '[]',
+    validate_only = true
+}
+
+t {
+    schema = array,
+    validate = '[1,2,3,4,5]',
+    validate_only = true
+}
+
+t {
+    schema = array,
+    validate = '42',
+    validate_error = 'Not a array: 42'
+}
+
+t {
+    schema = array,
+    validate = '[1,2,3,4,5,"XXX"]',
+    validate_error = '6: Not a int: XXX'
+}
+
 -- map
+
+local map = '{"type":"map","values":"int"}'
+
+t {
+    schema = map,
+    validate = '{}',
+    validate_only = true
+}
+
+t {
+    schema = map,
+    validate = '{"A":1,"B":2,"C":3,"D":4,"E":5}',
+    validate_only = true
+}
+
+t {
+    schema = map,
+    validate = '42',
+    validate_error = 'Not a map: 42'
+}
+
+t {
+    schema = map,
+    validate = '{"A":1,"B":2,"C":3,"D":4,"E":5,"F":"XXX"}',
+    validate_error = 'F: Not a int: XXX'
+}
+
 -- union
+
+local union = '["null","string"]'
+
+t {
+    schema = union,
+    validate = 'null',
+    validate_only = true
+}
+
+t {
+    schema = '["string"]',
+    validate = 'null',
+    validate_error = 'Unexpected type in union: null'
+}
+
+t {
+    schema = union,
+    validate = '{"string":"Hello, world!"}',
+    validate_only = true
+}
+
+t {
+    schema = union,
+    validate = 42,
+    validate_error = 'Not a union: 42'
+}
+
+t {
+    schema = union,
+    validate = '{"string":42}',
+    validate_error = 'string: Not a string: 42'
+}
+
+t {
+    schema = union,
+    validate = '{"XXX":42}',
+    validate_error = 'XXX: Unexpected key in union'
+}
+
+t {
+    schema = union,
+    validate = '{"string":"", "XXX":42}',
+    validate_error = 'XXX: Unexpected key in union'
+}
+
 -- fixed
+
+local fixed16 = '{"name":"fixed16","type":"fixed","size":16}'
+
+t {
+    schema = fixed16,
+    validate = '"0123456789abcdef"',
+    validate_only = true
+}
+
+t {
+    schema = fixed16,
+    validate = 42,
+    validate_error = 'Not a fixed16: 42'
+}
+
+t {
+    schema = fixed16,
+    validate = '"Hello, world!"',
+    validate_error = 'Not a fixed16: Hello, world!'
+}
+
 -- enum
 -- record
