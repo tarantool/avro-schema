@@ -10,7 +10,7 @@ schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len)
 uint32_t
 schema_rt_search8(const uint8_t *tab, uint32_t k, size_t n)
 #define SCHEMA_RT_SEARCH_BODY \
-    uint32_t i; \
+    uint32_t i = 0; \
     while (i != n - 1 && tab[i] != k) i++; \
     return i;
 { SCHEMA_RT_SEARCH_BODY }
