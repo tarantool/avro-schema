@@ -1,5 +1,5 @@
 Name: tarantool-avro
-Version: 1.0.0
+Version: 2.0.0
 Release: 1%{?dist}
 Summary: Apache Avro bindings for Tarantool
 Group: Applications/Databases
@@ -12,7 +12,7 @@ BuildRequires: tarantool-devel >= 1.6.8.0
 Requires: tarantool >= 1.6.8.0
 
 %description
-This package provides Apache Avro bindings for Tarantool.
+This package provides Apache Avro schema tools for Tarantool.
 
 %prep
 %setup -q -n %{name}-%{version}
@@ -32,5 +32,13 @@ make %{?_smp_mflags} check
 %{_datarootdir}/tarantool/avro_*.lua
 
 %changelog
+* Wed Jul 13 2016 Nick Zavaritsky <mejedi@tarantool.org> 2.0.0-1
+Full rewrite in Lua:
+- added support for Avro schema defaults;
+- support for Avro schema aliases;
+- great error messages;
+- runtime code generation makes transformations fast.
+* Wed Jul 13 2016 Nick Zavaritsky <mejedi@tarantool.org> 1.0.1-1
+- Incremental update
 * Wed Mar 9 2016 Nick Zavaritsky <mejedi@tarantool.org> 1.0.0-1
 - Initial version

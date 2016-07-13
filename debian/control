@@ -14,4 +14,4 @@ Package: tarantool-avro
 Architecture: i386 amd64 armhf arm64
 Depends: tarantool (>= 1.6.8.0), ${shlibs:Depends}, ${misc:Depends}
 Pre-Depends: ${misc:Pre-Depends}
-Description: Apache Avro bindings for Tarantools
+Description: Apache Avro schema tools for Tarantools
