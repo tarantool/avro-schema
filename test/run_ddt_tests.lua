@@ -1,6 +1,3 @@
-package.path  = package.path ..';avro/?.lua'
-package.cpath = package.cpath..';avro/?.so'
-
 local jutil          = require("jit.util")
 local math           = require('math')
 local io             = require('io')
@@ -55,7 +52,7 @@ local function cvt_cache_save(path)
         insert(data, format('[%q] = %q', key, cvt_cache[key]))
     end
     cache_file:write(format([[
--- run_tests.lua / cvt_cache contents (generated)
+-- run_ddt_tests.lua / cvt_cache contents (generated)
 return {
 %s
 }]], concat(data, ',\n')))
@@ -290,9 +287,9 @@ local function run_tests(dir)
     end
 end
 
-cvt_cache_load('.cvt_cache')
-run_tests('suite/*.lua')
-cvt_cache_save('.cvt_cache')
+cvt_cache_load('.ddt_cache')
+run_tests('ddt_suite/*.lua')
+cvt_cache_save('.ddt_cache')
 if #tests_failed == 0 then
     print('All tests passed!')
     os.exit(0)

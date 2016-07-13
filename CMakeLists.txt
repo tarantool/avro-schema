@@ -93,8 +93,25 @@ install(FILES ${CMAKE_BINARY_DIR}/avro_schema_back_.lua
 install(TARGETS avro_schema_rt_c LIBRARY
         DESTINATION ${TARANTOOL_INSTALL_LIBDIR})
 
-# enable_testing()
-# add_test(avro tarantool ${CMAKE_SOURCE_DIR}/test/avro.test.lua)
-# set_tests_properties(avro PROPERTIES ENVIRONMENT "BINARY_DIR=${PROJECT_BINARY_DIR}")
-# add_custom_target(check COMMAND ctest -V)
-add_custom_target(check COMMAND true)
+enable_testing()
+set(TARANTOOL tarantool)
+
+add_test(NAME ddt_tests
+         COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/run_ddt_tests.lua
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
+
+set(TESTS ddt_tests)
+foreach(test IN LISTS TESTS)
+
+    set_property(TEST ${test}
+                PROPERTY ENVIRONMENT
+                "LUA_PATH=${PROJECT_SOURCE_DIR}/?.lua\\;\\;")
+
+    set_property(TEST ${test}
+                APPEND
+                PROPERTY ENVIRONMENT
+                "LUA_CPATH=${PROJECT_BINARY_DIR}/?.so\\;\\;")
+
+endforeach()
+
+add_custom_target(check COMMAND ctest -V)

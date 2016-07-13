@@ -1,4 +1,4 @@
--- run_tests.lua / cvt_cache contents (generated)
+-- run_ddt_tests.lua / cvt_cache contents (generated)
 return {
 ["! 1.0"] = "Ê?€\0\0",
 ["! 1.1"] = "Ê?ŒÌÍ",
