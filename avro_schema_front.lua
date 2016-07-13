@@ -609,25 +609,23 @@ copy_data = function(schema, data, visited)
         end
         return data
     elseif schematype == 'long' then
-        if type(data) == 'cdata' then
-            -- note: number <-> cdata(inttype) coercion is weird,
-            --       for this reason we check for cdata explicitly.
-            -- note: if data is neither cdata(inttype) nor cdata(double)
-            --       the expression below will raise. We assume
-            --       cdata(double) is never seen.
-            -- note: if data is cdata(inttype), it's 64 bit wide or less;
-            --       hence data >= INT64_MIN (signed) or >= 0 (unsigned).
-            if data > 9223372036854775807LL then error() end
-            return data + 0LL
-        elseif data < -9223372036854775808 or data >= 9223372036854775808 or floor(data) ~= data then
-            -- note: if it's not a number, the expression above will
-            --       produce an error
-            -- note: boundaries above were carefully selected to avoid
-            --       losing precision; basically, both are 2**K.
-            error()
-        else
-            return data
+        local n = tonumber(data)
+        -- note: if it's not a number or cdata(numbertype),
+        --       the expression below will raise
+        -- note: boundaries were carefully picked to avoid
+        --       rounding errors, they are INT64_MIN and INT64_MAX+1,
+        --       respectively (both 2**k)
+        if n < -9223372036854775808 or n >= 9223372036854775808 or
+           floor(n) ~= n then
+            -- due to rounding errors, INT64_MAX-1023..INT64_MAX
+            -- fails the range check above, check explicitly for this
+            -- case; in number > cdata(uint64_t) expression, number
+            -- is implicitly coerced to uint64_t
+            if n ~= 9223372036854775808 or data > 9223372036854775807ULL then
+                error()
+            end
         end
+        return data
     elseif schematype == 'double' or schema == 'float' then
         return 0 + tonumber(data)
     elseif schematype == 'bytes' or schematype == 'string' then
