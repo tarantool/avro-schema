@@ -1,5 +1,11 @@
+tarantool-avro (1.0.1-1) stable; urgency=low
+
+  * Incremental update
+
+ -- Nick Zavaritsky <mejedi@tarantool.org>  Wed, 13 Jul 2016 14:56:00 +0300
+
 tarantool-avro (1.0.0-1) unstable; urgency=low
 
   * Initial release
 
- -- Roman Tsisyk <roman@tarantool.org>  Wed, 16 Sep 2015 11:30:00 +0300
+ -- Nick Zavaritsky <mejedi@tarantool.org>  Wed, 6 Mar 2016 11:30:00 +0300

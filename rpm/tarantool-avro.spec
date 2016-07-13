@@ -1,5 +1,5 @@
 Name: tarantool-avro
-Version: 1.0.0
+Version: 1.0.1
 Release: 1%{?dist}
 Summary: Apache Avro bindings for Tarantool
 Group: Applications/Databases
@@ -34,5 +34,7 @@ make %{?_smp_mflags} check
 %{_libdir}/tarantool/avro.so
 
 %changelog
+* Wed Jul 13 2016 Nick Zavaritsky <mejedi@tarantool.org> 1.0.1-1
+- Incremental update
 * Wed Mar 9 2016 Nick Zavaritsky <mejedi@tarantool.org> 1.0.0-1
 - Initial version
