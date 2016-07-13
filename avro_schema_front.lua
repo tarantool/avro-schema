@@ -610,10 +610,14 @@ copy_data = function(schema, data, visited)
         return data
     elseif schematype == 'long' then
         if type(data) == 'cdata' then
-            -- note: number <-> cdata(int64) coercion is strange,
+            -- note: number <-> cdata(inttype) coercion is weird,
             --       for this reason we check for cdata explicitly.
-            --       If data is a cdata(int64) it's definitely within
-            --       range, otherwize (data + 0LL) will produce an error
+            -- note: if data is neither cdata(inttype) nor cdata(double)
+            --       the expression below will raise. We assume
+            --       cdata(double) is never seen.
+            -- note: if data is cdata(inttype), it's 64 bit wide or less;
+            --       hence data >= INT64_MIN (signed) or >= 0 (unsigned).
+            if data > 9223372036854775807LL then error() end
             return data + 0LL
         elseif data < -9223372036854775808 or data >= 9223372036854775808 or floor(data) ~= data then
             -- note: if it's not a number, the expression above will
