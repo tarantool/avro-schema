@@ -110,7 +110,11 @@ add_test(NAME api_tests
          COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/api_tests.lua
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
 
-set(TESTS ddt_tests api_tests)
+add_test(NAME buf_grow_test
+         COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/buf_grow_test.lua
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
+
+set(TESTS ddt_tests api_tests buf_grow_test)
 foreach(test IN LISTS TESTS)
 
     set_property(TEST ${test} PROPERTY ENVIRONMENT "LUA_PATH=${LUA_PATH}")

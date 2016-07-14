@@ -98,7 +98,7 @@ test:is_deeply({schema.create(inf_loop_union_decl)},
 -- compile
 local res = {schema.compile(int)}
 test:test("compile / int", function(test)
-    test:plan(14)
+    test:plan(18)
     test:is(res[1], true, '(1)')
     test:istable(res[2], '(2)')
     local m = res[2]
@@ -117,6 +117,10 @@ test:test("compile / int", function(test)
     test:is_deeply({flatten_msgpack(msgpack.encode(42))}, {true, msgpack.encode({42})}, '(12)')
     test:is_deeply({unflatten_msgpack({42})}, {true, msgpack.encode(42)}, '(13)')
     test:is_deeply({unflatten_msgpack(msgpack.encode({42}))}, {true, msgpack.encode(42)}, '(14)')
+    test:is_deeply({flatten('')}, {false, 'Truncated data'}, '(15)')
+    test:is_deeply({unflatten('')}, {false, 'Truncated data'}, '(16)')
+    test:is_deeply({flatten_msgpack('')}, {false, 'Truncated data'}, '(17)')
+    test:is_deeply({unflatten_msgpack('')}, {false, 'Truncated data'}, '(18)')
 end)
 
 -- get_names
