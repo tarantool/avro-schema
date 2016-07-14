@@ -1,4 +1,4 @@
-# tarantool-avro [![Build Status](https://travis-ci.org/tarantool/avro-schema.svg?branch=master)](https://travis-ci.org/tarantool/avro-schema)
+# avro-schema [![Build Status](https://travis-ci.org/tarantool/avro-schema.svg?branch=master)](https://travis-ci.org/tarantool/avro-schema)
 [Apache Avro](http://avro.apache.org/docs/1.8.0/spec.html) schema tools for Tarantool, implemented from scratch in Lua
 
 Notable features:
