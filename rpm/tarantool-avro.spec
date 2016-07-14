@@ -29,7 +29,7 @@ make %{?_smp_mflags} check
 
 %files
 %{_libdir}/tarantool/avro_schema_rt_c.so
-%{_datarootdir}/tarantool/avro_*.lua
+%{_datarootdir}/tarantool/avro_schema/*.lua
 
 %changelog
 * Wed Jul 13 2016 Nick Zavaritsky <mejedi@tarantool.org> 2.0.0-1

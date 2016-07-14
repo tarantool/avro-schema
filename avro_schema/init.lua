@@ -1,9 +1,9 @@
 local digest      = require('digest')
-local front       = require('avro_schema_front')
-local c           = require('avro_schema_c')
-local il          = require('avro_schema_il')
-local backend_lua = require('avro_schema_back')
-local rt          = require('avro_schema_rt')
+local front       = require('avro_schema.frontend')
+local c           = require('avro_schema.compiler')
+local il          = require('avro_schema.il')
+local backend_lua = require('avro_schema.backend')
+local rt          = require('avro_schema.runtime')
 
 local format, find, sub = string.format, string.find, string.sub
 local insert, remove, concat = table.insert, table.remove, table.concat
@@ -266,7 +266,7 @@ local function gen_lua_code(width_in, width_out, service_fields, il, il_code)
 local ffi        = require('ffi')
 local bit        = require('bit')
 local digest     = require('digest')
-local rt         = require('avro_schema_rt')
+local rt         = require('avro_schema.runtime')
 local pcall      = pcall
 local bor, band  = bit.bor, bit.band
 local lshift     = bit.lshift

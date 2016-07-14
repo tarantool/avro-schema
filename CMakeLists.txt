@@ -47,9 +47,9 @@ set (CMAKE_SHARED_LINKER_FLAGS
     "-Wl,--version-script,${CMAKE_SOURCE_DIR}/exports -Wl,--gc-sections -nodefaultlibs")
 
 add_library(avro_schema_rt_c SHARED
-            rt/pipeline.c
-            rt/hash.c
-            rt/misc.c
+            runtime/pipeline.c
+            runtime/hash.c
+            runtime/misc.c
             lib/phf/phf.cc)
 set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
                      "avro_schema_rt_c")
@@ -59,42 +59,48 @@ target_link_libraries(avro_schema_rt_c c)
 
 # postprocess Lua file, replacing opcode.X named constants with values
 add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/il_filt
-                   DEPENDS avro_schema_il.lua
+                   DEPENDS avro_schema/il.lua
                    COMMAND ${CMAKE_SOURCE_DIR}/gen_il_filt.sh
-                   ${CMAKE_SOURCE_DIR}/avro_schema_il.lua)
+                   ${CMAKE_SOURCE_DIR}/avro_schema/il.lua)
 
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_il_.lua
-                   DEPENDS avro_schema_il.lua ${CMAKE_BINARY_DIR}/il_filt
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/il.lua
+                   DEPENDS avro_schema/il.lua ${CMAKE_BINARY_DIR}/il_filt
                    COMMAND ${CMAKE_SOURCE_DIR}/il_filt.sh
-                   ${CMAKE_SOURCE_DIR}/avro_schema_il.lua avro_schema_il_.lua)
+                   ${CMAKE_SOURCE_DIR}/avro_schema/il.lua il.lua)
 
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/avro_schema_back_.lua
-                   DEPENDS avro_schema_back.lua ${CMAKE_BINARY_DIR}/il_filt
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/backend.lua
+                   DEPENDS avro_schema/backend.lua ${CMAKE_BINARY_DIR}/il_filt
                    COMMAND ${CMAKE_SOURCE_DIR}/il_filt.sh
-                   ${CMAKE_SOURCE_DIR}/avro_schema_back.lua
-                   avro_schema_back_.lua)
+                   ${CMAKE_SOURCE_DIR}/avro_schema/backend.lua backend.lua)
 
 add_custom_target(postprocess_lua ALL DEPENDS
-    ${CMAKE_BINARY_DIR}/avro_schema_il_.lua
-    ${CMAKE_BINARY_DIR}/avro_schema_back_.lua)
+    ${CMAKE_BINARY_DIR}/il.lua
+    ${CMAKE_BINARY_DIR}/backend.lua)
 
 # Install module
-install(FILES avro_schema.lua avro_schema_c.lua avro_schema_front.lua
-              avro_schema_rt.lua
-        DESTINATION ${TARANTOOL_INSTALL_LUADIR})
+install(FILES avro_schema/init.lua avro_schema/compiler.lua
+              avro_schema/frontend.lua avro_schema/runtime.lua
+        DESTINATION ${TARANTOOL_INSTALL_LUADIR}/avro_schema)
 
-install(FILES ${CMAKE_BINARY_DIR}/avro_schema_il_.lua RENAME avro_schema_il.lua
-        DESTINATION ${TARANTOOL_INSTALL_LUADIR})
+install(FILES ${CMAKE_BINARY_DIR}/il.lua
+        DESTINATION ${TARANTOOL_INSTALL_LUADIR}/avro_schema)
 
-install(FILES ${CMAKE_BINARY_DIR}/avro_schema_back_.lua
-        RENAME avro_schema_back.lua
-        DESTINATION ${TARANTOOL_INSTALL_LUADIR})
+install(FILES ${CMAKE_BINARY_DIR}/backend.lua
+        DESTINATION ${TARANTOOL_INSTALL_LUADIR}/avro_schema)
 
 install(TARGETS avro_schema_rt_c LIBRARY
         DESTINATION ${TARANTOOL_INSTALL_LIBDIR})
 
-enable_testing()
+# testing
+
 set(TARANTOOL tarantool)
+
+set(LUA_PATH
+    "${CMAKE_SOURCE_DIR}/?.lua\\;${CMAKE_SOURCE_DIR}/?/init.lua\\;\\;")
+
+set(LUA_CPATH "${CMAKE_BINARY_DIR}/?.so\\;\\;")
+
+enable_testing()
 
 add_test(NAME ddt_tests
          COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/run_ddt_tests.lua
@@ -103,15 +109,16 @@ add_test(NAME ddt_tests
 set(TESTS ddt_tests)
 foreach(test IN LISTS TESTS)
 
-    set_property(TEST ${test}
-                PROPERTY ENVIRONMENT
-                "LUA_PATH=${PROJECT_SOURCE_DIR}/?.lua\\;\\;")
+    set_property(TEST ${test} PROPERTY ENVIRONMENT "LUA_PATH=${LUA_PATH}")
 
-    set_property(TEST ${test}
-                APPEND
-                PROPERTY ENVIRONMENT
-                "LUA_CPATH=${PROJECT_BINARY_DIR}/?.so\\;\\;")
+    set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
+                 "LUA_CPATH=${LUA_CPATH}")
 
 endforeach()
 
 add_custom_target(check COMMAND ctest -V)
+
+add_custom_target(benchmark
+                  COMMAND env "LUA_PATH=${LUA_PATH}"
+                  "LUA_CPATH=${LUA_CPATH}"
+                          ${TARANTOOL} ${CMAKE_SOURCE_DIR}/benchmark.lua)

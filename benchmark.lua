@@ -76,6 +76,8 @@ local data  = require('msgpack').encode({
     }
 })
 
+print('benchmark started...')
+
 local clock       = require('clock')
 
 local n = 10000000
