@@ -1328,8 +1328,5 @@ end
 
 -----------------------------------------------------------------------
 return {
-    emit_code          = emit_code, 
-    do_convert_record_flatten   = do_convert_record_flatten,
-    do_convert_record_unflatten = do_convert_record_unflatten,
-    emit_rec_xflatten  = emit_rec_xflatten
+    emit_code = emit_code
 }

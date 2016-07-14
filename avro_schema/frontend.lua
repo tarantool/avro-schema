@@ -1066,14 +1066,6 @@ local function create_ir(from, to, imatch)
 end
 
 return {
-    validname             = validname,
-    fullname              = fullname,
-    validfullname         = validfullname,
-    checkname             = checkname,
-    checkaliases          = checkaliases,
-    copy_field_default    = copy_field_default,
-
-    -- semipublic
     create_schema         = create_schema,
     validate_data         = validate_data,
     create_ir             = create_ir
