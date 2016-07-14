@@ -582,9 +582,6 @@ end
 
 local copy_data
 
-local nojit = function() end -- workaround for LuaJIT crash
-require('jit').off(nojit)
-
 -- validate data against a schema; return a copy
 copy_data = function(schema, data, visited)
     -- error handler peeks into ptr using debug.getlocal();
@@ -598,7 +595,6 @@ copy_data = function(schema, data, visited)
     -- e.x. "attempt to perform arithmetic on a string value". Unless
     -- a message starts with '@', we replace it (see copy_data_eh).
     if     schematype == 'null' then
-        nojit() -- workaround for LuaJIT crash
         if data ~= null then
             error()
         end
@@ -688,7 +684,6 @@ copy_data = function(schema, data, visited)
                 res[k] = copy_data(schema.values, v, visited)
             end
         elseif not schematype then -- union
-            nojit() -- workaround for LuaJIT crash
             local tagmap = create_union_tag_map(schema)
             if data == null then
                 if not tagmap['null'] then
