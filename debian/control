@@ -1,4 +1,4 @@
-Source: tarantool-avro
+Source: tarantool-avro-schema
 Priority: optional
 Section: database
 Maintainer: Nick Zavaritsky <mejedi@tarantool.org>
@@ -6,9 +6,9 @@ Build-Depends: debhelper (>= 9), cdbs,
                cmake (>= 2.8),
                tarantool-dev (>= 1.6.8.0)
 Standards-Version: 3.9.6
-Homepage: https://github.com/tarantool/tarantool-avro
-Vcs-Git: git://github.com/tarantool/tarantool-avro.git
-Vcs-Browser: https://github.com/tarantool/tarantool-avro
+Homepage: https://github.com/tarantool/avro-schema
+Vcs-Git: git://github.com/tarantool/avro-schema.git
+Vcs-Browser: https://github.com/tarantool/avro-schema
 
 Package: tarantool-avro
 Architecture: i386 amd64 armhf arm64

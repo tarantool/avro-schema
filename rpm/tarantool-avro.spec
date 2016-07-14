@@ -1,10 +1,10 @@
-Name: tarantool-avro
+Name: tarantool-avro-schema
 Version: 2.0.0
 Release: 1%{?dist}
 Summary: Apache Avro bindings for Tarantool
 Group: Applications/Databases
 License: BSD
-URL: https://github.com/tarantool/avro
+URL: https://github.com/tarantool/avro-schema
 Source0: https://github.com/tarantool/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
 BuildRequires: cmake >= 2.8
 BuildRequires: gcc >= 4.5
