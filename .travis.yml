@@ -5,7 +5,7 @@ services:
 language: python
 env:
     global:
-      - PRODUCT=tarantool-avro
+      - PRODUCT=tarantool-avro-schema
     matrix:
       - OS=el DIST=6 PACK=rpm
       - OS=el DIST=7 PACK=rpm

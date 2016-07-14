@@ -1,11 +1,11 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Debianized-By: Roman Tsisyk <roman@tarantool.org>
-Upstream-Name: tarantool-avro
-Upstream-Contact: roman@tarantool.org
-Source: https://github.com/tarantool/tarantool-avro
+Debianized-By: Nick Zavaritsky <mejedi@tarantool.org>
+Upstream-Name: avro-schema
+Upstream-Contact: mejedi@tarantool.org
+Source: https://github.com/tarantool/avro-schema
 
 Files: *
-Copyright: 2015 by Roman Tsisyk <roman@tarantool.org>
+Copyright: 2016 by Nick Zavaritsky <mejedi@tarantool.org>
 License: BSD-2-Clause
  Redistribution and use in source and binary forms, with or
  without modification, are permitted provided that the following

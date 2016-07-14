@@ -1,4 +1,4 @@
-tarantool-avro (2.0.0-1) unstable; urgency=low
+tarantool-avro-schema (2.0.0-1) unstable; urgency=low
 
   Full rewrite in Lua:
   * added support for Avro schema defaults;
@@ -8,13 +8,13 @@ tarantool-avro (2.0.0-1) unstable; urgency=low
 
  -- Nick Zavaritsky <mejedi@tarantool.org>  Wed, 13 Jul 2016 15:34:00 +0300
 
-tarantool-avro (1.0.1-1) stable; urgency=low
+tarantool-avro-schema (1.0.1-1) stable; urgency=low
 
   * Incremental update
 
  -- Nick Zavaritsky <mejedi@tarantool.org>  Wed, 13 Jul 2016 14:56:00 +0300
 
-tarantool-avro (1.0.0-1) unstable; urgency=low
+tarantool-avro-schema (1.0.0-1) unstable; urgency=low
 
   * Initial release
 
