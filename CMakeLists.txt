@@ -43,8 +43,13 @@ add_definitions(-D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS)
 #    of libphf is actually needed (--version-script)
 # 2) enable linker to drop unused parts (--gc-sections)
 # 3) don't link default libs, since libstdc++ is unnecessary
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+set (CMAKE_SHARED_LINKER_FLAGS
+    "-Wl,-exported_symbols_list,${CMAKE_SOURCE_DIR}/exports_osx -Wl,-dead_strip -nodefaultlibs")
+else()
 set (CMAKE_SHARED_LINKER_FLAGS
     "-Wl,--version-script,${CMAKE_SOURCE_DIR}/exports -Wl,--gc-sections -nodefaultlibs")
+endif()
 
 add_library(avro_schema_rt_c SHARED
             runtime/pipeline.c
@@ -98,7 +103,11 @@ set(TARANTOOL tarantool)
 set(LUA_PATH
     "${CMAKE_SOURCE_DIR}/?.lua\\;${CMAKE_SOURCE_DIR}/?/init.lua\\;\\;")
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+set(LUA_CPATH "${CMAKE_BINARY_DIR}/?.dylib\\;\\;")
+else()
 set(LUA_CPATH "${CMAKE_BINARY_DIR}/?.so\\;\\;")
+endif()
 
 enable_testing()
 
