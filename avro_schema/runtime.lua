@@ -132,8 +132,9 @@ int32_t
 phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 ]]
 
-local rt_C_path   = package.searchpath('avro_schema_rt_c',
-                                        package.cpath)
+local rt_C_path   = package.searchpath('avro_schema_rt_c', package.cpath) or
+                    error(format('Failed to load avro_schema_rt_c.%s. Check LUA_CPATH.',
+                                 ffi.os=='OSX' and 'dylib' or 'so'))
 local rt_C        = ffi.load(rt_C_path)
 local regs        = ffi.new('struct schema_rt_State')
 
