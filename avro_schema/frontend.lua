@@ -9,7 +9,6 @@ local sub, lower = string.sub, string.lower
 local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
 local clear = require('table.clear')
-local bnot  = bit.bnot
 local next, type = next, type
 
 local function deepcopy(v)
@@ -41,12 +40,12 @@ local promotions = {
 }
 
 -- more IR:
--- { 'FIXED',  N   }
--- { 'ARRAY',  ... }
--- { 'MAP',    ... }
--- { 'UNION',  bc,  from_tags,  id_map, to_tags }
--- { 'RECORD', bc,  from_names, id_map, to_names, defaults, is_hidden, from_name, to_name }
--- { 'ENUM',   nil, from_syms,  id_map, to_syms,  nil,      nil,       from_name, to_name }
+-- { type = 'FIXED',  size   = N   }
+-- { type = 'ARRAY',  nested = ... }
+-- { type = 'MAP',    nested = ... }
+-- { type = 'UNION',  bc = ...,  i2o  = ?, itags = ?, otags = ? }
+-- { type = 'RECORD', bc = ...,  i2o  = ?, o2i   = ?, from =  ?, to = ? }
+-- { type = 'ENUM',   i2o = ?,   from = ?, to    = ? }
 
 -- check if name is a valid Avro identifier
 local function validname(name)
@@ -543,18 +542,6 @@ local function create_record_field_map(record)
     return res
 end
 
-local function create_record_field_names_list(record)
-    local res = dcache[record.fields]
-    if not res then
-        res = {}
-        for fi, f in ipairs(record.fields) do
-            res[fi] = f.name
-        end
-        dcache[record.fields] = res
-    end
-    return res
-end
-
 -- create a mapping from a symbol name -> symbol id
 local function create_enum_symbol_map(enum)
     local res = dcache[enum]
@@ -828,11 +815,11 @@ build_ir = function(from, to, mem, imatch)
             return nil, (err or build_ir_error(nil, 'No common types'))
         end
         return {
-            'UNION',
-            bc,
-            from_union and create_union_tag_list(from) or nil,
-            mm,
-            to_union and create_union_tag_list(to) or nil
+            type = 'UNION',
+            bc = bc,
+            i2o = mm,
+            itags = from_union and create_union_tag_list(from) or nil,
+            otags = to_union and create_union_tag_list(to) or nil
         }
     elseif type(from) == 'string' then
         if from == 'any' then
@@ -855,13 +842,13 @@ build_ir = function(from, to, mem, imatch)
         if not bc then
             return nil, err
         end
-        return { 'ARRAY', bc }
+        return { type = 'ARRAY', nested = bc }
     elseif from.type == 'map'   then
         local bc, err = build_ir(from.values, to.values, mem, imatch)
         if not bc then
             return nil, err
         end
-        return { 'MAP', bc }
+        return { type = 'MAP', nested = bc }
     elseif from.name ~= to.name and imatch and (
            not from.aliases or
            not create_aliases_set(from.aliases)[to.name]) then
@@ -877,7 +864,7 @@ build_ir = function(from, to, mem, imatch)
             return nil, build_ir_error(nil, 'Size mismatch: %d vs %d',
                                        from.size, to.size)
         end
-        return { 'FIXED', from.size }
+        return { type = 'FIXED', size = from.size }
     else -- record or enum
         -- About mem and IR
         -- (1) *named* schema elements can participate in loops;
@@ -913,8 +900,6 @@ build_ir = function(from, to, mem, imatch)
         mem[k] = res
         if from.type == 'record' then
             local mm, bc = {}, {}
-            local hidden
-            local defaults
             if imatch then
                 local fieldmap = create_record_field_map(from)
                 for fi, f in ipairs(to.fields) do
@@ -963,33 +948,21 @@ build_ir = function(from, to, mem, imatch)
                 end
             end
             for fi, f in ipairs(to.fields) do
-                if f.default ~= nil then
-                    defaults           = defaults or {}
-                    defaults[bnot(fi)] = f.type
-                    defaults[fi]       = f.default
-                elseif not mminv[fi] then
+                if f.default == nil and not mminv[fi] then
                     ptrfrom = nil
                     ptrto = nil
                     err = build_ir_error(nil, 'Field %s is missing in source schema, and no default value was provided',
                                          f.name)
                     goto done
                 end
-                if f.hidden then
-                    hidden = hidden or {}
-                    hidden[fi] = true
-                end
             end
             clear(res)
-            res[1] = 'RECORD'
-            res[2] = bc
-            res[3] = create_record_field_names_list(from)
-            res[4] = mm
-            res[5] = create_record_field_names_list(to)
-            res[6] = defaults
-            res[7] = hidden
-            res[8] = from.name
-            res[9] = to.name
-            res[10] = mminv
+            res.type = 'RECORD'
+            res.bc      = bc
+            res.i2o     = mm
+            res.o2i     = mminv
+            res.from    = from
+            res.to      = to
         else -- enum
             local symmap     = create_enum_symbol_map(to)
             local mm         = {}
@@ -1003,12 +976,10 @@ build_ir = function(from, to, mem, imatch)
                 err = build_ir_error(nil, 'No common symbols')
             else
                 clear(res)
-                res[1] = 'ENUM'
-                res[3] = from.symbols
-                res[4] = mm
-                res[5] = to.symbols
-                res[8] = from.name
-                res[9] = to.name
+                res.type      = 'ENUM'
+                res.i2o       = mm
+                res.from      = from
+                res.to        = to
             end
         end
 ::done::
