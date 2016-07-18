@@ -662,12 +662,12 @@ int unparse_msgpack(struct State *state,
                 goto copy_data;
             }
             if (value->xlen <= UINT16_MAX) {
-                out[1] = 0xda;
+                out[0] = 0xda;
                 unaligned(out+1)->u16 = host2net16((uint16_t)value->xlen);
                 out += 3;
                 goto copy_data;
             }
-            out[1] = 0xdb;
+            out[0] = 0xdb;
             unaligned(out+1)->u32 = host2net32(value->xlen);
             out += 5;
             goto copy_data;
