@@ -111,6 +111,10 @@ local function prepare_default(il, schema, val)
         for i = 1, #symbols do
             if symbols[i] == val then return il.putintc, i-1 end
         end
+    elseif schema.type == 'array' and next(val) == nil then
+        return il.putarrayc, 0
+    elseif schema.type == 'map' and next(val) == nil then
+        return il.putmapc, 0
     end
     assert(false, 'NYI: complex default')
 end

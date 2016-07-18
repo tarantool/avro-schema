@@ -383,3 +383,20 @@ end
 
 _G['schema'] = nil
 
+t {
+    schema = [[{
+        "name": "foo", "type": "record", "fields": [
+            {"name": "_", "type": {"type":"array", "items":"int"}, "default":[]}
+        ]
+    }]],
+    func = 'flatten', input = '{}', output = '[[]]'
+}
+
+t {
+    schema = [[{
+        "name": "foo", "type": "record", "fields": [
+            {"name": "_", "type": {"type":"map", "values":"int"}, "default":[]}
+        ]
+    }]],
+    func = 'flatten', input = '{}', output = '[{}]'
+}
