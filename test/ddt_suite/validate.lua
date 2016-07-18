@@ -390,12 +390,12 @@ t {
 local records = {[[{
     "name": "foo", "type": "record", "fields": [
         {"name": "X", "type": "string"},
-        {"name": "Y", "type": "int"}
+        {"name": "Y", "type": "boolean"}
     ]
 }]],  [[{
     "name": "foo", "type": "record", "fields": [
         {"name": "X", "type": "string"},
-        {"name": "Y", "type": "int", "default": 42}
+        {"name": "Y", "type": "boolean", "default": false}
     ]
 }]]}
 
@@ -405,31 +405,31 @@ for schema_no = 1,#records do
 
     t {
         schema = records[schema_no],
-        validate = '{"X":"Hello, world!", "Y":100500}',
+        validate = '{"X":"Hello, world!", "Y":true}',
         validate_only = true
     }
 
     t {
         schema = records[schema_no],
-        validate = '{"X":"Hello, world!", "Y":100500, "Z":19}',
+        validate = '{"X":"Hello, world!", "Y":true, "Z":19}',
         validate_error = 'Z: Unknown field'
     }
 
     t {
         schema = records[schema_no],
-        validate = '{"X":42, "Y":100500}',
+        validate = '{"X":42, "Y":true}',
         validate_error = 'X: Not a string: 42'
     }
 
     t {
         schema = records[schema_no],
         validate = '{"X":"", "Y":"Hello, world!"}',
-        validate_error = 'Y: Not a int: Hello, world!'
+        validate_error = 'Y: Not a boolean: Hello, world!'
     }
 
     t {
         schema = records[schema_no],
-        validate = '{"Y":100500}',
+        validate = '{"Y":false}',
         validate_error = 'Field X missing'
     }
 

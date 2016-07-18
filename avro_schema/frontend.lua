@@ -664,7 +664,7 @@ copy_data = function(schema, data, visited)
             ptr = nil
             for _,field in ipairs(schema.fields) do
                 if     data[field.name] then
-                elseif field.default then
+                elseif field.default ~= nil then
                     res[field.name] = deepcopy(field.default)
                 else
                     error(format('@Field %s missing', field.name), 0)
