@@ -60,12 +60,12 @@ return {
 end
 
 local function json2msgpack(data)
-    local res = tostring(cvt_cache[data]) -- in case wrong data was loaded
+    local res = cvt_cache[data]
     if not res then
         res = msgpack_helper(data)
         cvt_cache[data] = res
     end
-    return res
+    return tostring(res) -- in case wrong data was loaded
 end
 
 local function msgpack2json(data)
@@ -190,6 +190,7 @@ local function convert_stage(test, args)
     local call_func = test.schema_c[func .. '_msgpack']
     if not call_func then
         test.FAILED = 'unknown function '..func
+        return
     end
     if type(input) ~= 'table' then
         input = { input }
@@ -258,10 +259,13 @@ end
 
 local tests_failed = {}
 local function t(args)
-    local id = test_id(debug.getinfo(2, 'lS'))
+    local id = test_id(debug.getinfo(2, 'l'))
     local test = { id = id }
     for i = 1, #stages do
-        stages[i](test, args)
+        local ok, err = pcall(stages[i], test, args)
+        if not ok then
+            test.FAILED = err
+        end
         if test.PASSED then
             print(format('%32s: PASSED', id))
             return
