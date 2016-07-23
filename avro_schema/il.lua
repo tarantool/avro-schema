@@ -26,7 +26,7 @@ struct schema_il_Opcode {
     union {
         struct {
             uint32_t ipv;
-            uint32_t ipo;
+             int32_t ipo;
         };
         int32_t  ci;
         int64_t  cl;
@@ -115,7 +115,7 @@ struct schema_il_V {
             uint32_t gen    :30;
             uint32_t islocal:1;
             uint32_t isdead :1;
-            uint32_t inc;
+             int32_t inc;
         };
     };
 };
@@ -163,8 +163,6 @@ local function opcode_new(op)
     return o
 end
 
-local opcode_NOP = opcode_new(opcode.MOVE); opcode_NOP.ripv = opcode.NILREG
-
 local function opcode_ctor_ipv(op)
     return function(ipv)
         local o = ffi_new('struct schema_il_Opcode')
@@ -207,8 +205,6 @@ local function opcode_ctor_offset_ci(op)
 end
 
 local il_methods = {
-    nop = function() return opcode_NOP end,
-    ----------------------------------------------------------------
     declfunc = function(name, ipv)
         local o = opcode_new(opcode.DECLFUNC)
         o.name = name; o.ipv = ipv
@@ -344,9 +340,7 @@ end
 -- visualize opcode
 local function opcode_vis(o, extra)
     local opname = op2str[o.op]
-    if o == opcode_NOP then
-        return 'NOP'
-    elseif o.op == opcode.CALLFUNC then
+    if o.op == opcode.CALLFUNC then
         return format('%s %s,\t%s,\tFUNC<%s>', opname,
                       rvis(o.ripv), rvis(o.ipv, o.ipo), extra[o])
     elseif o.op == opcode.DECLFUNC then
@@ -365,6 +359,7 @@ local function opcode_vis(o, extra)
     elseif o.op == opcode.OBJFOREACH then
         return format('%s %s,\t[%s],\t%d', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), o.step)
     elseif o.op == opcode.MOVE then
+        if o.ripv == opcode.NILREG then return 'NOP' end
         return format('%s %s,\t%s', opname, rvis(o.ripv), rvis(o.ipv, o.ipo))
     elseif o.op == opcode.ISSET then
         return format('%s %s,\t%s,\t%s', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), cvis(o, extra))
@@ -427,39 +422,6 @@ local function il_vis(il, root)
     if res[1] == '\n' then res[1] = '' end
     insert(res, '\n')
     return concat(res)
-end
-
--- cleanup IL:
---  (*) fix incorrect lists nesting
---  (*) remove NOPS and MOVEs assigning to NILREG
---  (*) remove redundant IFs
-local il_cleanup_helper
-il_cleanup_helper = function(res, object)
-    if type(object) == 'table' then
-        local head = object[1]
-        if type(head) == 'cdata' and
-           head.op >= opcode.DECLFUNC and head.op <= opcode.OBJFOREACH then
-            local nested = { head }
-            for i = 2, #object do
-                il_cleanup_helper(nested, object[i])
-            end
-            if nested[2] or head.op == opcode.DECLFUNC then
-                insert(res, nested) -- keep nested block IFF it's not empty
-            end
-        else
-            for i = 1, #object do
-                il_cleanup_helper(res, object[i])
-            end
-        end
-    elseif object.op < opcode.MOVE or object.op > opcode.PSKIP or
-           object.ripv ~= opcode.NILREG then
-        insert(res, object) -- elide NOPs (NOP is MOVE to NILREG)
-    end
-end
-local function il_cleanup(object)
-    local res = {}
-    il_cleanup_helper(res, object)
-    return res
 end
 
 -- === Basic optimization engine in less than 450 LOC. ===
@@ -1024,7 +986,7 @@ local function il_create()
             return o
         end,
     ----------------------------------------------------------------
-        id = function() id = id + 1; return id end,
+        id = function(n) local res = id; id = id + (n or 1); return res end,
         get_extra = function(o)
             return extra[o]
         end,
@@ -1032,7 +994,6 @@ local function il_create()
         opcode_vis = function(o)
             return opcode_vis(o, extra)
         end,
-        cleanup = il_cleanup,
         optimize = function(code) return voptimize(il, code) end,
     }, { __index = il_methods })
     return il

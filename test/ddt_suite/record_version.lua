@@ -40,7 +40,7 @@ t {
     schema1 = foo, schema2 = foo_reversed,
     func = 'unflatten',
     input = '[1,2,3,4]',
-    output = '{"D":4, "C":3, "B":2, "A":1}'
+    output = '{"A":1, "B":2, "C":3, "D":4}'
 }
 
 --
@@ -86,7 +86,7 @@ t {
     schema1 = foo_reduced, schema2 = foo_reversed,
     func = 'unflatten',
     input = '[1,2]',
-    output = '{"D":1005, "C":1006, "B":2, "A":1}'
+    output = '{"A":1, "B":2, "D":1005, "C":1006}'
 }
 
 t {

@@ -510,20 +510,6 @@ local function create_union_tag_map(union)
     return res
 end
 
-local ucache = setmetatable({}, { __mode = 'k' })
-
-local function create_union_tag_list(union)
-    local res = ucache[union]
-    if not res then
-        res = {}
-        for bi, b in ipairs(union) do
-            res[bi] = type_tag(b)
-        end
-        ucache[union] = res
-    end
-    return res
-end
-
 -- create a mapping from a field name -> field id (incl. aliases) 
 local function create_record_field_map(record)
     local res = dcache[record]
@@ -766,17 +752,13 @@ build_ir = function(from, to, mem, imatch)
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
     if     from_union or to_union then
-        if not from_union then
-            from = { from }
-        end
-        if not to_union then
-            to = { to }
-        end
         local mm, bc     = {}, {}
+        local ufrom = from_union and from or {from}
+        local uto = to_union and to or {to}
         local havecommon = false
         local err
-        for fbi, fb in ipairs(from) do
-            for tbi, tb in ipairs(to) do
+        for fbi, fb in ipairs(ufrom) do
+            for tbi, tb in ipairs(uto) do
                 if type(fb) == 'string' then
                     if fb == 'any' then
                         err = build_ir_error(1, 'NYI: any')
@@ -793,13 +775,13 @@ build_ir = function(from, to, mem, imatch)
                     end
                 elseif type(tb) ~= 'table' or fb.type ~= tb.type then
                     -- mismatch
-                elseif from.name ~= to.name and imatch and (
-                       not from.aliases or
-                       not create_aliases_set(from.aliases)[to.name]) then
+                elseif fb.name ~= tb.name and imatch and (
+                       not fb.aliases or
+                       not create_aliases_set(fb.aliases)[tb.name]) then
                     -- mismatch
-                elseif from.name ~= to.name and not imatch and (
-                       not to.aliases or
-                       not create_aliases_set(to.aliases)[from.name]) then
+                elseif fb.name ~= tb.name and not imatch and (
+                       not tb.aliases or
+                       not create_aliases_set(tb.aliases)[fb.name]) then
                     -- mismatch
                 else
                     bc[fbi], err = build_ir(fb, tb, mem, imatch)
@@ -816,10 +798,13 @@ build_ir = function(from, to, mem, imatch)
         end
         return {
             type = 'UNION',
-            bc = bc,
-            i2o = mm,
-            itags = from_union and create_union_tag_list(from) or nil,
-            otags = to_union and create_union_tag_list(to) or nil
+            nested = {
+                type = '__UNION__',
+                bc   = bc,
+                i2o  = mm,
+                from = from,
+                to   = to
+            }
         }
     elseif type(from) == 'string' then
         if from == 'any' then
@@ -958,11 +943,14 @@ build_ir = function(from, to, mem, imatch)
             end
             clear(res)
             res.type = 'RECORD'
-            res.bc      = bc
-            res.i2o     = mm
-            res.o2i     = mminv
-            res.from    = from
-            res.to      = to
+            res.nested = {
+                type    = '__RECORD__',
+                bc      = bc,
+                i2o     = mm,
+                o2i     = mminv,
+                from    = from,
+                to      = to
+            }
         else -- enum
             local symmap     = create_enum_symbol_map(to)
             local mm         = {}
@@ -1004,9 +992,7 @@ build_ir_error = function(offset, fmt, ...)
         local _, to      = debug.getlocal(i, 2)
         local _, ptrfrom = debug.getlocal(i, 5)
         local _, ptrto   = debug.getlocal(i, 6)
-        assert(type(from) == 'table')
-        assert(type(to) == 'table')
-        if     not from.type then
+        if type(from) == 'table' and not from.type or type(to) == 'table' and not to.type then
             insert(res, '<union>')
         elseif not from.name then
             insert(res, format('<%s>', from.type))
@@ -1039,5 +1025,7 @@ end
 return {
     create_schema         = create_schema,
     validate_data         = validate_data,
-    create_ir             = create_ir
+    create_ir             = create_ir,
+    get_enum_symbol_map   = create_enum_symbol_map,
+    get_union_tag_map     = create_union_tag_map
 }
