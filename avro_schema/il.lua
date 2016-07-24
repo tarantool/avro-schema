@@ -545,7 +545,7 @@ local function vexecute(il, scope, o, res)
     -- spill $0
     if o.op == opcode.CALLFUNC then
         local vinfo = vlookup(scope, 0)
-        if vinfo.inc > 0 then
+        if vinfo.inc ~= 0 then
             insert(res, il.move(0, 0, vinfo.inc))
         end
         vinfo = vcreate(scope, 0)
@@ -611,7 +611,7 @@ local function vmergebranches(il, bscopes, bblocks)
         vpinfo.inc = 0
         for i = 2, nscopes do
             local vinfo = bscopes[i][vid]
-            if vinfo and vinfo.inc > 0 then
+            if vinfo and vinfo.inc ~= 0 then
                 insert(bblocks[i], il.move(vid, vid, vinfo.inc))
             end
         end
@@ -657,7 +657,7 @@ local function vprepareloop(il, scope, lblock, block)
     local changed = vvarschanged(lblock)
     for vid, _ in pairs(changed) do
         local vinfo = vlookup(scope, vid)
-        if vinfo.inc > 0 then
+        if vinfo.inc ~= 0 then
             insert(block, il.move(vid, vid, vinfo.inc))
             local info = vcreate(scope, vid)
             info.gen = il.id()
@@ -674,7 +674,7 @@ local function vmergeloop(il, lscope, lblock)
             local vpinfo = vcreate(parent, vid)
             vpinfo.gen = il.id()
             vpinfo.inc = 0
-            if vinfo.inc > 0 then
+            if vinfo.inc ~= 0 then
                 insert(lblock, il.move(vid, vid, vinfo.inc))
             end
         end
@@ -764,7 +764,8 @@ voptimizeblock = function(il, scope, block, res)
             if head.op >= opcode.IFSET and head.op <= opcode.STRSWITCH then
                 -- branchy things: conditions and switches
                 local bscopes = {0}
-                local bblocks = {head}
+                local bblocks = {}
+                vexecute(il, scope, head, bblocks)
                 local cobhoistable, cobmaxoffset = 0, 0
                 for i = 2, #o do
                     local branch = o[i]
@@ -845,7 +846,7 @@ voptimizeblock = function(il, scope, block, res)
                 local cob = lblock[0]
                 if cob then -- attempt COB hoisting
                     local v0info = vlookup(lscope, 0)
-                    if v0info.gen ~= v0asn.gen or
+                    if v0info.gen == v0asn.gen or
                        v0info.inc == v0asn.inc then
                         -- hoisting failed: $0 is non-linear or
                         -- doesn't change at all
@@ -916,10 +917,10 @@ local function voptimizefunc(il, func)
     local r0 = vcreate(scope, 0)
     local r1 = vcreate(scope, head.ipv)
     voptimizeblock(il, scope, func, res)
-    if r0.inc > 0 then
+    if r0.inc ~= 0 then
         insert(res, il.move(0, 0, r0.inc))
     end
-    if r1.inc > 0 then
+    if r1.inc ~= 0 then
         insert(res, il.move(head.ipv, head.ipv, r1.inc))
     end
     return res
