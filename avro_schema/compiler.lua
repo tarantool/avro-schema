@@ -319,7 +319,7 @@ end
 
 -- x mode for records (flatten)
 local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
-    local bc, i2o, o2i = ir.bc, ir.i2o, ir.o2i
+    local i2o, o2i = ir.i2o, ir.o2i
     local from_fields, to_fields = ir.from.fields, ir.to.fields
     -- reserve a range of ids for all field variables at once
     local v_base = il.id(#from_fields) - 1
@@ -342,7 +342,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         }
         strswitch[i + 1] = branch
         if not i2o[i] then -- missing from target schema
-            il:append_code('cn', branch, bc[i], loop_var, 1, loop_var)
+            il:append_code('cn', branch, ir[i], loop_var, 1, loop_var)
             if field.default == nil then
                 -- mandatory field, add a check
                 insert(code_section2,
@@ -364,7 +364,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 next_offset = offset + abs(width)
             end
         end
-        local field_ir = unwrap_ir(bc[i])
+        local field_ir = unwrap_ir(ir[i])
         local field_default = field.default
         if next_offset then -- at fixed offset, patch
             if i then
@@ -415,13 +415,13 @@ end
 local function do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)
     xgap = xgap or 1
-    local i2o, bc, from = ir.i2o, ir.bc, ir.from
+    local i2o, from = ir.i2o, ir.from
     if not is_union(from) then -- non-union mapped to a union
         if find(mode, 'x') then
             extend(code, il.checkobuf(xgap),
                    il.putintc(0, i2o[1] - 1), il.move(0, 0, xgap))
         end
-        return il:append_code(mode, code, bc[1], ipv, ipo, ripv)
+        return il:append_code(mode, code, ir[1], ipv, ipo, ripv)
     end
     -- a union mapped to either a union or a non-union
     local accepts_null = get_union_tag_map(from) ['null'] 
@@ -468,9 +468,9 @@ local function do_append_union_flatten(il, mode, code, ir,
                 if to_union then
                     extend(dest, il.checkobuf(xgap),
                            il.putintc(0, o - 1), il.move(0, 0, xgap))
-                    il:append_code(x_or_cx, dest, bc[i], ipv, val_ipo)
+                    il:append_code(x_or_cx, dest, ir[i], ipv, val_ipo)
                 else -- target is not a union (maybe a record, hence unwrap) 
-                    il:append_code(x_or_cx, dest, unwrap_ir(bc[i]),
+                    il:append_code(x_or_cx, dest, unwrap_ir(ir[i]),
                                    ipv, val_ipo)
                 end
             else -- branch doesn't exist in target schema
@@ -539,7 +539,7 @@ end
 local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     assert(find(mode, 'n'))
     assert(ripv == ipv)
-    local to, bc, i2o, o2i = ir.to, ir.bc, ir.i2o, ir.o2i
+    local to, i2o, o2i = ir.to, ir.i2o, ir.o2i
     local to_fields = to.fields
     local x, putmapc = find(mode, 'x')
     if x then 
@@ -547,16 +547,16 @@ local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         extend(code, il.checkobuf(1), putmapc, il.move(0, 0, 1))
     end
     insert(code, il.move(ipv, ipv, ipo))
-    for i, field_bc in ipairs(bc) do
+    for i, field_ir in ipairs(ir) do
         local o = i2o[i]
         local field = to_fields[o]
         if x and o and not field.hidden then
             putmapc.ci = putmapc.ci + 1
             extend(code, il.checkobuf(1),
                     il.putstrc(0, field.name), il.move(0, 0, 1))
-            il:append_code('cxn', code, unwrap_ir(field_bc), ipv, 0, ipv)
+            il:append_code('cxn', code, unwrap_ir(field_ir), ipv, 0, ipv)
         else
-            il:append_code('cn', code, unwrap_ir(field_bc), ipv, 0, ipv)
+            il:append_code('cn', code, unwrap_ir(field_ir), ipv, 0, ipv)
         end
     end
     for o, field in ipairs(to_fields) do
@@ -572,7 +572,7 @@ end
 local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     local x = find(mode, 'x')
     assert(x or find(mode, 'n'))
-    local i2o, bc, from, to = ir.i2o, ir.bc, ir.from, ir.to
+    local i2o, from, to = ir.i2o, ir.from, ir.to
     local to_union = is_union(to)
     if not is_union(from) then -- non-union mapped to a union
         local target = to[i2o[1]]
@@ -581,7 +581,7 @@ local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
                     il.putstrc(1, target.name or target.type or target),
                     il.move(0, 0, 2))
         end
-        return il:append_code(mode, code, unwrap_ir(bc[1]), ipv, ipo, ripv)
+        return il:append_code(mode, code, unwrap_ir(ir[1]), ipv, ipo, ripv)
     end
     if find(mode, 'c') then insert(code, il.isint(ipv, ipo)) end
     if x and to_union then -- extract common code
@@ -604,7 +604,7 @@ local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
                            il.move(0, 0, 2))
                 end
             end
-            il:append_code(mode, code_branch, bc[i], ipv, ipo + 1, ripv)
+            il:append_code(mode, code_branch, ir[i], ipv, ipo + 1, ripv)
         end
     end
 end

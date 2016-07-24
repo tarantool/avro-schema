@@ -43,8 +43,8 @@ local promotions = {
 -- { type = 'FIXED',  size   = N   }
 -- { type = 'ARRAY',  nested = ... }
 -- { type = 'MAP',    nested = ... }
--- { type = 'UNION',  bc = ...,  i2o  = ?, itags = ?, otags = ? }
--- { type = 'RECORD', bc = ...,  i2o  = ?, o2i   = ?, from =  ?, to = ? }
+-- { type = 'UNION',  i2o  = ?, itags = ?, otags = ?, ... }
+-- { type = 'RECORD', i2o  = ?, o2i   = ?, from =  ?, to = ?, ... }
 -- { type = 'ENUM',   i2o = ?,   from = ?, to    = ? }
 
 -- check if name is a valid Avro identifier
@@ -752,13 +752,14 @@ build_ir = function(from, to, mem, imatch)
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
     if     from_union or to_union then
-        local mm, bc     = {}, {}
-        local ufrom = from_union and from or {from}
-        local uto = to_union and to or {to}
+        local mm = {}
+        local bc = { type = '__UNION__', from = from, to = to, i2o = mm }
+        from = from_union and from or {from}
+        to = to_union and to or {to}
         local havecommon = false
         local err
-        for fbi, fb in ipairs(ufrom) do
-            for tbi, tb in ipairs(uto) do
+        for fbi, fb in ipairs(from) do
+            for tbi, tb in ipairs(to) do
                 if type(fb) == 'string' then
                     if fb == 'any' then
                         err = build_ir_error(1, 'NYI: any')
@@ -796,16 +797,7 @@ build_ir = function(from, to, mem, imatch)
         if not havecommon then
             return nil, (err or build_ir_error(nil, 'No common types'))
         end
-        return {
-            type = 'UNION',
-            nested = {
-                type = '__UNION__',
-                bc   = bc,
-                i2o  = mm,
-                from = from,
-                to   = to
-            }
-        }
+        return { type = 'UNION', nested = bc }
     elseif type(from) == 'string' then
         if from == 'any' then
             return nil, build_ir_error(1, 'NYI: any')
@@ -884,7 +876,10 @@ build_ir = function(from, to, mem, imatch)
         end
         mem[k] = res
         if from.type == 'record' then
-            local mm, bc = {}, {}
+            local mm, mminv = {}, {}
+            local bc = {
+                type = '__RECORD__', from = from, to = to, i2o = mm, o2i = mminv
+            }
             if imatch then
                 local fieldmap = create_record_field_map(from)
                 for fi, f in ipairs(to.fields) do
@@ -899,7 +894,6 @@ build_ir = function(from, to, mem, imatch)
                     mm[fi] = fieldmap[f.name]
                 end
             end
-            local mminv = {}
             for fi, f in ipairs(from.fields) do
                 local mi = mm[fi]
                 if mi then
@@ -943,14 +937,7 @@ build_ir = function(from, to, mem, imatch)
             end
             clear(res)
             res.type = 'RECORD'
-            res.nested = {
-                type    = '__RECORD__',
-                bc      = bc,
-                i2o     = mm,
-                o2i     = mminv,
-                from    = from,
-                to      = to
-            }
+            res.nested = bc
         else -- enum
             local symmap     = create_enum_symbol_map(to)
             local mm         = {}
@@ -992,7 +979,9 @@ build_ir_error = function(offset, fmt, ...)
         local _, to      = debug.getlocal(i, 2)
         local _, ptrfrom = debug.getlocal(i, 5)
         local _, ptrto   = debug.getlocal(i, 6)
-        if type(from) == 'table' and not from.type or type(to) == 'table' and not to.type then
+        assert(type(from) == 'table')
+        assert(type(to) == 'table')
+        if not from.type then
             insert(res, '<union>')
         elseif not from.name then
             insert(res, format('<%s>', from.type))
