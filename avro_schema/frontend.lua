@@ -1,5 +1,60 @@
 -- The frontend.
 -- Loads schema and generates IR.
+--
+-- # About schemas
+--
+-- Internally, a schema is encoded precisely as defined by Avro spec.
+-- So create_schema simply creates a private copy so no one changes
+-- data from under us.  Makes it possible to validate and sanitize
+-- schema definition exactly once.
+--
+-- Create also normalizes schema definition (did you know that
+-- both "int" and { "type": "int" } are the same thing?)
+--
+-- For convenience, any reference to an earlier-defined type by name
+-- is replaced with an object itself (loops!).
+--
+--
+-- # About IR
+--
+-- Compiler generates code from the IR, which is more generic than
+-- a bare schema. IR defines a 'from' schema, a 'to' schema and a mapping.
+--
+-- IR is a graph of nodes mirroring a schema structure.
+-- Simple terminal nodes (string):
+--
+--   NUL, BOOL, INT, LONG, FLT, DBL, BIN, STR,
+--   INT2LONG, INT2FLT, INT2DBL, LONG2FLT, LONG2DBL,
+--   FLT2DBL, STR2BIN, BIN2STR
+--
+-- Complex nodes (table):
+--
+--   { type = 'FIXED',  size   = <n>  }
+--   { type = 'ARRAY',  nested = <ir> }
+--   { type = 'MAP',    nested = <ir> }
+--
+--   { type = 'ENUM',       from = <schema>, to = <schema>, i2o = ? }
+--
+--   { type = 'RECORD', nested = {
+--           type = '__RECORD__',
+--           from = <schema>, to = <schema>, i2o = ?, o2i = ?, ... }}
+--
+--   { type = 'UNION', nested = {
+--           type = '__UNION__',
+--           from = <schema>, to = <schema>, i2o = ?, ... }}
+--
+-- Legend: n      — size of fixed
+--         ir     - ir of the array item / map value
+--         schema - source or destination schema (for this particular node)
+--         i2o    - input-index-to-output-index mapping
+--         o2i    - i2o backwards
+--         ...    - ir of record fields / union branches (source schema order)
+--
+-- Note 1: RECORD/__RECORD__ are for the compiler's convenience
+--         (distinguishing container and contents)
+--
+-- Note 2: In a UNION, is_union(from) or is_union(to) holds
+--         (Avro allows mapping a union to non-union and vice versa)
 
 local debug = require('debug')
 local ffi = require('ffi')
@@ -23,14 +78,13 @@ local function deepcopy(v)
     end
 end
 
--- primitive types in Avro;
--- weird-looking strings are the IR bytecode
+-- primitive types
 local primitive_type = {
     null  = 'NUL', boolean = 'BOOL', int   = 'INT', long   = 'LONG',
     float = 'FLT', double  = 'DBL',  bytes = 'BIN', string = 'STR', any = 'XXX'
 }
 
--- permitted type promotions, more IR bytecode featured
+-- type promotions
 local promotions = {
     int    = { long   = 'INT2LONG', float  = 'INT2FLT', double = 'INT2DBL' },
     long   = { float  = 'LONG2FLT', double = 'LONG2DBL' },
@@ -38,14 +92,6 @@ local promotions = {
     string = { bytes  = 'STR2BIN' },
     bytes  = { string = 'BIN2STR' }
 }
-
--- more IR:
--- { type = 'FIXED',  size   = N   }
--- { type = 'ARRAY',  nested = ... }
--- { type = 'MAP',    nested = ... }
--- { type = 'UNION',  i2o  = ?, itags = ?, otags = ?, ... }
--- { type = 'RECORD', i2o  = ?, o2i   = ?, from =  ?, to = ?, ... }
--- { type = 'ENUM',   i2o = ?,   from = ?, to    = ? }
 
 -- check if name is a valid Avro identifier
 local function validname(name)
