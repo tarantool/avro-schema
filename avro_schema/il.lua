@@ -7,6 +7,7 @@ local ffi_new        = ffi.new
 local format, rep    = string.format, string.rep
 local insert, remove = table.insert, table.remove
 local concat         = table.concat
+local max            = math.max
 
 ffi.cdef([[
 struct schema_il_Opcode {
@@ -495,17 +496,6 @@ local function vcreate(scope, vid)
     return v
 end
 
-local function vsnapshot(scope, vid)
-    local v = scope[vid]
-    if v then
-        local copy = ffi_new('struct schema_il_V')
-        copy.raw = v.raw
-        return copy
-    else -- in outter scope, virtually immutable
-        return vlookup(scope.parent, vid)
-    end
-end
-
 -- 'execute' an instruction and update scope
 local function vexecute(il, scope, o, res)
     assert(type(o)=='cdata')
@@ -546,14 +536,12 @@ local function vexecute(il, scope, o, res)
         fixoffset = vinfo.inc
     end
     -- spill $0
+    local v0info
     if o.op == opcode.CALLFUNC then
-        local vinfo = vlookup(scope, 0)
-        if vinfo.inc ~= 0 then
-            insert(res, il.move(0, 0, vinfo.inc))
+        v0info = vlookup(scope, 0)
+        if v0info.inc ~= 0 then
+            insert(res, il.move(0, 0, v0info.inc))
         end
-        vinfo = vcreate(scope, 0)
-        vinfo.gen = il.id()
-        vinfo.inc = 0
     end
     -- apply fixes
     o.ipo = o.ipo + fixipo
@@ -565,6 +553,20 @@ local function vexecute(il, scope, o, res)
         local vinfo = vcreate(scope, o.ripv)
         vinfo.gen = il.id()
         vinfo.inc = 0
+    end
+    -- adjust $0 after func call
+    if o.op == opcode.CALLFUNC then
+        local new_v0info = vcreate(scope, 0)
+        local inc = il._wpo_info[il.get_extra(o)]
+        if inc then -- this function adds a const value to $0
+            inc = inc + v0info.inc
+            new_v0info.gen = v0info.gen
+            new_v0info.inc = inc
+            insert(res, il.move(0, 0, -inc))
+        else
+            new_v0info.gen = il.id()
+            new_v0info.inc = 0
+        end
     end
 end
 
@@ -581,9 +583,10 @@ local function vmergebranches(il, bscopes, bblocks)
     local nscopes = #bscopes
     for i = 2, nscopes do
         for vid, vinfo in pairs(bscopes[i]) do
-            counters[vid] = (counters[vid] or 1) + 1
-            if vinfo.islocal == 0 and not skip[vid] then
+            local check_it = not skip[vid] and vinfo.islocal == 0
+            if check_it and vinfo.raw ~= vlookup(parent, vid).raw then
                 local vother = maybediverged[vid]
+                counters[vid] = (counters[vid] or 1) + 1
                 if vinfo.isdead == 1 then
                     skip[vid] = true
                     diverged[vid] = nil
@@ -609,76 +612,31 @@ local function vmergebranches(il, bscopes, bblocks)
         end
     end
     for vid, _ in pairs(diverged) do
-        local vpinfo = vcreate(parent, vid)
-        vpinfo.gen = il.id()
-        vpinfo.inc = 0
+        local vinfo_parent = vlookup(parent, vid)
         for i = 2, nscopes do
-            local vinfo = bscopes[i][vid]
-            if vinfo and vinfo.inc ~= 0 then
+            local vinfo = bscopes[i][vid] or vinfo_parent
+            if vinfo.inc ~= 0 then
                 insert(bblocks[i], il.move(vid, vid, vinfo.inc))
             end
         end
+        vinfo_parent = vcreate(parent, vid)
+        vinfo_parent.gen = il.id()
+        vinfo_parent.inc = 0
     end
     return diverged
-end
-
--- Collect variables modified by the given code block.
-local vvarschanged_cache = setmetatable({}, { __mode = 'k' })
-local vvarschanged
-vvarschanged = function(block)
-    local res = vvarschanged_cache[block]
-    if res then return res end
-    assert(type(block) == 'table')
-    res = {}
-    local locals = {}
-    for i = 1, #block do
-        local item = block[i]
-        if type(item) == 'table' then
-            local nested = vvarschanged(item)
-            for vid, _ in pairs(nested) do
-                res[vid] = true
-            end
-        elseif item.op == opcode.CALLFUNC then
-            res[0] = true
-            if item.ripv ~= opcode.NILREG then res[item.ripv] = true end
-        elseif item.op >= opcode.OBJFOREACH and item.op <= opcode.PSKIP then
-            res[item.ripv] = true
-        elseif item.op == opcode.BEGINVAR then
-            locals[item.ipv] = true
-        end
-    end
-    for vid, _ in pairs(locals) do
-        res[vid] = nil
-    end
-    vvarschanged_cache[block] = res
-    return res
-end
-
--- Spill 'dirty' variables that are modified in a loop body
--- before entering the loop.
-local function vprepareloop(il, scope, lblock, block)
-    local changed = vvarschanged(lblock)
-    for vid, _ in pairs(changed) do
-        local vinfo = vlookup(scope, vid)
-        if vinfo.inc ~= 0 then
-            insert(block, il.move(vid, vid, vinfo.inc))
-            local info = vcreate(scope, vid)
-            info.gen = il.id()
-            info.inc = 0
-        end
-    end
 end
 
 -- Spill 'dirty' variables at the end of a loop body.
 local function vmergeloop(il, lscope, lblock)
     local parent = lscope.parent
     for vid, vinfo in pairs(lscope) do
-        if vinfo ~= parent and vinfo.islocal == 0 then
-            local vpinfo = vcreate(parent, vid)
-            vpinfo.gen = il.id()
-            vpinfo.inc = 0
-            if vinfo.inc ~= 0 then
-                insert(lblock, il.move(vid, vid, vinfo.inc))
+        if vinfo ~= parent and vinfo.islocal == 0 and vinfo.isdead == 0 then
+            local vinfo_parent = vlookup(parent, vid)
+            if vinfo_parent.raw ~= vinfo.raw then
+                local delta_inc = vinfo.inc - vinfo_parent.inc
+                if delta_inc ~= 0 then
+                    insert(lblock, il.move(vid, vid, delta_inc))
+                end
             end
         end
     end
@@ -732,35 +690,19 @@ end
 local voptimizeblock
 voptimizeblock = function(il, scope, block, res)
     -- COB hoisting state
-    local entryv0sn = vsnapshot(scope, 0) -- $0 at block start
-    local firstcobpos, firstcobv0sn -- first COB (if any), will attempt
+    local block_0gen = vlookup(scope, 0).gen -- $0 at block start
+    local first_cob_pos, first_cob_0gen -- first COB (if any), will attempt
                                     -- to pop it into the parent
-    local cobpos, cobv0sn, cobfixup -- 'active' COB, when we encounter
+    local cob_pos, cob_0gen         -- 'active' COB, when we encounter
                                     -- another COB, we attempt to merge
 
     for i = 2, #block do -- foreach item in the current block, excl. head
+        local new_cob_pos, new_cob_0gen, new_cob_0gen_hack
         local o = block[i]
         if type(o) == 'cdata' then -- Opcode
             vexecute(il, scope, o, res)
             if o.op == opcode.CHECKOBUF then
-                local v0info = vlookup(scope, 0)
-                if not cobv0sn or v0info.gen ~= cobv0sn.gen or
-                   not vcobmotionvalid(res, o, cobpos) then
-                    -- no active COB or merge imposible: activate current COB
-                    cobpos = #res
-                    cobv0sn = vsnapshot(scope, 0)
-                    if not firstcobpos then
-                        firstcobpos = cobpos
-                        firstcobv0sn = cobv0sn 
-                    end
-                    cobfixup = 0
-                else
-                    -- update active COB and drop the current one
-                    o.offset = o.offset + cobfixup
-                    vcobmerge(o, res[cobpos])
-                    res[cobpos] = o
-                    remove(res)
-                end
+                new_cob_pos = #res; new_cob_0gen = vlookup(scope, 0).gen
             end
         else
             local head = o[1]
@@ -781,9 +723,7 @@ voptimizeblock = function(il, scope, block, res)
                     local cob = bblock[0]
                     if cob and cob.ipv == opcode.NILREG then
                         cobhoistable = cobhoistable + 1
-                        if cob.offset > cobmaxoffset then
-                            cobmaxoffset = cob.offset
-                        end
+                        cobmaxoffset = max(cobmaxoffset, cob.offset)
                     end
                 end
                 -- a condition has 2 branches, though empty ones are omitted;
@@ -793,8 +733,6 @@ voptimizeblock = function(il, scope, block, res)
                                 head.op == opcode.IFNUL) then
                     bscopes[3] = { parent = scope }
                 end
-                vmergebranches(il, bscopes, bblocks)
-                insert(res, bblocks)
                 -- hoist COBs but only if at least half of the branches will
                 -- benefit
                 if cobhoistable >= #bblocks/2 then
@@ -805,92 +743,67 @@ voptimizeblock = function(il, scope, block, res)
                             remove(bblock, pos)
                         end
                     end
-                    local o = il.checkobuf(cobmaxoffset)
-                    local v0info = vlookup(scope, 0)
-                    if not cobv0sn or v0info.gen ~= cobv0sn.gen or
-                       not vcobmotionvalid(res, o, cobpos) then
-                        -- no active COB or merge imposible: activate current
-                        cobpos = #res
-                        cobv0sn = vsnapshot(scope, 0)
-                        if not firstcobpos then
-                            firstcobpos = cobpos
-                            firstcobv0sn = cobv0sn 
-                        end
-                        cobfixup = 0
-                        insert(res, cobpos, o)
-                    else
-                        -- update active COB and drop the current one
-                        o.offset = o.offset + cobfixup
-                        vcobmerge(o, res[cobpos])
-                        res[cobpos] = o
-                    end
+                    insert(res, il.checkobuf(cobmaxoffset))
+                    new_cob_pos, new_cob_0gen = #res, vlookup(scope, 0).gen
                 end
+                -- finally, merge branches
+                vmergebranches(il, bscopes, bblocks)
+                insert(res, bblocks)
             elseif head.op == opcode.OBJFOREACH then
                 -- loops
-                local v0bsn = vsnapshot(scope, 0) -- used by COB hoisting
-                vprepareloop(il, scope, o, res)
-                local v0asn = vsnapshot(scope, 0) -- used by COB hoisting
                 local lscope = { parent = scope }
                 local lblock = {}
-                vexecute(il, lscope, head, lblock)
-                local ivinfo = lscope[head.ripv]
-                local ivgen = ivinfo.gen
+                vexecute(il, scope, head, lblock)
+                local loop_var = head.ripv
                 voptimizeblock(il, lscope, o, lblock)
-                if ivinfo.gen == ivgen then
+                if scope[loop_var].gen == lscope[loop_var].gen then
                     -- loop variable incremented in fixed steps
-                    head.step = ivinfo.inc
-                    lscope[head.ripv] = nil
-                    local vinfo = vcreate(scope, head.ripv)
-                    vinfo.gen = il.id()
-                    vinfo.inc = 0
+                    head.step = lscope[loop_var].inc
+                    lscope[loop_var] = nil
                 end
+                -- hoist COB out of loop
+                local v0info = vlookup(scope, 0)
+                local loop_v0info = vlookup(lscope, 0)
+                local new_cob = lblock[0]
+                if v0info.gen == loop_v0info.gen and new_cob then
+                    remove(lblock, lblock[-1])
+                    local step = loop_v0info.inc - v0info.inc
+                    if step == 0 then
+                        insert(res, new_cob)
+                    else
+                        insert(res, il.checkobuf(v0info.inc, head.ipv,
+                                                 head.ipo, step))
+                    end
+                    new_cob_pos, new_cob_0gen = #res, v0info.gen
+                end
+                if v0info.raw ~= loop_v0info.raw then
+                    new_cob_0gen_hack = il.id() -- ex: record( array, int )
+                    vcreate(scope, 0).gen = new_cob_0gen_hack
+                end
+                -- finally, merge loop
                 vmergeloop(il, lscope, lblock)
                 insert(res, lblock)
-                local cob = lblock[0]
-                if cob then -- attempt COB hoisting
-                    local v0info = vlookup(lscope, 0)
-                    if v0info.gen == v0asn.gen or
-                       v0info.inc == v0asn.inc then
-                        -- hoisting failed: $0 is non-linear or
-                        -- doesn't change at all
-                    else
-                        remove(lblock, lblock[-1])
-                        cob.offset = 0
-                        cob.ipv = head.ipv
-                        cob.ipo = head.ipo
-                        cob.scale = v0info.inc --[[ - v0asn.inc
-                            but the later == 0, vprepareloop() spilled it ]]
-                        if not cobv0sn or v0bsn.gen ~= cobv0sn.gen or
-                           not vcobmotionvalid(res, cob, cobpos) then
-                            -- no active COB or merge imposible:
-                            -- activate current one
-                            cobfixup = 0
-                            cobpos = #res
-                            cobv0sn = vsnapshot(scope, 0)
-                            if not firstcobpos then
-                                firstcobpos = cobpos
-                                firstcobv0sn = cobv0sn
-                            end
-                            insert(res, cobpos, cob)
-                        else
-                            -- update active COB and drop the current one;
-                            -- changing cobv0sn here is a hack
-                            -- enabling to move COBs across (some) loops.
-                            -- Basically when moving COB we must compensate
-                            -- for $0 changing. Due to limitations in the
-                            -- variable state tracking, it looks as if $0
-                            -- value before and after the loop are unrelated.
-                            -- In fact, after($0) = before($0) + k*x.
-                            cobfixup = v0bsn.inc - cobv0sn.inc
-                            cob.offset = cobfixup
-                            vcobmerge(cob, res[cobpos])
-                            cobv0sn = vsnapshot(scope, 0)
-                            res[cobpos] = cob
-                        end
-                    end
-                end
             else
                 assert(false)
+            end
+        end
+        -- push COB up
+        if new_cob_pos then
+            if not cob_pos or cob_0gen ~= new_cob_0gen or
+                not vcobmotionvalid(res, res[new_cob_pos], cob_pos) then
+                -- no active COB or merge imposible: activate new COB
+                cob_pos = new_cob_pos
+                cob_0gen = new_cob_0gen_hack or new_cob_0gen
+                if not first_cob_pos then
+                    first_cob_pos, first_cob_0gen = cob_pos, new_cob_0gen
+                end
+            else
+                -- update active COB and drop the new one
+                local new_cob = res[new_cob_pos]
+                remove(res, new_cob_pos)
+                vcobmerge(new_cob, res[cob_pos])
+                res[cob_pos] = new_cob
+                cob_0gen = new_cob_0gen_hack or cob_0gen
             end
         end
     end
@@ -901,16 +814,15 @@ voptimizeblock = function(il, scope, block, res)
         end
     end
     -- Attempt to pop the very first COB into the parent.
-    if firstcobpos and firstcobv0sn.gen == entryv0sn.gen and
-       vcobmotionvalid(res, res[firstcobpos], nil, firstcobpos) then
+    if first_cob_pos and first_cob_0gen == block_0gen and
+       vcobmotionvalid(res, res[first_cob_pos], nil, first_cob_pos) then
         -- There was a COB and the code motion was valid.
         -- Create a copy of the COB with adjusted offset and save it in res[0].
         -- If the parent decides to accept, it has to remove a now redundant
         -- COB at firstcobpos.
-        local o = res[firstcobpos]
-        res[0] = il.checkobuf(o.offset + firstcobv0sn.inc - entryv0sn.inc,
-                               o.ipv, o.ipo, o.scale)
-        res[-1] = firstcobpos
+        local o = res[first_cob_pos]
+        res[0] = il.checkobuf(o.offset, o.ipv, o.ipo, o.scale)
+        res[-1] = first_cob_pos
     end
 end
 
@@ -920,6 +832,9 @@ local function voptimizefunc(il, func)
     local r0 = vcreate(scope, 0)
     local r1 = vcreate(scope, head.ipv)
     voptimizeblock(il, scope, func, res)
+    if r0.gen == 0 then
+        il._wpo_info[head.name] = r0.inc
+    end
     if r0.inc ~= 0 then
         insert(res, il.move(0, 0, r0.inc))
     end
@@ -931,7 +846,10 @@ end
 
 local function voptimize(il, code)
     local res = {}
-    for i = 1, #code do
+    -- simple form of whole program optimization:
+    -- start with leaf functions, record $0 update pattern
+    il._wpo_info = {}
+    for i = #code,1,-1 do
         res[i] = voptimizefunc(il, code[i])
     end
     return res
