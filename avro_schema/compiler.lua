@@ -705,7 +705,7 @@ local function emit_code(il, ir)
     end
 
     local function do_append_xflatten(il, mode, code, ir, ipv, ipo, ripv)
-        assert(mode == 'cxn')
+        assert(find(mode, 'cx'), mode)
         local ir_type = ir.type
         if ir_type == '__FUNC__' then
             local prev_update_cell = update_cell
@@ -719,16 +719,19 @@ local function emit_code(il, ir)
         elseif ir_type == '__RECORD__' then
             insert(code, il.ismap(ipv, ipo))
             do_append_convert_record_xflatten(il, code, ir, ipv, ipo, f_codegen)
-            insert(code, il.skip(ripv, ipv, ipo))
-        elseif ir_type == '__UNION__' and is_union(ir.to) then
-            extend(code, il.checkobuf(6),
-                   il.putarrayc(0, 3),
-                   il.putstrc(1, '='), il.putintkc(2, update_cell),
-                   il.putarrayc(4, 3),
-                   il.putstrc(5, '='), il.putintkc(6, update_cell + 1),
-                   il.move(0, 0, 3))
-            update_cell = update_cell + 2
-            return do_append_flatten(f_codegen, mode, code, ir, ipv, ipo, ripv, 4)
+            if find(mode, 'n') then insert(code, il.skip(ripv, ipv, ipo)) end
+        elseif ir_type == '__UNION__' and is_record_or_union(ir.to) then
+            if is_union(ir.to) then
+                extend(code, il.checkobuf(6),
+                       il.putarrayc(0, 3),
+                       il.putstrc(1, '='), il.putintkc(2, update_cell),
+                       il.putarrayc(4, 3),
+                       il.putstrc(5, '='), il.putintkc(6, update_cell + 1),
+                       il.move(0, 0, 3))
+                update_cell = update_cell + 2
+                il = f_codegen
+            end
+            return do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, 4)
         else
             extend(code, il.checkobuf(3), il.putarrayc(0, 3),
                    il.putstrc(1, '='), il.putintkc(2, update_cell),
