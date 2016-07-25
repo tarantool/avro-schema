@@ -176,37 +176,6 @@ local function checkaliases(schema, ns, scope)
     return aliases
 end
 
--- sometimes if a type doesn't contain records
--- a faster algorithm is applicable (false positives are ok)
-local function type_may_contain_records(t)
-    if     type(t) == 'string' then
-        return false
-    elseif t.type == 'array' then
-        return type_may_contain_records(t.items)
-    elseif t.type == 'map' then
-        return type_may_contain_records(t.values)
-    elseif not t.type then
-        -- union, up to 1 non-trivial branch checked (bb)
-        local bb
-        for _, b in ipairs(t) do
-            if     type(b) == 'string' then
-                -- definitely no records here
-            elseif bb then -- second non-trivial branch
-                return true
-            else
-                bb = b
-            end
-        end
-        if bb then
-            return type_may_contain_records(bb)
-        else
-            return false
-        end
-    else
-        return false
-    end
-end
-
 -- it makes sense to cache certain derived data
 -- keyed by schema node,
 --   <union>  -> tagstr_to_branch_no_map
@@ -219,12 +188,10 @@ local copy_field_default
 -- create a private copy and sanitize recursively;
 -- [ns]       current ns (or nil)
 -- [scope]    a dictionary of named types (ocasionally used for unnamed too)
--- [defaults] array of cat-ed <context_info, field, default> triples;
---            Note: defaults are installed after checking default values
 -- [open_rec] a set consisting of the current record + parent records;
 --            it is used to reject records containing themselves
-copy_schema = function(schema, ns, scope, defaults, open_rec)
-    local res, ptr -- we depend on these being locals #6 and #7
+copy_schema = function(schema, ns, scope, open_rec)
+    local res, ptr -- we depend on these being locals #5 and #6
     if type(schema) == 'table' then
         if scope[schema] then
             -- this check is necessary for unnamed complex types (union, array, map)
@@ -236,7 +203,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
             res = {}
             for branchno, xbranch in ipairs(schema) do
                 ptr = branchno
-                local branch = copy_schema(xbranch, ns, scope, defaults)
+                local branch = copy_schema(xbranch, ns, scope)
                 local bxtype, bxname
                 if type(branch) == 'table' and not branch.type then
                     copy_schema_error('Union may not immediately contain other unions')
@@ -306,19 +273,19 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     if not xtype then
                         copy_schema_error('Record field must have a "type"')
                     end
-                    field.type = copy_schema(xtype, ns, scope, defaults, open_rec)
+                    field.type = copy_schema(xtype, ns, scope, open_rec)
                     if open_rec[field.type] then
                         local path, n = {}
                         for i = 1, 1000000 do
-                            local _, res = debug.getlocal(i, 6)
+                            local _, res = debug.getlocal(i, 5)
                             if res == field.type then
                                 n = i
                                 break
                             end
                         end
                         for i = n, 1, -1 do
-                            local _, res = debug.getlocal(i, 6)
-                            local _, ptr = debug.getlocal(i, 7)
+                            local _, res = debug.getlocal(i, 5)
+                            local _, ptr = debug.getlocal(i, 6)
                             insert(path, res.fields[ptr].name)
                         end
                         error(format('Record %s contains itself via %s',
@@ -327,20 +294,11 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                     end
                     local xdefault = xfield.default
                     if xdefault ~= nil then
-                        if type_may_contain_records(field.type) then
-                            -- copy it later - may depend on parts we didn't build yet
-                            insert(defaults, copy_schema_location_info() or '?')
-                        else
-                            -- can safely copy it now; it's faster
-                            local ok, res = copy_field_default(field.type, xdefault)
-                            if not ok then
-                                copy_schema_error('Default value not valid (%s)', res)
-                            end
-                            insert(defaults, '')
-                            xdefault = res
+                        local ok, res = copy_field_default(field.type, xdefault)
+                        if not ok then
+                            copy_schema_error('Default value not valid (%s)', res)
                         end
-                        insert(defaults, field)
-                        insert(defaults, xdefault)
+                        field.default = res
                     end
                     local xaliases = xfield.aliases
                     if xaliases then
@@ -405,7 +363,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                 if not xitems then
                     copy_schema_error('Array type must have "items"')
                 end
-                res.items = copy_schema(xitems, ns, scope, defaults)
+                res.items = copy_schema(xitems, ns, scope)
                 scope[schema] = nil
                 return res
             elseif xtype == 'map' then
@@ -415,7 +373,7 @@ copy_schema = function(schema, ns, scope, defaults, open_rec)
                 if not xvalues then
                     copy_schema_error('Map type must have "values"')
                 end
-                res.values = copy_schema(xvalues, ns, scope, defaults)
+                res.values = copy_schema(xvalues, ns, scope)
                 scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
@@ -477,8 +435,8 @@ copy_schema_location_info = function()
     local top, bottom = find_frames(copy_schema)
     local res = {}
     for i = bottom, top, -1 do
-        local _, node = debug.getlocal(i, 6)
-        local _, ptr  = debug.getlocal(i, 7)
+        local _, node = debug.getlocal(i, 5)
+        local _, ptr  = debug.getlocal(i, 6)
         if type(node) == 'table' then
             if node.type == nil then -- union
                 insert(res, '<union>')
@@ -525,22 +483,7 @@ end
 
 -- validate schema definition (creates a copy)
 local function create_schema(schema)
-    local d = {}
-    local root = copy_schema(schema, nil, {}, d)
-    for i = 1, #d, 3 do
-        local context, field, default = d[i], d[i + 1], d[i + 2]
-        if context == '' then
-            -- already cloned
-            field.default = default
-        else
-            local ok, res = copy_field_default(field.type, default)
-            if not ok then
-                error(format('%s: Default value not valid (%s)', context, res), 0)
-            end
-            field.default = res
-        end
-    end
-    return root
+    return copy_schema(schema, nil, {})
 end
 
 -- create a mapping from a (string) type tag -> union branch id 
