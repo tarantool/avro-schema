@@ -365,7 +365,8 @@ local function compile(...)
     else
         local il = il_create()
         local debug = args.debug
-        local il_code, width_in, width_out = c_emit_code(il, ir)
+        local ok, il_code, width_in, width_out = pcall(c_emit_code, il, ir)
+        if not ok then return false, il_code end
         if not debug then
             il_code = il.optimize(il_code)
         end

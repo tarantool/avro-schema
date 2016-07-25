@@ -81,7 +81,8 @@ end
 -- primitive types
 local primitive_type = {
     null  = 'NUL', boolean = 'BOOL', int   = 'INT', long   = 'LONG',
-    float = 'FLT', double  = 'DBL',  bytes = 'BIN', string = 'STR', any = 'XXX'
+    float = 'FLT', double  = 'DBL',  bytes = 'BIN', string = 'STR',
+    any   = 'ANY: not supported in compiled schemas'
 }
 
 -- type promotions
