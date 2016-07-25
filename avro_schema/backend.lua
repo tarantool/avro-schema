@@ -105,7 +105,7 @@ local function varref(ipv, ipo, map)
     if ipo == 0 then
         return class..ipv
     else
-        return format('%s%d+%d', class, ipv, ipo)
+        return format('%s%d%+d', class, ipv, ipo)
     end
 end
 
@@ -195,7 +195,7 @@ local function emit_instruction(il, o, res, varmap)
     local tab = emit_instruction_tab -- a shorter alias
     if     o.op == opcode.CALLFUNC  then
         local prolog, epilog = '', ''
-        if o.k then
+        if o.k ~= 0 then
             prolog = format('r.k = r.k%+d; ', o.k)
             epilog = format('; r.k = r.k%+d', -o.k)
         end

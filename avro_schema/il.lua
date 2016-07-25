@@ -315,10 +315,8 @@ local il_methods = {
 local function rvis(reg, inc)
     if reg == opcode.NILREG then
         return '_'
-    elseif not inc or inc == 0 then
-        return '$'..reg
     else
-        return format('$%d+%d', reg, inc)
+        return format(inc and inc ~= 0 and '$%d%+d' or '$%d', reg, inc)
     end
 end
 
