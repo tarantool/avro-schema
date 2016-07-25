@@ -304,7 +304,7 @@ end
 local append_put_field_values
 append_put_field_values = function(il, code, field_type, field_val)
     if is_record(field_type) then
-        for _, field in field_type.fields do
+        for _, field in ipairs(field_type.fields) do
             append_put_field_values(il, code,
                                     field.type, field_val[field.name])
         end
