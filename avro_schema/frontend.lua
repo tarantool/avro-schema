@@ -486,8 +486,8 @@ local function create_schema(schema)
     return copy_schema(schema, nil, {})
 end
 
--- create a mapping from a (string) type tag -> union branch id 
-local function create_union_tag_map(union)
+-- get a mapping from a (string) type tag -> union branch id
+local function get_union_tag_map(union)
     local res = dcache[union]
     if not res then
         res = {}
@@ -499,8 +499,8 @@ local function create_union_tag_map(union)
     return res
 end
 
--- create a mapping from a field name -> field id (incl. aliases) 
-local function create_record_field_map(record)
+-- get a mapping from a field name -> field id (incl. aliases)
+local function get_record_field_map(record)
     local res = dcache[record]
     if not res then
         res = {}
@@ -517,8 +517,8 @@ local function create_record_field_map(record)
     return res
 end
 
--- create a mapping from a symbol name -> symbol id
-local function create_enum_symbol_map(enum)
+-- get a mapping from a symbol name -> symbol id
+local function get_enum_symbol_map(enum)
     local res = dcache[enum]
     if not res then
         res = {}
@@ -530,16 +530,23 @@ local function create_enum_symbol_map(enum)
     return res
 end
 
-local function create_aliases_set(aliases)
-    local res = dcache[aliases]
-    if not res then
-        res = {}
-        for i = 1, #aliases do
-            res[aliases[i]] = 1
-        end
-        dcache[aliases] = res
+-- from.type == to.type and from.name == to.name (considering aliases)
+local function complex_types_may_match(from, to, imatch)
+    if from.type ~= to.type then return false end
+    if from.name == to.name then return true end
+    if imatch then
+        local tmp = from; from = to; to = tmp
     end
-    return res
+    local aliases = to.aliases
+    if not aliases then return false end
+    local alias_set = dcache[aliases]
+    if alias_set then return alias_set[from.name] end
+    local alias_set = {}
+    for _, name in ipairs(aliases) do
+        alias_set[name] = true
+    end
+    dcache[aliases] = alias_set
+    return alias_set[from.name]
 end
 
 local copy_data
@@ -597,7 +604,7 @@ copy_data = function(schema, data, visited)
         end
         return data
     elseif schematype == 'enum' then
-        if not create_enum_symbol_map(schema)[data] then
+        if not get_enum_symbol_map(schema)[data] then
             error()
         end
         return data
@@ -614,7 +621,7 @@ copy_data = function(schema, data, visited)
         visited[data] = true
         -- record, enum, array, map, fixed
         if     schematype == 'record' then
-            local fieldmap = create_record_field_map(schema)
+            local fieldmap = get_record_field_map(schema)
             for k,v in pairs(data) do
                 ptr = k
                 local field = schema.fields[fieldmap[k]]
@@ -646,7 +653,7 @@ copy_data = function(schema, data, visited)
                 res[k] = copy_data(schema.values, v, visited)
             end
         elseif not schematype then -- union
-            local tagmap = create_union_tag_map(schema)
+            local tagmap = get_union_tag_map(schema)
             if data == null then
                 if not tagmap['null'] then
                     error('@Unexpected type in union: null', 0)
@@ -729,6 +736,15 @@ copy_field_default = function(fieldtype, default)
     end
 end
 
+local function create_records_field_mapping(from, to)
+    local i2o, o2i, field_map = {}, {}, get_record_field_map(to)
+    for field_pos, field in ipairs(from.fields) do
+        local to_pos = field_map[field.name]
+        if to_pos then i2o[field_pos] = to_pos; o2i[to_pos] = field_pos end
+    end
+    return i2o, o2i
+end
+
 local build_ir_error
 local build_ir
 
@@ -741,56 +757,38 @@ build_ir = function(from, to, mem, imatch)
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
     if     from_union or to_union then
-        local mm = {}
-        local bc = { type = '__UNION__', from = from, to = to, i2o = mm }
+        local i2o = {}
+        local ir = { type = '__UNION__', from = from, to = to, i2o = i2o }
         from = from_union and from or {from}
         to = to_union and to or {to}
-        local havecommon = false
+        local have_common = false
         local err
-        for fbi, fb in ipairs(from) do
-            for tbi, tb in ipairs(to) do
-                if type(fb) == 'string' then
-                    if fb == 'any' then
-                        err = build_ir_error(1, 'NYI: any')
-                        break
+        for i, branch in ipairs(from) do
+            for o, to_branch in ipairs(to) do
+                if type(branch) == 'string' then
+                    if branch == to_branch then
+                        ir[i] = primitive_type[branch]
+                        i2o[i] = o
+                        have_common = true; break
+                    elseif promotions[branch] and
+                           promotions[branch][to_branch] then
+                        ir[i] = promotions[branch][to_branch]
+                        i2o[i] = o
+                        have_common = true; break
                     end
-                    if     fb == tb then
-                        bc[fbi] = primitive_type[fb]
-                        mm[fbi] = tbi
-                        break
-                    elseif promotions[fb] and promotions[fb][tb] then
-                        bc[fbi] = promotions[fb][tb]
-                        mm[fbi] = tbi
-                        break
-                    end
-                elseif type(tb) ~= 'table' or fb.type ~= tb.type then
-                    -- mismatch
-                elseif fb.name ~= tb.name and imatch and (
-                       not fb.aliases or
-                       not create_aliases_set(fb.aliases)[tb.name]) then
-                    -- mismatch
-                elseif fb.name ~= tb.name and not imatch and (
-                       not tb.aliases or
-                       not create_aliases_set(tb.aliases)[fb.name]) then
-                    -- mismatch
-                else
-                    bc[fbi], err = build_ir(fb, tb, mem, imatch)
+                elseif complex_types_may_match(branch, to_branch, imatch) then
+                    ir[i], err = build_ir(branch, to_branch, mem, imatch)
                     if not err then
-                        mm[fbi] = tbi
-                        break
+                        i2o[i] = o; have_common = true; break
                     end
                 end
             end
-            havecommon = havecommon or mm[fbi]
         end
-        if not havecommon then
+        if not have_common then
             return nil, (err or build_ir_error(nil, 'No common types'))
         end
-        return { type = 'UNION', nested = bc }
+        return { type = 'UNION', nested = ir }
     elseif type(from) == 'string' then
-        if from == 'any' then
-            return nil, build_ir_error(1, 'NYI: any')
-        end
         if from == to then
             return primitive_type[from]
         elseif promotions[from] and promotions[from][to] then
@@ -799,10 +797,10 @@ build_ir = function(from, to, mem, imatch)
             return nil, build_ir_error(1, 'Types incompatible: %s and %s', from,
                                        type(to) == 'string' and to or to.name or to.type)
         end
-    elseif type(to) ~= 'table' or from.type ~= to.type then
+    elseif not complex_types_may_match(from, to, imatch) then
         return nil, build_ir_error(1, 'Types incompatible: %s and %s',
                                    from.name or from.type,
-                                   type(to) == 'string' and to or to.name or to.type)
+                                   to.name or to.type or to)
     elseif from.type == 'array' then
         local bc, err = build_ir(from.items, to.items, mem, imatch)
         if not bc then
@@ -815,146 +813,73 @@ build_ir = function(from, to, mem, imatch)
             return nil, err
         end
         return { type = 'MAP', nested = bc }
-    elseif from.name ~= to.name and imatch and (
-           not from.aliases or
-           not create_aliases_set(from.aliases)[to.name]) then
-        return nil, build_ir_error(1, 'Types incompatible: %s and %s',
-                                   from.name, to.name)
-    elseif from.name ~= to.name and not imatch and (
-           not to.aliases or
-           not create_aliases_set(to.aliases)[from.name]) then
-        return nil, build_ir_error(1, 'Types incompatible: %s and %s',
-                                   from.name, to.name)
     elseif from.type == 'fixed' then
         if from.size ~= to.size then
             return nil, build_ir_error(nil, 'Size mismatch: %d vs %d',
                                        from.size, to.size)
         end
         return { type = 'FIXED', size = from.size }
-    else -- record or enum
-        -- About mem and IR
-        -- (1) *named* schema elements can participate in loops;
-        -- (2) mem to the resque! keyed by <source-element, target-element>;
-        -- (3) a *named* source schema element can ever be successfully mapped
-        --     to a single target schema element;
-        -- (4) however, fields in the source schema missing from the target
-        --     schema still have their IR built, build_ir() is
-        --     called with from == to;
-        -- (5) the same IR may be used to generate *both* transformation and
-        --     validation programs;
-        -- (6) if IR_A was built for <from, from> and later IR_B was built
-        --     for <from, to>, every ref to IR_A is to be replaced with IR_B;
-        --
-        --     [[ This unification helps when chaining IRs: IR1-IR2-IR3.
-        --        Assume we started with N types. Without unification every
-        --        subsequent step creates up to N new types. ]]
-        --
-        -- (7) however, build_ir() is ocasionally called with types that fail
-        --     to match, often not fatal (think unions);
-        -- (8) if it fails, we leave IR_A intact.
-        local k, k2 = format('%p.%p', from, to)
-        local res, err = mem[k]
-        if res then
-            return res
+    elseif from.type == 'record' then
+        local res = mem[to]
+        if res then return res end
+        local i2o, o2i
+        if imatch then
+            o2i, i2o = create_records_field_mapping(to, from)
+        else
+            i2o, o2i = create_records_field_mapping(from, to)
         end
-        k2 = format('%p.%p', from, from)
-        res = mem[k2]
-        if not res then
-            res = {}
-            mem[k2] = res
-        end
-        mem[k] = res
-        if from.type == 'record' then
-            local mm, mminv = {}, {}
-            local bc = {
-                type = '__RECORD__', from = from, to = to, i2o = mm, o2i = mminv
-            }
-            if imatch then
-                local fieldmap = create_record_field_map(from)
-                for fi, f in ipairs(to.fields) do
-                    local mi = fieldmap[f.name]
-                    if mi then
-                        mm[mi] = fi
-                    end
+        local ir = {
+            type = '__RECORD__', from = from, to = to, i2o = i2o, o2i = o2i
+        }
+        res = { type = 'RECORD', nested = ir }
+        mem[to] = res -- NB: clean on error!
+        for i, field in ipairs(from.fields) do
+            local o = i2o[i]
+            if o then
+                local to_field = to.fields[o]
+                ptrfrom = i; ptrto = o
+                ir[i], err = build_ir(field.type, to_field.type, mem, imatch)
+                if err then
+                    mem[to] = nil
+                    return nil, err
+                end
+                if field.default and not to_field.default then
+                    mem[to] = nil
+                    return nil, build_ir_error(nil, [[
+Default value defined in source schema but missing in target schema]])
                 end
             else
-                local fieldmap = create_record_field_map(to)
-                for fi, f in ipairs(from.fields) do
-                    mm[fi] = fieldmap[f.name]
-                end
-            end
-            for fi, f in ipairs(from.fields) do
-                local mi = mm[fi]
-                if mi then
-                    mminv[mi] = fi
-                    local tf = to.fields[mi]
-                    ptrfrom = fi
-                    ptrto = mi
-                    bc[fi], err = build_ir(f.type, tf.type, mem, imatch)
-                    if err then
-                        goto done
-                    end
-                    if f.default and not tf.default then
-                        -- The spec says nothing about this case.
-                        -- Converting defaults into the target schema
-                        -- makes sense as well, but the implementation
-                        -- was way too complex.
-                        -- Caveat: works funny if defaults are different.
-                        err = build_ir_error(nil, 'Default value defined in source schema but missing in target schema')
-                        goto done
-                    end
-                else
-                    if f.default then
-                        -- a subtle difference:
-                        -- mm[fi] == nil    a field is missing in target schema
-                        -- mm[fi] == false  a field is missing in target schema
-                        --                  the source schema defines default
-                        -- affect validation
-                        mm[fi] = false
-                    end
-                    bc[fi] = build_ir(f.type, f.type, mem) -- never fails
-                end
-            end
-            for fi, f in ipairs(to.fields) do
-                if f.default == nil and not mminv[fi] then
-                    ptrfrom = nil
-                    ptrto = nil
-                    err = build_ir_error(nil, 'Field %s is missing in source schema, and no default value was provided',
-                                         f.name)
-                    goto done
-                end
-            end
-            clear(res)
-            res.type = 'RECORD'
-            res.nested = bc
-        else -- enum
-            local symmap     = create_enum_symbol_map(to)
-            local mm         = {}
-            local havecommon = nil
-            for si, s in ipairs(from.symbols) do
-                local mi = symmap[s]
-                mm[si] = mi
-                havecommon = havecommon or mi
-            end
-            if not havecommon then
-                err = build_ir_error(nil, 'No common symbols')
-            else
-                clear(res)
-                res.type      = 'ENUM'
-                res.i2o       = mm
-                res.from      = from
-                res.to        = to
+                ir[i] = build_ir(field.type, field.type, mem) -- never fails
             end
         end
-::done::
-        if err then 
-            if #res == 0 then -- there was no IR_A before we came
-                mem[k2] = nil
+        for o, field in ipairs(to.fields) do
+            if field.default == nil and not o2i[o] then
+                mem[to] = nil; ptrfrom = nil; ptrto = nil
+                return nil, build_ir_error(nil, [[
+Field %s is missing in source schema, and no default value was provided]],
+                                           field.name)
             end
-            mem[k] = nil
-            return nil, err
         end
         return res
+    elseif from.type == 'enum' then
+        local res = mem[to]
+        if res then return res end
+        local symmap      = get_enum_symbol_map(to)
+        local i2o         = {}
+        local have_common = nil
+        for symbol_val, symbol in ipairs(from.symbols) do
+            local to_val = symmap[symbol]
+            i2o[symbol_val] = to_val
+            have_common = have_common or to_val
+        end
+        if not have_common then
+            return nil, build_ir_error(nil, 'No common symbols')
+        end
+        res = { type = 'ENUM', from = from, to = to, i2o = i2o }
+        mem[to] = res
+        return res
+    else
+        assert(false)
     end
 end
 
@@ -1004,6 +929,6 @@ return {
     create_schema         = create_schema,
     validate_data         = validate_data,
     create_ir             = create_ir,
-    get_enum_symbol_map   = create_enum_symbol_map,
-    get_union_tag_map     = create_union_tag_map
+    get_enum_symbol_map   = get_enum_symbol_map,
+    get_union_tag_map     = get_union_tag_map
 }

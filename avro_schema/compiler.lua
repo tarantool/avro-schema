@@ -177,6 +177,7 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
     local ir_type = ir.type 
     if not ir_type then
         local ilfuncs = ir2ilfuncs[ir]
+        assert(ilfuncs, ir)
         if find(mode, 'c') then insert(code, il[ilfuncs.is] (ipv, ipo)) end
         if find(mode, 'x') then
             extend(code,
