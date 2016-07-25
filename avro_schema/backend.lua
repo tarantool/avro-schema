@@ -194,10 +194,16 @@ end
 local function emit_instruction(il, o, res, varmap)
     local tab = emit_instruction_tab -- a shorter alias
     if     o.op == opcode.CALLFUNC  then
-        insert(res, format('v0%s = f%d(r, v0, %s)',
+        local prolog, epilog = '', ''
+        if o.k then
+            prolog = format('r.k = r.k%+d; ', o.k)
+            epilog = format('; r.k = r.k%+d', -o.k)
+        end
+        insert(res, format('%sv0%s = f%d(r, v0, %s)%s', prolog,
                             o.ripv == opcode.NILREG and '' or
                             ', '..varref(o.ripv, 0, varmap),
-                            il.get_extra(o), varref(o.ipv, o.ipo, varmap)))
+                            il.get_extra(o), varref(o.ipv, o.ipo, varmap),
+                            epilog))
     elseif o.op == opcode.MOVE      then
         insert(res, format('%s = %s',
                             varref(o.ripv, 0,     varmap),
@@ -219,6 +225,10 @@ local function emit_instruction(il, o, res, varmap)
     elseif o.op == opcode.PUTINTC then
         local pos = varref(0, o.offset, varmap)
         insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = %d',
+                            pos, pos, o.ci))
+    elseif o.op == opcode.PUTINTKC then
+        local pos = varref(0, o.offset, varmap)
+        insert(res, format('r.ot[%s] = 4; r.ov[%s].ival = r.k + %d',
                             pos, pos, o.ci))
     elseif o.op == opcode.PUTARRAYC or o.op == opcode.PUTMAPC then
         local pos = varref(0, o.offset, varmap)

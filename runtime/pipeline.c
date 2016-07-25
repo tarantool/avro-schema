@@ -909,3 +909,26 @@ int schema_rt_extract_location(struct State *state,
         ismap = type == MapValue;
     }
 }
+
+void schema_rt_xflatten_done(struct State *state,
+                             size_t len)
+{
+    uint32_t array_len = 0, countdown = 1;
+    size_t i;
+    for (i = 1; i < len; i++) {
+        switch (state->ot[i]) {
+        case ArrayValue:
+            countdown += state->ov[i].xlen;
+            break;
+        case MapValue:
+            countdown += state->ov[i].xlen * 2;
+            break;
+        }
+        if (--countdown == 0) {
+            array_len ++;
+            countdown = 1;
+        }
+    }
+    state->ot[0] = ArrayValue;
+    state->ov[0].xlen = array_len;
+}

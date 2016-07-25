@@ -44,6 +44,7 @@ struct schema_rt_State {
     struct schema_rt_Value   *v;
     uint8_t                  *ot;
     struct schema_rt_Value   *ov;
+    int32_t                   k;
 };
 
 int
@@ -61,6 +62,10 @@ schema_rt_buf_grow(struct schema_rt_State *state,
 
 int schema_rt_extract_location(struct schema_rt_State *state,
                                intptr_t                pos);
+
+void schema_rt_xflatten_done(struct schema_rt_State *state,
+                             size_t len);
+
 ]]
 
 -- hash ---------------------------------------------------------------
@@ -263,16 +268,16 @@ extract_location = function(r, pos)
 end
 
 local etype2typename = {
-    [0xea] = 'BOOL', [0xeb] = 'INT', [0xec] = 'FLOAT', [0xed] = 'DOUBLE',
-    [0xee] = 'LONG', [0xef] = 'STR', [0xf0] = 'BIN',   [0xf1] = 'ARRAY',
-    [0xf2] = 'MAP',  [0xf3] = 'NIL', [0xf4] = 'NIL or MAP'
+    [0xec] = 'BOOL', [0xed] = 'INT', [0xee] = 'FLOAT', [0xef] = 'DOUBLE',
+    [0xf0] = 'LONG', [0xf1] = 'STR', [0xf2] = 'BIN',   [0xf3] = 'ARRAY',
+    [0xf4] = 'MAP',  [0xf5] = 'NIL', [0xf6] = 'NIL or MAP'
 }
 
 local function err_type(r, pos, etype)
-    -- T==4(LONG) and (etype==0xec(ISFLOAT) or etype==0xed(ISDOUBLE))
-    -- due to T range (1..12) and etype-s coding (234 + (0..9))
+    -- T==4(LONG) and (etype==0xee(ISFLOAT) or etype==0xef(ISDOUBLE))
+    -- due to T range (1..12) and etype-s coding (236 + (0..9))
     -- this check is robust
-    if r.t[pos] * band(etype, 0xfe) == 0x3b0 then
+    if r.t[pos] * band(etype, 0xfe) == 0x3b8 then
         r.t[pos] = 7 + band(etype, 1) -- long 2 float / double
         r.v[pos].dval = r.v[pos].ival
         return
@@ -280,7 +285,7 @@ local function err_type(r, pos, etype)
     local location, iskerror = extract_location(r, pos)
     if iskerror then
         error(format('%sNon-string key', location), 0)
-    elseif etype == 0xeb and r.t[pos] == 4 then
+    elseif etype == 0xed and r.t[pos] == 4 then
         error(format('%sValue exceeds INT range: %s',
                      location, r.v[pos].ival), 0)
     else

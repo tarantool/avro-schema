@@ -15,6 +15,7 @@ struct schema_il_Opcode {
         union {
             uint16_t scale;
             uint16_t step;
+            uint16_t k;
         };
     };
     union {
@@ -58,52 +59,54 @@ struct schema_il_Opcode {
     static const int PUTARRAYC   = 0xd3;
     static const int PUTMAPC     = 0xd4;
     static const int PUTXC       = 0xd5;
-    static const int PUTNULC     = 0xd6;
+    static const int PUTINTKC    = 0xd6;
+    static const int PUTDUMMYC   = 0xd7;
+    static const int PUTNULC     = 0xd8;
 
-    static const int PUTBOOL     = 0xd7;
-    static const int PUTINT      = 0xd8;
-    static const int PUTLONG     = 0xd9;
-    static const int PUTFLOAT    = 0xda;
-    static const int PUTDOUBLE   = 0xdb;
-    static const int PUTSTR      = 0xdc;
-    static const int PUTBIN      = 0xdd;
-    static const int PUTARRAY    = 0xde;
-    static const int PUTMAP      = 0xdf;
-    static const int PUTINT2LONG = 0xe0;
-    static const int PUTINT2FLT  = 0xe1;
-    static const int PUTINT2DBL  = 0xe2;
-    static const int PUTLONG2FLT = 0xe3;
-    static const int PUTLONG2DBL = 0xe4;
-    static const int PUTFLT2DBL  = 0xe5;
-    static const int PUTSTR2BIN  = 0xe6;
-    static const int PUTBIN2STR  = 0xe7;
+    static const int PUTBOOL     = 0xd9;
+    static const int PUTINT      = 0xda;
+    static const int PUTLONG     = 0xdb;
+    static const int PUTFLOAT    = 0xdc;
+    static const int PUTDOUBLE   = 0xdd;
+    static const int PUTSTR      = 0xde;
+    static const int PUTBIN      = 0xdf;
+    static const int PUTARRAY    = 0xe0;
+    static const int PUTMAP      = 0xe1;
+    static const int PUTINT2LONG = 0xe2;
+    static const int PUTINT2FLT  = 0xe3;
+    static const int PUTINT2DBL  = 0xe4;
+    static const int PUTLONG2FLT = 0xe5;
+    static const int PUTLONG2DBL = 0xe6;
+    static const int PUTFLT2DBL  = 0xe7;
+    static const int PUTSTR2BIN  = 0xe8;
+    static const int PUTBIN2STR  = 0xe9;
 
-    static const int PUTENUMI2S  = 0xe8;
-    static const int PUTENUMS2I  = 0xe9;
+    static const int PUTENUMI2S  = 0xea;
+    static const int PUTENUMS2I  = 0xeb;
 
     /* rt.err_type depends on these values */
-    static const int ISBOOL      = 0xea;
-    static const int ISINT       = 0xeb;
-    static const int ISFLOAT     = 0xec;
-    static const int ISDOUBLE    = 0xed;
-    static const int ISLONG      = 0xee;
-    static const int ISSTR       = 0xef;
-    static const int ISBIN       = 0xf0;
-    static const int ISARRAY     = 0xf1;
-    static const int ISMAP       = 0xf2;
-    static const int ISNUL       = 0xf3;
-    static const int ISNULORMAP  = 0xf4;
+    static const int ISBOOL      = 0xec;
+    static const int ISINT       = 0xed;
+    static const int ISFLOAT     = 0xee;
+    static const int ISDOUBLE    = 0xef;
+    static const int ISLONG      = 0xf0;
+    static const int ISSTR       = 0xf1;
+    static const int ISBIN       = 0xf2;
+    static const int ISARRAY     = 0xf3;
+    static const int ISMAP       = 0xf4;
+    static const int ISNUL       = 0xf5;
+    static const int ISNULORMAP  = 0xf6;
 
-    static const int LENIS       = 0xf5;
+    static const int LENIS       = 0xf7;
 
-    static const int ISSET       = 0xf6;
-    static const int ISNOTSET    = 0xf7;
-    static const int BEGINVAR    = 0xf8;
-    static const int ENDVAR      = 0xf9;
+    static const int ISSET       = 0xf8;
+    static const int ISNOTSET    = 0xf9;
+    static const int BEGINVAR    = 0xfa;
+    static const int ENDVAR      = 0xfb;
 
-    static const int CHECKOBUF   = 0xfa;
+    static const int CHECKOBUF   = 0xfc;
 
-    static const int ERRVALUEV   = 0xfb;
+    static const int ERRVALUEV   = 0xfd;
 
     static const unsigned NILREG  = 0xffffffff;
 };
@@ -136,6 +139,7 @@ local op2str = {
     [opcode.PUTDOUBLEC ] = 'PUTDOUBLEC ',   [opcode.PUTSTRC    ] = 'PUTSTRC    ',
     [opcode.PUTBINC    ] = 'PUTBINC    ',   [opcode.PUTARRAYC  ] = 'PUTARRAYC  ',
     [opcode.PUTMAPC    ] = 'PUTMAPC    ',   [opcode.PUTXC      ] = 'PUTXC      ',
+    [opcode.PUTINTKC   ] = 'PUTINTKC   ',   [opcode.PUTDUMMYC  ] = 'PUTDUMMYC  ',
     [opcode.PUTNULC    ] = 'PUTNULC    ',   [opcode.PUTBOOL    ] = 'PUTBOOL    ',
     [opcode.PUTINT     ] = 'PUTINT     ',   [opcode.PUTLONG    ] = 'PUTLONG    ',
     [opcode.PUTFLOAT   ] = 'PUTFLOAT   ',   [opcode.PUTDOUBLE  ] = 'PUTDOUBLE  ',
@@ -231,6 +235,7 @@ local il_methods = {
         return o
     end,
     putintc     = opcode_ctor_offset_ci(opcode.PUTINTC),
+    putintkc    = opcode_ctor_offset_ci(opcode.PUTINTKC),
     putlongc = function(offset, cl)
         local o = opcode_new(opcode.PUTLONGC)
         o.offset = offset; o.cl = cl
@@ -341,8 +346,8 @@ end
 local function opcode_vis(o, extra)
     local opname = op2str[o.op]
     if o.op == opcode.CALLFUNC then
-        return format('%s %s,\t%s,\tFUNC<%s>', opname,
-                      rvis(o.ripv), rvis(o.ipv, o.ipo), extra[o])
+        return format('%s %s,\t%s,\tFUNC<%s>,\t%d', opname,
+                      rvis(o.ripv), rvis(o.ipv, o.ipo), extra[o], o.k)
     elseif o.op == opcode.DECLFUNC then
         return format('%s %d,\t%s', opname, o.name, rvis(o.ipv))
     elseif o.op == opcode.IBRANCH then
@@ -365,7 +370,7 @@ local function opcode_vis(o, extra)
         return format('%s %s,\t%s,\t%s', opname, rvis(o.ripv), rvis(o.ipv, o.ipo), cvis(o, extra))
     elseif o.op == opcode.SKIP or o.op == opcode.PSKIP then
         return format('%s %s,\t[%s]', opname, rvis(o.ripv), rvis(o.ipv, o.ipo))
-    elseif o.op == opcode.PUTBOOLC or o.op == opcode.PUTINTC or
+    elseif o.op == opcode.PUTBOOLC or o.op == opcode.PUTINTC or o.op == opcode.PUTINTKC or
            o.op == opcode.PUTARRAYC or o.op == opcode.PUTMAPC then
         return format('%s [%s],\t%d', opname, rvis(0, o.offset), o.ci)
     elseif o.op == opcode.PUTLONGC then
@@ -941,9 +946,10 @@ local function il_create()
 
     local il
     il = setmetatable({
-        callfunc = function(ripv, ipv, ipo, func)
+        callfunc = function(ripv, ipv, ipo, func, k)
             local o = opcode_new(opcode.CALLFUNC)
-            o.ripv = ripv or opcode.NILREG; o.ipv = ipv; o.ipo = ipo
+            o.ripv = ripv or opcode.NILREG; o.ipv = ipv; o.ipo = ipo;
+            o.k = k or 0
             extra[o] = func
             return o
         end,

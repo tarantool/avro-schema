@@ -236,24 +236,18 @@ x%d = ffi_string(r.b1-r.v[%d].xoff, r.v[%d].xlen)]], i, i, i))
     })
 end
 
-local function gen_lua_xflatten(il, il_code, res)
+local function gen_lua_xflatten(service_fields, il, il_code, res)
     local func = il_code[3]
-    if #func == 1 then -- dummy xflatten, root type probably not a RECORD
-        insert(res, 'local xflatten')
-        return
-    end
     il.emit_lua_func(il_code[3], res, {
         func_decl = 'local function xflatten(data)',
         func_locals = 'local r, v0, v1',
-        conversion_init = [[
+        conversion_init = format([[
 r = rt_regs
 decode_proc(r, data)
 r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
-v0 = 1
-v1 = 0]],
+r.k = %d; v0 = 1; v1 = 0]], #service_fields + 1),
         conversion_complete = [[
-r.ot[0] = 11
-r.ov[0].xlen = v1
+rt_C.schema_rt_xflatten_done(r, v0)
 v0 = encode_proc(r, v0)]],
         func_return = 'return v0'
     })
@@ -296,7 +290,7 @@ ${inner_decls}
         unflatten  = function(data)
             return pcall(unflatten, data)
         end,
-        xflatten  = xflatten and function(data)
+        xflatten  = function(data)
             return pcall(xflatten, data)
         end
     }
@@ -309,7 +303,7 @@ return linker
 
     gen_lua_flatten(width_out, service_fields, il, il_code, inner_decls)
     gen_lua_unflatten(width_in, service_fields, il, il_code, inner_decls)
-    gen_lua_xflatten(il, il_code, inner_decls)
+    gen_lua_xflatten(service_fields, il, il_code, inner_decls)
 
     for i = 1, #il_code do
         local func = il_code[i]
@@ -371,7 +365,7 @@ local function compile(...)
     else
         local il = il_create()
         local debug = args.debug
-        local il_code, width_in, width_out = c_emit_code(il, ir, #service_fields)
+        local il_code, width_in, width_out = c_emit_code(il, ir)
         if not debug then
             il_code = il.optimize(il_code)
         end

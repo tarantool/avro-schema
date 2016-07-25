@@ -348,6 +348,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 insert(code_section2,
                        il.isset(v_base + i, ipv, ipo, field.name))
             end
+            insert(code_section2, il.endvar(v_base + i))
         end
     end
     -- iterate fields in target schema, track current offset into a tuple
@@ -643,7 +644,7 @@ end
 
 -----------------------------------------------------------------------
 
-local function emit_code(il, ir, n_svc_fields)
+local function emit_code(il, ir)
     ir = unwrap_ir(ir)
     local from, to = ir.from, ir.to
     local funcs = {
@@ -658,9 +659,86 @@ local function emit_code(il, ir, n_svc_fields)
     f_codegen:append_code('cxn', funcs[1], ir, 1, 0, 1)
     u_codegen:append_code('cxn', funcs[2], ir, 1, 0, 1)
 
-    if to and is_record(to) then
-        -- TODO xflatten
+    local update_cell = 0
+
+    local function do_append_convert_record_xflatten(il, code, ir, ipv, ipo)
+        local i2o, o2i = ir.i2o, ir.o2i
+        local from_fields, to_fields = ir.from.fields, ir.to.fields
+        -- reserve a range of ids for all field variables at once
+        local v_base = il.id(#from_fields) - 1
+        -- we append instructions before and after the loop when convenient;
+        -- for these reasons we initially accumulate the loop and subsequent
+        -- instructions in code_section2, and append it to code once done 
+        local code_section2 = {}
+        -- emit parsing loop
+        local loop_var, loop_body = append_objforeach(il, code_section2, ipv, ipo)
+        local strswitch = { il.strswitch(loop_var, 0) }
+        insert(loop_body, strswitch)
+        -- create a branch in strswitch for each field (source schema)
+        for i, field in ipairs(from_fields) do
+            -- declare field var; before the loop
+            insert(code, il.beginvar(v_base + i))
+            local branch = {
+                il.sbranch(field.name),
+                il.isnotset(v_base + i),
+                il.move(v_base + i, loop_var, 1)
+            }
+            strswitch[i + 1] = branch
+            if not i2o[i] then -- missing from target schema
+                f_codegen:append_code('cn', branch, ir[i], loop_var, 1, loop_var)
+            end
+            insert(code_section2, il.endvar(v_base + i))
+        end
+        -- iterate fields in target schema order
+        for o, field in ipairs(to_fields) do
+            local i = o2i[o]
+            local field_ir = unwrap_ir(ir[i])
+            if i then
+                local branch = strswitch[i + 1]
+                il:append_code('cxn', branch, field_ir, loop_var, 1, loop_var)
+            else
+                update_cell = update_cell + schema_width(field.type)
+            end
+        end
+        append(code, code_section2)
     end
+
+    local function do_append_xflatten(il, mode, code, ir, ipv, ipo, ripv)
+        assert(mode == 'cxn')
+        local ir_type = ir.type
+        if ir_type == '__FUNC__' then
+            local prev_update_cell = update_cell
+            update_cell = 0
+            il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
+            update_cell = prev_update_cell
+        elseif ir_type == '__CALL__' then
+            insert(code, il.callfunc(find(mode, 'n') and ripv, ipv, ipo,
+                   ir.func[1].name, update_cell))
+            update_cell = update_cell + schema_width(ir.nested.to)
+        elseif ir_type == '__RECORD__' then
+            insert(code, il.ismap(ipv, ipo))
+            do_append_convert_record_xflatten(il, code, ir, ipv, ipo, f_codegen)
+            insert(code, il.skip(ripv, ipv, ipo))
+        elseif ir_type == '__UNION__' and is_union(ir.to) then
+            extend(code, il.checkobuf(6),
+                   il.putarrayc(0, 3),
+                   il.putstrc(1, '='), il.putintkc(2, update_cell),
+                   il.putarrayc(4, 3),
+                   il.putstrc(5, '='), il.putintkc(6, update_cell + 1),
+                   il.move(0, 0, 3))
+            update_cell = update_cell + 2
+            return do_append_flatten(f_codegen, mode, code, ir, ipv, ipo, ripv, 4)
+        else
+            extend(code, il.checkobuf(3), il.putarrayc(0, 3),
+                   il.putstrc(1, '='), il.putintkc(2, update_cell),
+                   il.move(0, 0, 3))
+            update_cell = update_cell + 1
+            return do_append_flatten(f_codegen, mode, code, ir, ipv, ipo, ripv)
+        end
+    end
+
+    local x_codegen = new_codegen(il, funcs, do_append_xflatten, ir, funcs[3])
+    x_codegen:append_code('cxn', funcs[3], ir, 1, 0, 1)
 
     return funcs,
            from and abs(schema_width(from)) or 1,

@@ -45,7 +45,7 @@ local ok, person = avro.create({
 
 if not ok then error(person) end
 
-local ok, person_c = avro.compile(person)
+local ok, person_c = avro.compile{person, dump_il='person.il'}
 if not ok then error(person_c) end
 
 local flatten = person_c.flatten_msgpack

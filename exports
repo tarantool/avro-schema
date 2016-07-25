@@ -7,6 +7,7 @@ global:
     unparse_msgpack;
     schema_rt_buf_grow;
     schema_rt_extract_location;
+    schema_rt_xflatten_done;
 
     create_hash_func;
     eval_hash_func;

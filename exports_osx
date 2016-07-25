@@ -2,6 +2,7 @@ _parse_msgpack
 _unparse_msgpack
 _schema_rt_buf_grow
 _schema_rt_extract_location
+_schema_rt_xflatten_done
 
 _create_hash_func
 _eval_hash_func
