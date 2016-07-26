@@ -616,7 +616,12 @@ local function vmergebranches(il, bscopes, bblocks)
         for i = 2, nscopes do
             local vinfo = bscopes[i][vid] or vinfo_parent
             if vinfo.inc ~= 0 then
-                insert(bblocks[i], il.move(vid, vid, vinfo.inc))
+                local bblock = bblocks[i]
+                if not bblock then -- restore missing branch
+                    bblock = { il.ibranch(bblocks[2][1].ci == 0) }
+                    bblocks[i] = bblock
+                end
+                insert(bblock, il.move(vid, vid, vinfo.inc))
             end
         end
         vinfo_parent = vcreate(parent, vid)
@@ -632,11 +637,9 @@ local function vmergeloop(il, lscope, lblock)
     for vid, vinfo in pairs(lscope) do
         if vinfo ~= parent and vinfo.islocal == 0 and vinfo.isdead == 0 then
             local vinfo_parent = vlookup(parent, vid)
-            if vinfo_parent.raw ~= vinfo.raw then
-                local delta_inc = vinfo.inc - vinfo_parent.inc
-                if delta_inc ~= 0 then
-                    insert(lblock, il.move(vid, vid, delta_inc))
-                end
+            local delta_inc = vinfo.inc - vinfo_parent.inc
+            if delta_inc ~= 0 then
+                insert(lblock, il.move(vid, vid, delta_inc))
             end
         end
     end
