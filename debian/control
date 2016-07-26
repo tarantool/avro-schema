@@ -10,8 +10,11 @@ Homepage: https://github.com/tarantool/avro-schema
 Vcs-Git: git://github.com/tarantool/avro-schema.git
 Vcs-Browser: https://github.com/tarantool/avro-schema
 
-Package: tarantool-avro
+Package: tarantool-avro-schema
 Architecture: i386 amd64 armhf arm64
 Depends: tarantool (>= 1.6.8.0), ${shlibs:Depends}, ${misc:Depends}
 Pre-Depends: ${misc:Pre-Depends}
 Description: Apache Avro schema tools for Tarantools
+Provides: tarantool-avro
+Conflicts: tarantool-avro
+Replaces: tarantool-avro
