@@ -57,7 +57,7 @@ add_library(avro_schema_rt_c SHARED
             runtime/misc.c
             lib/phf/phf.cc)
 set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
-                     "avro_schema_rt_c")
+                     "avro_schema_rt_c" SUFFIX ".so")
 
 # link with libc explicitly (-nodefaultlibs earlier)
 target_link_libraries(avro_schema_rt_c c)
@@ -103,11 +103,7 @@ set(TARANTOOL tarantool)
 set(LUA_PATH
     "${CMAKE_SOURCE_DIR}/?.lua\\;${CMAKE_SOURCE_DIR}/?/init.lua\\;\\;")
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-set(LUA_CPATH "${CMAKE_BINARY_DIR}/?.dylib\\;\\;")
-else()
 set(LUA_CPATH "${CMAKE_BINARY_DIR}/?.so\\;\\;")
-endif()
 
 enable_testing()
 
