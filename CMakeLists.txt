@@ -57,7 +57,7 @@ add_library(avro_schema_rt_c SHARED
             runtime/misc.c
             lib/phf/phf.cc)
 set_target_properties(avro_schema_rt_c PROPERTIES PREFIX "" OUTPUT_NAME
-                     "avro_schema_rt_c" SUFFIX ".so")
+                     "avro_schema_rt_c" SUFFIX ".so" MACOSX_RPATH 0)
 
 # link with libc explicitly (-nodefaultlibs earlier)
 target_link_libraries(avro_schema_rt_c c)
