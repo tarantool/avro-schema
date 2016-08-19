@@ -111,6 +111,8 @@ end
 
 local emit_instruction_tab = {
     ----------------------- T
+    [opcode.PUTNULC    ] =  1,
+    [opcode.PUTDUMMYC  ] = 17,
     [opcode.PUTARRAYC  ] = 11,
     [opcode.PUTMAPC    ] = 12,
     [opcode.PUTFLOATC  ] =  6,
@@ -242,9 +244,9 @@ local function emit_instruction(il, o, res, varmap)
         local pos = varref(0, o.offset, varmap)
         insert(res, format('r.ot[%s] = %d; r.ov[%s].dval = %f',
                             pos, tab[o.op], pos, o.cd))
-    elseif o.op == opcode.PUTNULC   then
-        insert(res, format('r.ot[%s] = 1',
-                            varref(0, o.offset, varmap)))
+    elseif o.op == opcode.PUTNULC or o.op == opcode.PUTDUMMYC then
+        insert(res, format('r.ot[%s] = %d',
+                            varref(0, o.offset, varmap), tab[o.op]))
     elseif o.op == opcode.PUTSTRC or o.op == opcode.PUTBINC or
            o.op == opcode.PUTXC     then
         local pos = varref(0, o.offset, varmap)
@@ -911,13 +913,6 @@ r.ot[%s] = 4; r.ov[%s].ival = (%s)[t*3+2];]],
 
     function il.emit_lua_func(func, res, opts)
         return emit_func(il, func, res, opts)
-    end
-    
-    function il.append_lua_code(code, res)
-        local varmap = {}
-        for i = 1, #code do
-            emit_instruction(il, code[i], res, varmap)
-        end
     end
 
     il.enable_loop_peeling = (opts.enable_loop_peeling ~= false)

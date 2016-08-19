@@ -132,129 +132,56 @@ local function param_list(n, class)
     return concat(res, ', ')
 end
 
--- service fields, a subset of AVRO types
-local service_types = {
-    boolean = { check = 'isbool'               },
-    int =     { check = 'isint'                },
-    long =    { check = 'islong'               },
-    float =   { check = 'isfloat',  typeid = 6 },
-    double =  { check = 'isdouble', typeid = 7 },
-    string =  { check = 'isstr',    typeid = 8 },
-    bytes =   { check = 'isbin',    typeid = 9 }
-}
-
-local function gen_lua_flatten(width, service_fields, il, il_code, res)
-    local n = #service_fields
-    local init = {
-        'r = rt_regs; v1 = 0',
-        'decode_proc(r, data)',
-        'r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool',
-        format('r.ot[0] = 11; r.ov[0].xlen = %d', width + n)
-    }
-    local pos = 1
-    for i = 1, n do
-        local field = service_fields[i]
+local function gen_store_service_fields(service_fields)
+    local code, pos = {}, 1
+    for i, field in ipairs(service_fields) do
         if field == 'boolean' then
-            insert(init, format('r.ot[%d] = 3-ffi_cast("int", not a%d)', pos, i))
+            insert(code, format('r.ot[%d] = 3-ffi_cast("int", not a%d)', pos, i))
             pos = pos + 1
         elseif field == 'int' or field == 'long' then
-            insert(init, format('r.ot[%d] = 4; r.ov[%d].ival = a%d', pos, pos, i))
+            insert(code, format('r.ov[%d].ival = a%d', pos, pos, i))
             pos = pos + 1
         elseif field == 'float' or field == 'double' then
-            insert(init, format('r.ot[%d] = %d; r.ov[%d].dval = a%d',
-                                pos, service_types[field].typeid, pos, i))
+            insert(code, format('r.ov[%d].dval = a%d',
+                                pos, i))
             pos = pos + 1
         elseif field == 'string' or field == 'bytes' then
-            insert(init, format([[
-r.ot[%d] = %d; r.ov[%d].xlen = #a%d; r.ov[%d].xoff = 0xffffffff]],
-                                pos, service_types[field].typeid, pos, i, pos))
-            insert(init, format('r.ov[%d].p = ffi_cast("void *", a%d)', pos+1, i))
+            insert(code, format([[
+r.ov[%d].xlen = #a%d; r.ov[%d].xoff = 0xffffffff
+r.ov[%d].p = ffi_cast("void *", a%d)]],
+                                pos, i, pos, pos+1, i))
             pos = pos + 2
         else
             assert(false)
         end
     end
-    -- Buf has space for 128 items, but if more are to be written,
-    -- CHECKOBUF is needed
-    if pos > 127 then error('Too many service fields', 0) end
-    insert(init, 'v0 = '..pos)
-    il.emit_lua_func(il_code[1], res, {
-        func_decl = format('local function flatten(data%s)', param_list(n)),
-        func_locals = 'local r, v0, v1',
-        conversion_init = concat(init, '\n'),
-        conversion_complete = 'v0 = encode_proc(r, v0)',
-        func_return = 'return v0'
-    })
+    return code
 end
 
-local function gen_lua_unflatten(width, service_fields, il, il_code, res)
-    local n = #service_fields
-    local init = {
-        'r = rt_regs; v0 = 0; v1 = 0',
-        'decode_proc(r, data)',
-        'r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool'
-    }
-    local vcode = {
-        il.isarray(1, 0),
-        il.lenis(1, 0, width + n)
-    }
-    for i = 1, n do
-        local field = service_fields[i]
-        insert(vcode, il[service_types[field].check](1, i))
-    end
-    insert(vcode, il.move(1, 1, n + 1))
-    il.append_lua_code(vcode, init)
-
-    local complete = {}
-    for i = 1, n do
-        local field = service_fields[i]
+local function gen_fetch_service_fields(service_fields)
+    local code = {}
+    for i, field in ipairs(service_fields) do
         if field == 'boolean' then
-            insert(complete, format('x%d = r.t[%d] == 3', i, i))
+            insert(code, format('x%d = r.t[%d] == 3', i, i))
         elseif field == 'int' then
-            insert(complete, format('x%d = tonumber(r.v[%d].ival)', i, i))
+            insert(code, format('x%d = tonumber(r.v[%d].ival)', i, i))
         elseif field == 'long' then
-            insert(complete, format('x%d = r.v[%d].ival', i, i))
+            insert(code, format('x%d = r.v[%d].ival', i, i))
         elseif field == 'float' or field == 'double' then
-            insert(complete, format('x%d = r.v[%d].dval', i, i))
+            insert(code, format('x%d = r.v[%d].dval', i, i))
         elseif field == 'string' or field == 'bytes' then
-            insert(complete, format([[
+            insert(code, format([[
 x%d = ffi_string(r.b1-r.v[%d].xoff, r.v[%d].xlen)]], i, i, i))
         else
             assert(false)
         end
     end
-    insert(complete, 'v0 = encode_proc(r, v0)')
-
-    il.emit_lua_func(il_code[2], res, {
-        func_decl = 'local function unflatten(data)',
-        func_locals = 'local r, v0, v1',
-        nlocals_min = n,
-        conversion_init = concat(init, '\n'),
-        conversion_complete = concat(complete, '\n'),
-        func_return = 'return v0' .. param_list(n, 'x'),
-        iter_prolog = 'if _ < 16 then goto continue end' -- artificially bump iter count
-    })
-end
-
-local function gen_lua_xflatten(service_fields, il, il_code, res)
-    local func = il_code[3]
-    il.emit_lua_func(il_code[3], res, {
-        func_decl = 'local function xflatten(data)',
-        func_locals = 'local r, v0, v1',
-        conversion_init = format([[
-r = rt_regs
-decode_proc(r, data)
-r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
-r.k = %d; v0 = 1; v1 = 0]], #service_fields + 1),
-        conversion_complete = [[
-rt_C.schema_rt_xflatten_done(r, v0)
-v0 = encode_proc(r, v0)]],
-        func_return = 'return v0'
-    })
+    return code
 end
 
 local expand_lua_template
-local function gen_lua_code(width_in, width_out, service_fields, il, il_code)
+local function gen_lua_code(args, il, il_code, service_fields)
+    install_lua_backend(il, args)
     expand_lua_template = expand_lua_template or compile_template([=[
 -- v2.1
 local ffi        = require('ffi')
@@ -300,28 +227,76 @@ return linker
     local outter_protos = {}
     local outter_decls = {}
     local inner_decls = {}
+    local n = #service_fields
 
-    gen_lua_flatten(width_out, service_fields, il, il_code, inner_decls)
-    gen_lua_unflatten(width_in, service_fields, il, il_code, inner_decls)
-    gen_lua_xflatten(service_fields, il, il_code, inner_decls)
+    -- flatten
+    local f_complete = gen_store_service_fields(service_fields)
+    insert(f_complete, 'v0 = encode_proc(r, v0)')
 
-    for i = 1, #il_code do
+    il.emit_lua_func(il_code[1], inner_decls, {
+        func_decl = format('local function flatten(data%s)', param_list(n)),
+        func_locals = 'local r, v0, v1',
+        conversion_init = [[
+        r = rt_regs; v1 = 0; v0 = 0
+        decode_proc(r, data)
+        r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool]],
+        conversion_complete = concat(f_complete, '\n'),
+        func_return = 'return v0'
+    })
+
+    -- unflatten
+    local u_complete = gen_fetch_service_fields(service_fields)
+    insert(u_complete, 'v0 = encode_proc(r, v0)')
+
+    il.emit_lua_func(il_code[2], inner_decls, {
+        func_decl = 'local function unflatten(data)',
+        func_locals = 'local r, v0, v1',
+        nlocals_min = n,
+        conversion_init = [[
+r = rt_regs; v0 = 0; v1 = 0
+decode_proc(r, data)
+r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool]],
+        conversion_complete = concat(u_complete, '\n'),
+        func_return = 'return v0' .. param_list(n, 'x'),
+        iter_prolog = 'if _ < 16 then goto continue end' -- artificially bump iter count
+    })
+
+    -- xflatten
+    il.emit_lua_func(il_code[3], inner_decls, {
+        func_decl = 'local function xflatten(data)',
+        func_locals = 'local r, v0, v1',
+        conversion_init = format([[
+r = rt_regs
+decode_proc(r, data)
+r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
+r.k = %d; v0 = 0; v1 = 0]], n + 1),
+        conversion_complete = [[
+rt_C.schema_rt_xflatten_done(r, v0)
+v0 = encode_proc(r, v0)]],
+        func_return = 'return v0'
+    })
+
+    -- helper functions (if any)
+    for i = 4, #il_code do
         local func = il_code[i]
-        local name = func[1].name
-        if name > 3 then -- entry point vs. callable func 
-            insert(outter_protos, format('local f%d', name))
-            il.emit_lua_func(func, outter_decls)
-        end
+        insert(outter_protos, format('local f%d', func[1].name))
+        il.emit_lua_func(func, outter_decls)
     end
 
     return expand_lua_template({
         cpool_data = base64_encode(il.cpool_get_data()),
-        extra_params = param_list(#service_fields),
+        extra_params = param_list(n),
         outter_protos = outter_protos,
         outter_decls = outter_decls,
         inner_decls = inner_decls
     })
 end
+
+-- service fields, a subset of AVRO types
+local valid_service_field = {
+    boolean = 1, int =    1, long =  1, float = 1,
+    double =  1, string = 1, bytes = 1
+}
 
 -- compile(schema)
 -- compile(schema1, schema2)
@@ -341,9 +316,8 @@ local function compile(...)
     if type(service_fields) ~= 'table' then
         error('service_fields: Expecting a table', 0)
     end
-    for i = 1, #service_fields do
-        local field = service_fields[i]
-        if not service_types[field] then
+    for i, field in ipairs(service_fields) do
+        if not valid_service_field[field] then
             error(format('service_fields[%d]: Invalid type: %s', i, field), 0)
         end
     end
@@ -365,7 +339,7 @@ local function compile(...)
     else
         local il = il_create()
         local debug = args.debug
-        local ok, il_code, width_in, width_out = pcall(c_emit_code, il, ir)
+        local ok, il_code = pcall(c_emit_code, il, ir, service_fields)
         if not ok then return false, il_code end
         if not debug then
             il_code = il.optimize(il_code)
@@ -376,8 +350,7 @@ local function compile(...)
             file:write(il.vis(il_code))
             file:close()
         end
-        install_lua_backend(il, args)
-        local lua_code = gen_lua_code(width_in, width_out, service_fields, il, il_code)
+        local lua_code, lua_args = gen_lua_code(args, il, il_code, service_fields)
         local dump_src = args.dump_src
         if dump_src then
             local file = io.open(dump_src, 'w+')
@@ -386,7 +359,7 @@ local function compile(...)
         end
         local module, err     = loadstring(lua_code, '@<schema-jit>')
         if not module then error(err, 0) end
-        local linker          = module()
+        local linker          = module(lua_args)
         local process_msgpack = linker(rt_universal_decode, rt_msgpack_encode)
         local process_lua     = linker(rt_universal_decode, rt_lua_encode)
         return true, {

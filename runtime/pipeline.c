@@ -20,6 +20,7 @@ enum TypeId {
     ArrayValue       = 11,
     MapValue         = 12,
 
+    CDummyValue      = 17, /* skipped */
     CStringValue     = 18,
     CBinValue        = 19,
     CopyCommand      = 20 /* Copy N bytes verbatim from data bank.
@@ -555,6 +556,8 @@ int unparse_msgpack(struct State *state,
         switch (*typeid) {
         default:
             goto error_badcode;
+        case CDummyValue:
+            continue;
         case NilValue:
             *out ++ = 0xc0;
             goto check_buf;
@@ -923,6 +926,8 @@ void schema_rt_xflatten_done(struct State *state,
         case MapValue:
             countdown += state->ov[i].xlen * 2;
             break;
+        case CDummyValue:
+            continue;
         }
         if (--countdown == 0) {
             array_len ++;

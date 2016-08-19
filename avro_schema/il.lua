@@ -204,7 +204,7 @@ end
 local function opcode_ctor_offset_ci(op)
     return function(offset, ci)
         local o = ffi_new('struct schema_il_Opcode')
-        o.op = op; o.offset = offset; o.ci = ci or 42
+        o.op = op; o.offset = offset; o.ci = ci
         return o
     end
 end
@@ -255,8 +255,11 @@ local il_methods = {
     putarrayc   = opcode_ctor_offset_ci(opcode.PUTARRAYC),
     putmapc     = opcode_ctor_offset_ci(opcode.PUTMAPC),
     putnulc = function(offset)
-        local o = opcode_new(opcode.PUTNULC)
-        o.offset = offset
+        local o = opcode_new(opcode.PUTNULC); o.offset = offset
+        return o
+    end,
+    putdummyc = function(offset)
+        local o = opcode_new(opcode.PUTDUMMYC); o.offset = offset
         return o
     end,
     ----------------------------------------------------------------

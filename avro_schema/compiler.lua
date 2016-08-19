@@ -645,7 +645,17 @@ end
 
 -----------------------------------------------------------------------
 
-local function emit_code(il, ir)
+local sf2ilfuncs = {
+    boolean = { is = 'isbool',   put = 'putboolc',   v = false },
+    int =     { is = 'isint',    put = 'putintc',    v = 0 },
+    long =    { is = 'islong',   put = 'putlongc',   v = 0 },
+    float =   { is = 'isfloat',  put = 'putfloatc',  v = 0 },
+    double =  { is = 'isdouble', put = 'putdoublec', v = 0 },
+    string =  { is = 'isstr',    put = 'putstrc',    v = '' },
+    bytes =   { is = 'isbin',    put = 'putbinc',    v = '' }
+}
+
+local function emit_code(il, ir, service_fields)
     ir = unwrap_ir(ir)
     local from, to = ir.from, ir.to
     local funcs = {
@@ -743,6 +753,53 @@ local function emit_code(il, ir)
 
     local x_codegen = new_codegen(il, funcs, do_append_xflatten, ir, funcs[3])
     x_codegen:append_code('cxn', funcs[3], ir, 1, 0, 1)
+
+    -- augment code (see comments)
+
+    -- flatten: output array header + fill in defaults
+    local flatten, _flatten, pos = {
+        il.declfunc(1, 1), il.checkobuf(1 + 2*#service_fields),
+        il.putarrayc(0, #service_fields + (to and abs(schema_width(to)) or 1))
+    }, funcs[1], 1
+    for i, ft in ipairs(service_fields) do
+        local m = sf2ilfuncs[ft]
+        insert(flatten, il[m.put](pos, m.v)); pos = pos + 1
+        if m.v == '' then
+            insert(flatten, il.putdummyc(pos)); pos = pos + 1
+        end
+    end
+    insert(flatten, il.move(0, 0, pos))
+
+    funcs[1] = flatten
+    if _flatten[1].name == 1 then -- not called recursively?
+        _flatten[1] = il.move(0, 0, 0) -- kill function header
+        append(flatten, _flatten)
+    else
+        insert(flatten, il.callfunc(1, 1, 0, _flatten[1].name))
+        insert(funcs, _flatten)
+    end
+
+    -- unflatten: check array header + validate defaults
+    local uflatten, _uflatten = {
+        il.declfunc(2, 1), il.isarray(1, 0),
+        il.lenis(1, 0, #service_fields + (from and abs(schema_width(from)) or 1)),
+    }, funcs[2]
+    for i, ft in ipairs(service_fields) do
+        insert(uflatten, il[sf2ilfuncs[ft].is](1, i))
+    end
+    insert(uflatten, il.move(1, 1, 1 + #service_fields))
+
+    funcs[2] = uflatten
+    if _uflatten[1].name == 2 then -- not called recursively?
+        _uflatten[1] = il.move(0, 0, 0) -- kill function header
+        append(uflatten, _uflatten)
+    else
+        insert(uflatten, il.callfunc(1, 1, 0, _uflatten[1].name))
+        insert(funcs, _uflatten)
+    end
+
+    -- xflatten: skip output cell #0 (array header)
+    insert(funcs[3], 2, il.move(0, 0, 1))
 
     return funcs,
            from and abs(schema_width(from)) or 1,

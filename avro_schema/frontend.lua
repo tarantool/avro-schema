@@ -837,7 +837,7 @@ build_ir = function(from, to, mem, imatch)
         for i, field in ipairs(from.fields) do
             local o = i2o[i]
             if o then
-                local to_field = to.fields[o]
+                local to_field, err = to.fields[o]
                 ptrfrom = i; ptrto = o
                 ir[i], err = build_ir(field.type, to_field.type, mem, imatch)
                 if err then
