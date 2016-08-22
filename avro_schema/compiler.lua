@@ -776,10 +776,13 @@ local function emit_code(il, ir, service_fields)
         append(flatten, _flatten)
     else
         insert(flatten, il.callfunc(1, 1, 0, _flatten[1].name))
-        insert(funcs, _flatten)
+        insert(funcs, 4, _flatten) -- !important to keep rel. func order
+                                   -- optimizer processes funcs in reverse;
+                                   -- so when a call site is considered, callee
+                                   -- was already processed
     end
 
-    -- unflatten: check array header + validate defaults
+    -- unflatten: check array header + validate service fields
     local uflatten, _uflatten = {
         il.declfunc(2, 1), il.isarray(1, 0),
         il.lenis(1, 0, #service_fields + (from and abs(schema_width(from)) or 1)),
@@ -795,15 +798,13 @@ local function emit_code(il, ir, service_fields)
         append(uflatten, _uflatten)
     else
         insert(uflatten, il.callfunc(1, 1, 0, _uflatten[1].name))
-        insert(funcs, _uflatten)
+        insert(funcs, 5, _uflatten) -- !important to  keep rel. func order
     end
 
     -- xflatten: skip output cell #0 (array header)
     insert(funcs[3], 2, il.move(0, 0, 1))
 
-    return funcs,
-           from and abs(schema_width(from)) or 1,
-           to and abs(schema_width(to)) or 1
+    return funcs
 end
 
 -----------------------------------------------------------------------

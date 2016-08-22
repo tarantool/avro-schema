@@ -18,8 +18,11 @@ local function msgpack_helper(data, opts)
     local cmd = format("./msgpack_helper.py %s '%s'", opts or '',
                        base64_encode(data))
     local handle = io.popen(cmd, 'r')
-    local res = handle:read('*a')
-    handle:close()
+    local res = ''
+    if handle then
+        res = handle:read('*a') or ''
+        handle:close()
+    end
     return res
 end
 

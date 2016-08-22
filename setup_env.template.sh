@@ -1,0 +1,4 @@
+export TARANTOOL=${TARANTOOL}
+export LUA_PATH=${LUA_PATH}
+export LUA_CPATH=${LUA_CPATH}
+export TERRA_PATH=${TERRA_PATH}

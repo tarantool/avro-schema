@@ -105,6 +105,8 @@ set(LUA_PATH
 
 set(LUA_CPATH "${CMAKE_BINARY_DIR}/?.so\\;\\;")
 
+set(TERRA_PATH "${CMAKE_SOURCE_DIR}/?.t\\;\\;")
+
 enable_testing()
 
 add_test(NAME ddt_tests
@@ -127,11 +129,17 @@ foreach(test IN LISTS TESTS)
     set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
                  "LUA_CPATH=${LUA_CPATH}")
 
+    set_property(TEST ${test} APPEND PROPERTY ENVIRONMENT
+                 "TERRA_PATH=${TERRA_PATH}")
+
 endforeach()
 
 add_custom_target(check COMMAND ctest -V)
 
 add_custom_target(benchmark
                   COMMAND env "LUA_PATH=${LUA_PATH}"
-                  "LUA_CPATH=${LUA_CPATH}"
+                              "LUA_CPATH=${LUA_CPATH}"
+                              "TERRA_PATH=${TERRA_PATH}"
                           ${TARANTOOL} ${CMAKE_SOURCE_DIR}/benchmark.lua)
+
+configure_file(setup_env.template.sh setup_env.sh)

@@ -292,6 +292,64 @@ v0 = encode_proc(r, v0)]],
     })
 end
 
+local backends = { lua = gen_lua_code }
+
+if pcall(require, 'terra') then
+    local backend_terra = require('avro_schema.backend_terra')
+    local terra_compile = backend_terra.compile
+    local expand_lua_template
+    backends.terra = function(args, il, il_code, service_fields)
+        expand_lua_template = expand_lua_template or compile_template([=[
+-- v2.1 (Terra)
+local ffi         = require('ffi')
+local rt          = require('avro_schema.runtime')
+local ffi_string  = ffi.string
+local ffi_cast    = ffi.cast
+local rt_regs     = rt.regs
+local kernels     = ...
+local k_flatten   = kernels.flatten:getpointer()
+local k_unflatten = kernels.unflatten:getpointer()
+local k_xflatten  = kernels.xflatten:getpointer()
+return function(decode_proc, encode_proc)
+    decode_proc = decode_proc or rt.msgpack_decode
+    encode_proc = encode_proc or rt.msgpack_encode
+    return {
+        flatten = function(data${extra_params})
+            local r, _ = rt_regs, kernels
+            decode_proc(r, data)
+            local n = k_flatten(r)
+            if n == 0 then return false, ffi_string(r.res, r.res_size) end
+            ${store_service_fields}
+            return true, encode_proc(r, n)
+        end,
+        unflatten = function(data)
+            local r, _${extra_locals} = rt_regs, kernels
+            decode_proc(r, data)
+            local n = k_unflatten(r)
+            if n == 0 then return false, ffi_string(r.res, r.res_size) end
+            ${fetch_service_fields}
+            return true, encode_proc(r, n)${extra_locals}
+        end,
+        xflatten = function(data)
+            local r, _ = rt_regs, kernels
+            decode_proc(r, data)
+            local n = k_xflatten(r)
+            if n == 0 then return false, ffi_string(r.res, r.res_size) end
+            return true, encode_proc(r, n)
+        end
+    }
+end
+]=])
+        local n = #service_fields
+        return expand_lua_template({
+            extra_params         = param_list(n),
+            store_service_fields = gen_store_service_fields(service_fields),
+            extra_locals         = param_list(n, 'x'),
+            fetch_service_fields = gen_fetch_service_fields(service_fields)
+        }), terra_compile(args, il, il_code, n)
+    end
+end
+
 -- service fields, a subset of AVRO types
 local valid_service_field = {
     boolean = 1, int =    1, long =  1, float = 1,
@@ -350,7 +408,13 @@ local function compile(...)
             file:write(il.vis(il_code))
             file:close()
         end
-        local lua_code, lua_args = gen_lua_code(args, il, il_code, service_fields)
+        local backend_name = args.backend or
+                             backends['terra'] and 'terra' or 'lua'
+        local backend = backends[backend_name]
+        if not backend then
+            error('Unsupported backend: '..tostring(backend_name))
+        end
+        local lua_code, lua_args = backend(args, il, il_code, service_fields)
         local dump_src = args.dump_src
         if dump_src then
             local file = io.open(dump_src, 'w+')
@@ -368,7 +432,8 @@ local function compile(...)
             xflatten          = process_lua.xflatten,
             flatten_msgpack   = process_msgpack.flatten,
             unflatten_msgpack = process_msgpack.unflatten,
-            xflatten_msgpack  = process_msgpack.xflatten
+            xflatten_msgpack  = process_msgpack.xflatten,
+            _lua_args         = lua_args
         }
     end
 end

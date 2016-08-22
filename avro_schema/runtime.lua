@@ -45,6 +45,7 @@ struct schema_rt_State {
     uint8_t                  *ot;
     struct schema_rt_Value   *ov;
     int32_t                   k;
+    intptr_t                  jmp_buf[8];
 };
 
 int
@@ -63,8 +64,9 @@ schema_rt_buf_grow(struct schema_rt_State *state,
 int schema_rt_extract_location(struct schema_rt_State *state,
                                intptr_t                pos);
 
-void schema_rt_xflatten_done(struct schema_rt_State *state,
-                             size_t len);
+size_t
+schema_rt_xflatten_done(struct schema_rt_State *state,
+                        size_t len);
 
 ]]
 

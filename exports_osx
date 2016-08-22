@@ -20,3 +20,11 @@ _phf_destroy
 _phf_hash_uint32_band_raw8
 _phf_hash_uint32_band_raw16
 _phf_hash_uint32_band_raw32
+
+_schema_rt_setjmp;
+_schema_rt_err_type_eh;
+_schema_rt_err_length_eh;
+_schema_rt_err_missing_eh;
+_schema_rt_err_duplicate_eh;
+_schema_rt_err_value_eh;
+_schema_rt_buf_grow_eh;

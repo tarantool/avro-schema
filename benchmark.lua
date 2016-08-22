@@ -88,7 +88,7 @@ local t = clock.bench(function()
 end)[1]
 print(string.format('  flatten: %d RPS', math.floor(n/t)))
 
-local _, data = flatten(data)
+local _, data = flatten(data); assert(_)
 local t = clock.bench(function()
     for i = 1,n do
         unflatten(data)

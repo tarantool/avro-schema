@@ -25,5 +25,13 @@ global:
     phf_hash_uint32_band_raw8;
     phf_hash_uint32_band_raw16;
     phf_hash_uint32_band_raw32;
+
+    schema_rt_setjmp;
+    schema_rt_err_type_eh;
+    schema_rt_err_length_eh;
+    schema_rt_err_missing_eh;
+    schema_rt_err_duplicate_eh;
+    schema_rt_err_value_eh;
+    schema_rt_buf_grow_eh;
 local: *;
 };

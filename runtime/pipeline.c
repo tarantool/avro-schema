@@ -4,6 +4,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 enum TypeId {
     NilValue         = 1,
@@ -28,6 +29,26 @@ enum TypeId {
                            * strings during unflatten.
                            */
 };
+
+static const char *
+typename(int t)
+{
+    switch(t)
+    {
+    default:          return "";
+    case NilValue:    return "NIL";
+    case FalseValue:  return "FALSE";
+    case TrueValue:   return "TRUE";
+    case LongValue:   return "LONG";
+    case UlongValue:  return "ULONG";
+    case FloatValue:  return "FLOAT";
+    case DoubleValue: return "DOUBLE";
+    case StringValue: return "STR";
+    case BinValue:    return "BIN";
+    case ArrayValue:  return "ARRAY";
+    case MapValue:    return "MAP";
+    }
+}
 
 struct Value {
     union {
@@ -71,6 +92,8 @@ struct State {
     struct Value      *v;        // .......................
     uint8_t           *ot;       // consumed by unparse_msgpack
     struct Value      *ov;       // ...........................
+    int32_t            k;
+    intptr_t           jmp_buf[8];
 };
 
 #if !(C_HAVE_BSWAP16)
@@ -150,19 +173,32 @@ static int buf_grow_tv(uint8_t **t,
     return buf_grow(t, capacity, new_capacity);
 }
 
-static int set_error(struct State *state,
-                     const char *msg)
+static int
+res_reserve(struct State *state, size_t size)
 {
-    size_t len = strlen(msg);
-    if (state->res_capacity < len &&
-        buf_grow(&state->res, &state->res_capacity, next_capacity(len)) != 0) {
+    if (state->res_capacity < state->res_size + size)
+        return buf_grow(&state->res, &state->res_capacity,
+                        next_capacity(state->res_size + size));
+    return 0;
+}
 
-        state->res_size = 0;
-        return -1;
+static void
+res_append_fmt(struct State *state, const char *fmt, ...)
+    __attribute__((format(__printf__, 2, 3)));
+
+static void
+res_append_fmt(struct State *state, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int len = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (len > 0 && res_reserve(state, len + 1) == 0) {
+        va_start(ap, fmt);
+        vsnprintf((char*)(state->res + state->res_size), len + 1, fmt, ap);
+        state->res_size += len;
+        va_end(ap);
     }
-    state->res_size = len;
-    memcpy(state->res, msg, len);
-    return -1; /* always returns -1, see invocation */
 }
 
 int parse_msgpack(struct State *state,
@@ -527,11 +563,18 @@ done:
     return 0;
 
 error_underflow:
-    return set_error(state, "Truncated data");
+    state->res_size = 0;
+    res_append_fmt(state, "Truncated data");
+    return -1;
 error_c1:
-    return set_error(state, "Invalid data");
+    state->res_size = 0;
+    res_append_fmt(state, "Invalid data: 0xc1 at %+"PRIdMAX,
+                   (intmax_t)(value - state->v));
+    return -1;
 error_alloc:
-    return set_error(state, "Out of memory");
+    state->res_size = 0;
+    res_append_fmt(state, "Out of memory");
+    return -1;
 }
 
 int unparse_msgpack(struct State *state,
@@ -827,9 +870,14 @@ copy_data:
     return 0;
 
 error_alloc:
-    return set_error(state, "Out of memory");
+    state->res_size = 0;
+    res_append_fmt(state, "Out of memory");
+    return -1;
 error_badcode:
-    return set_error(state, "Internal error: unknown code");
+    state->res_size = 0;
+    res_append_fmt(state, "Internal error: unknown code %d at %+"PRIdMAX,
+                   *typeid, typeid - state->ot);
+    return -1;
 }
 
 int schema_rt_buf_grow(struct State *state,
@@ -890,10 +938,7 @@ int schema_rt_extract_location(struct State *state,
             item_size = sprintf(buf, "%"PRIu32, counter);
         }
         /* maintain invariant: there's space for sep in buf */
-        if (state->res_capacity < state->res_size + item_size + 2 &&
-            buf_grow(&state->res, &state->res_capacity,
-                     next_capacity(state->res_size + item_size + 2)) != 0) {
-
+        if (res_reserve(state, item_size + 2) != 0) {
             /* allocation failure (unlikely); discard incomplete message */
             state->res_size = 0;
             return 0;
@@ -913,8 +958,8 @@ int schema_rt_extract_location(struct State *state,
     }
 }
 
-void schema_rt_xflatten_done(struct State *state,
-                             size_t len)
+size_t schema_rt_xflatten_done(struct State *state,
+                               size_t len)
 {
     uint32_t array_len = 0, countdown = 1;
     size_t i;
@@ -936,4 +981,104 @@ void schema_rt_xflatten_done(struct State *state,
     }
     state->ot[0] = ArrayValue;
     state->ov[0].xlen = array_len;
+    return len;
+}
+
+/* eh variants, error reporting (terra backend) */
+
+void schema_rt_longjmp(intptr_t*) __attribute__((noreturn));
+
+
+static const char *
+op2typename(int op)
+{
+    switch(op)
+    {
+    default:   return "";
+    case 0xec: return "BOOL";
+    case 0xed: return "INT";
+    case 0xee: return "FLOAT";
+    case 0xef: return "DOUBLE";
+    case 0xf0: return "LONG";
+    case 0xf1: return "STR";
+    case 0xf2: return "BIN";
+    case 0xf3: return "ARRAY";
+    case 0xf4: return "MAP";
+    case 0xf5: return "NIL";
+    case 0xf6: return "NIL or MAP";
+    }
+}
+
+void schema_rt_err_type_eh(struct State *state, uint32_t pos, int op)
+{
+    int is_key = schema_rt_extract_location(state, pos);
+    if (is_key) {
+        res_append_fmt(state, "Non-string key");
+    } else if (op == 0xed && state->t[pos] == LongValue) {
+        res_append_fmt(state, "Value exceeds INT range: %"PRId64"LL",
+                       state->v[pos].ival);
+    } else {
+        res_append_fmt(state, "Expecting %s, encountered %s",
+                       op2typename(op), typename(state->t[pos]));
+    }
+    schema_rt_longjmp(state->jmp_buf);
+}
+
+void schema_rt_err_length_eh(struct State *state, uint32_t pos, uint32_t elen)
+{
+    schema_rt_extract_location(state, pos);
+    res_append_fmt(state,
+               "Expecting %s of length %"PRId32". "
+               "Encountered %s of length %"PRId32".",
+               typename(state->t[pos]), elen,
+               typename(state->t[pos]), state->v[pos].xlen);
+    schema_rt_longjmp(state->jmp_buf);
+}
+
+void schema_rt_err_missing_eh(struct State *state, uint32_t pos, const char *name)
+{
+    schema_rt_extract_location(state, pos);
+    res_append_fmt(state, "Key missing: \"%s\"", name);
+    schema_rt_longjmp(state->jmp_buf);
+}
+
+void schema_rt_err_duplicate_eh(struct State *state, uint32_t pos)
+{
+    schema_rt_extract_location(state, pos);
+    res_append_fmt(state, "Duplicate key");
+    schema_rt_longjmp(state->jmp_buf);
+}
+
+void schema_rt_err_value_eh(struct State *state, uint32_t pos, int is_ver_err)
+{
+    int is_key = schema_rt_extract_location(state, pos);
+    const char *tag = is_ver_err ? " (schema versioning)" : "";
+    if (is_key && state->t[pos] == StringValue) {
+        res_append_fmt(state, "Unknown key: \"%.*s\"%s",
+                   (int)state->v[pos].xlen,
+                   state->b1 - state->v[pos].xoff, tag);
+    } else {
+        res_append_fmt(state, "Bad value: ");
+        if (state->t[pos] == LongValue)
+            res_append_fmt(state, "%"PRId64, state->v[pos].ival);
+        else if (state->t[pos] == StringValue)
+            res_append_fmt(state, "\"%.*s\"",
+                       (int)state->v[pos].xlen,
+                       state->b1 - state->v[pos].xoff);
+        else
+            res_append_fmt(state, "%s", typename(state->t[pos]));
+        res_append_fmt(state, "%s", tag);
+    }
+    schema_rt_longjmp(state->jmp_buf);
+}
+
+void schema_rt_buf_grow_eh(struct State *state, size_t min_capacity)
+{
+    if (min_capacity > state->ot_capacity &&
+        buf_grow_tv(&state->ot, &state->ov, &state->ot_capacity,
+                    next_capacity(min_capacity)) != 0) {
+        state->res_size = 0;
+        res_append_fmt(state, "Out of memory");
+        schema_rt_longjmp(state->jmp_buf);
+    }
 }
