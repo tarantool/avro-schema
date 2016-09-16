@@ -72,10 +72,59 @@ local schema_handle_mt = {
     __serialize = schema_to_string
 }
 
-local function create(raw_schema)
+local augment_defaults
+augment_defaults = function(schema, visited)
+    if type(schema) == 'string' or visited[schema] then return end
+    visited[schema] = true
+    local t = schema.type
+    if t == nil then
+        for _, branch in ipairs(schema) do
+            augment_defaults(branch, visited)
+        end
+    elseif t == 'array' then
+        augment_defaults(schema.items, visited)
+    elseif t == 'map' then
+        augment_defaults(schema.values, visited)
+    elseif t == 'record' then
+        for _, field in ipairs(schema.fields) do
+            local fieldt = field.type
+            augment_defaults(fieldt, visited)
+            if field.default == nil then
+                local fieldtk = fieldt.type or fieldt
+                if type(fieldtk) == 'table' then
+                    fieldt = fieldt[1]
+                    fieldtk =  fieldt.type or fieldt
+                end
+                if fieldtk == 'boolean' then
+                    field.default = false
+                elseif fieldtk == 'int' or fieldtk == 'long' or
+                       fieldtk == 'float' or fieldtk == 'double' then
+                    field.default = 0
+                elseif fieldtk == 'bytes' or fieldtk == 'string' then
+                    field.default = ''
+                elseif fieldtk == 'array' or fieldtk == 'map' then
+                    field.default = {}
+                elseif fieldtk == 'enum' then
+                    field.default = fieldt.symbols[1]
+                elseif fieldtk == 'record' then
+                    local dr = {}
+                    for k, v in pairs(fieldt.fields) do
+                        dr[k] = v.default
+                    end
+                    field.default = dr
+                end
+            end
+        end
+    end
+end
+
+local function create(raw_schema, options)
     local ok, schema = pcall(f_create_schema, raw_schema)
     if not ok then
         return false, schema
+    end
+    if type(options) == 'table' and options.defaults == 'auto' then
+        augment_defaults(schema, {})
     end
     local schema_handle = setmetatable({}, schema_handle_mt)
     schema_by_handle[schema_handle] = schema
