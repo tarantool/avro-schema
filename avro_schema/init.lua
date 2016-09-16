@@ -108,8 +108,8 @@ augment_defaults = function(schema, visited)
                     field.default = fieldt.symbols[1]
                 elseif fieldtk == 'record' then
                     local dr = {}
-                    for k, v in pairs(fieldt.fields) do
-                        dr[k] = v.default
+                    for _, xfield in ipairs(fieldt.fields) do
+                        dr[xfield.name] = assert(xfield.default)
                     end
                     field.default = dr
                 end
