@@ -109,7 +109,7 @@ augment_defaults = function(schema, visited)
                 elseif fieldtk == 'record' then
                     local dr = {}
                     for _, xfield in ipairs(fieldt.fields) do
-                        dr[xfield.name] = assert(xfield.default)
+                        dr[xfield.name] = xfield.default
                     end
                     field.default = dr
                 end
@@ -502,7 +502,7 @@ export_helper = function(node, already_built)
         already_built[node] = true
         local res = {}
         for k, v in pairs(node) do
-            res[k] = export_helper(v, already_built)
+            res[k] = k == 'default' and v or export_helper(v, already_built)
         end
         return res
     end
