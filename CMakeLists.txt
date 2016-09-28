@@ -129,7 +129,7 @@ foreach(test IN LISTS TESTS)
 
 endforeach()
 
-add_custom_target(check COMMAND ctest -V)
+add_custom_target(check COMMAND sh -c 'ctest -V || ctest || ctest')
 
 add_custom_target(benchmark
                   COMMAND env "LUA_PATH=${LUA_PATH}"
