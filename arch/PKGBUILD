@@ -8,13 +8,7 @@ pkgdesc='Apache Avro schema tools for Tarantool'
 arch=(i686 x86_64)
 url='http://github.com/tarantool/avro-schema'
 license=(BSD)
-#depends=(readline ncurses zlib libyaml)
 makedepends=(cmake tarantool)
-#checkdepends=(python2-daemon python2-gevent python2-tarantool)
-#conflicts=(tarantool)
-#provides=(tarantool)
-#replaces=(tarantool)
-#install=tarantool.install
 source=(https://github.com/tarantool/$_pkgname/archive/$pkgver.tar.gz)
 
 build() {
@@ -25,12 +19,6 @@ build() {
     -DCMAKE_INSTALL_BINDIR=/usr/bin \
     -DCMAKE_INSTALL_SYSCONFDIR=/etc \
     -DCMAKE_INSTALL_LIBDIR=/usr/lib \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DENABLE_BUNDLED_LIBYAML:BOOL=OFF \
-    -DENABLE_BACKTRACE:BOOL=ON \
-    -DWITH_SYSTEMD:BOOL=ON \
-    -DENABLE_DIST:BOOL=ON \
     .
 
   make
