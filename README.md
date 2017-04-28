@@ -10,7 +10,7 @@ Notable features:
 avro_schema = require('avro_schema')
 ```
 
-##Creating a Schema
+## Creating a Schema
 ```lua
 ok, schema = avro_schema.create {
     type = "record",
@@ -23,7 +23,7 @@ ok, schema = avro_schema.create {
 ```
 Creates a schema object (`ok == true`). If there was a syntax error, returns `false` and the error message.
 
-##Validating Data by a Schema
+## Validating Data by a Schema
 ```lua
 ok, normalized_data_copy = avro_schema.validate(schema, { bar = "Hello, world!" })
 ```
@@ -32,7 +32,7 @@ Returns `true` if the data was valid. If not, returns `false` and the error mess
 The function creates a normalized copy of the data. Normalization implies
 filling in default values for missing fields.
 
-##Checking if Schemas are Compatible
+## Checking if Schemas are Compatible
 To facilitate data evolution Avro defines certain schema mapping rules.
 If schemas `A` and `B` are compatible, one can convert data from `A` to `B`. 
 ```lua
@@ -53,7 +53,7 @@ Unfortunately, downgrading doesn't work since in `A` the record type `Apple` has
 To make it work we implement `downgrade` mode. In the downgrade mode, name mapping rules consider
 aliases in the source schema (while ignoring aliases in the target schema).
 
-##Compiling Schemas
+## Compiling Schemas
 Compiling a schema creates optimized data conversion routines (runtime code generation).
 ```lua
 ok, methods = avro_schema.compile(schema)
@@ -71,7 +71,7 @@ ok, methods = avro_schema.compile({schema1, ... schemaN})
 
 There is the third option: let `compile` build routines that are fast yet produce the correct results.
 
-##Compile Options
+## Compile Options
 A few options affecting compilation are recognized.
 
 Enabling `downgrade` mode (see `avro_schema.are_compatible` for details):
@@ -89,14 +89,14 @@ Troubleshooting codegen issues:
 avro_schema.compile({schema1, schema2, debug = true, dump_il = "output.il"})
 ```
 
-##Generated Routines
+## Generated Routines
 `Compile` produces the following routines (returned in a Lua table):
   * `flatten`
   * `unflatten`
   * `flatten_msgpack`
   * `unflatten_msgpack`
   
-##Miscelania
+## Miscelania
 Checking if an object is a schema:
 ```lua
 avro_schema.is(object)
