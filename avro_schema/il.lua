@@ -594,7 +594,7 @@ local function vmergebranches(il, bscopes, bblocks)
                     skip[vid] = true
                     diverged[vid] = nil
                     maybediverged[vid] = nil
-                    vcreate(parent, vid).isdead = 1 
+                    vcreate(parent, vid).isdead = 1
                 elseif not vother then
                     maybediverged[vid] = vinfo
                 elseif vother.raw ~= vinfo.raw then
@@ -784,7 +784,9 @@ voptimizeblock = function(il, scope, block, res)
                 end
                 if v0info.raw ~= loop_v0info.raw then
                     new_cob_0gen_hack = il.id() -- ex: record( array, int )
-                    vcreate(scope, 0).gen = new_cob_0gen_hack
+                    local new_v0info = vcreate(scope, 0)
+                    new_v0info.gen = new_cob_0gen_hack
+                    new_v0info.inc = v0info.inc
                 end
                 -- finally, merge loop
                 vmergeloop(il, lscope, lblock)
