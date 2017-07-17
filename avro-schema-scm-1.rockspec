@@ -13,6 +13,11 @@ dependencies = {
     'lua >= 5.1'
 }
 build = {
-    type = 'cmake',
+    type = 'cmake';
+    variables = {
+        CMAKE_BUILD_TYPE="RelWithDebInfo";
+        TARANTOOL_INSTALL_LIBDIR="$(LIBDIR)";
+        TARANTOOL_INSTALL_LUADIR="$(LUADIR)";
+    };
 }
 -- vim: syntax=lua
