@@ -344,7 +344,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         strswitch[i + 1] = branch
         if not i2o[i] then -- missing from target schema
             il:append_code('cn', branch, ir[i], loop_var, 1, loop_var)
-            if field.default == nil then
+            if type(field.default) == 'nil' then
                 -- mandatory field, add a check
                 insert(code_section2,
                        il.isset(v_base + i, ipv, ipo, field.name))
@@ -375,7 +375,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 il:append_code('cxn', branch, field_ir, loop_var, 1, loop_var)
                 insert(branch, il.move(0, 0, -next_offset))
             end
-            if field_default ~= nil then
+            if type(field_default) ~= 'nil' then
                 insert(code, il.move(0, 0, offset))
                 append_put_field_values(il, code, field.type, field.default)
                 insert(code, il.move(0, 0, -next_offset))
@@ -386,7 +386,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         elseif i then -- and not next_offset: v/offset or v/length, append
             local branch = strswitch[i + 1]
             il:append_code('cn', branch, field_ir, loop_var, 1, loop_var)
-            if field_default ~= nil then
+            if type(field_default) ~= 'nil' then
                 local t_branch = { il.ibranch(1) }
                 il:append_code('x', t_branch, field_ir, v_base + i, 0)
                 local f_branch = { il.ibranch(0) }

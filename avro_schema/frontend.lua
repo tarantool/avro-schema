@@ -294,7 +294,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                                      concat(path, '/')), 0)
                     end
                     local xdefault = xfield.default
-                    if xdefault ~= nil then
+                    if type(xdefault) ~= 'nil' then
                         local ok, res = copy_field_default(field.type, xdefault)
                         if not ok then
                             copy_schema_error('Default value not valid (%s)', res)
@@ -634,7 +634,7 @@ copy_data = function(schema, data, visited)
             ptr = nil
             for _,field in ipairs(schema.fields) do
                 if     data[field.name] then
-                elseif field.default ~= nil then
+                elseif type(field.default) ~= 'nil' then
                     res[field.name] = deepcopy(field.default)
                 else
                     error(format('@Field %s missing', field.name), 0)
