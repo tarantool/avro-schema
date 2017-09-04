@@ -66,18 +66,6 @@ local floor = math.floor
 local clear = require('table.clear')
 local next, type = next, type
 
-local function deepcopy(v)
-    if type(v) == 'table' then
-        res = {}
-        for k, v in pairs(v) do
-            res[k] = deepcopy(v)
-        end
-        return res
-    else
-        return v
-    end
-end
-
 -- primitive types
 local primitive_type = {
     null  = 'NUL', boolean = 'BOOL', int   = 'INT', long   = 'LONG',
@@ -635,7 +623,7 @@ copy_data = function(schema, data, visited)
             for _,field in ipairs(schema.fields) do
                 if     data[field.name] then
                 elseif type(field.default) ~= 'nil' then
-                    res[field.name] = deepcopy(field.default)
+                    res[field.name] = table.deepcopy(field.default)
                 else
                     error(format('@Field %s missing', field.name), 0)
                 end

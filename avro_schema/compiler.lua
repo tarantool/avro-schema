@@ -309,7 +309,7 @@ append_put_field_values = function(il, code, field_type, field_val)
                                     field.type, field_val[field.name])
         end
     elseif is_union(field_type) then
-        local branch_no, branch_v = split_union_value(field_type, field_value)
+        local branch_no, branch_v = split_union_value(field_type, field_val)
         extend(code,
                il.checkobuf(1), il.putintc(0, branch_no - 1), il.move(0, 0, 1))
         append_put_value(il, 'flat', code, field_type[branch_no], branch_v)
