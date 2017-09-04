@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(34)
+test:plan(42)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -16,9 +16,13 @@ local int = res[2]
 
 -- nested records, union, reference to earlier declared type
 local foobar_decl = {
-    name = 'FooBar', type = 'record', fields = {
+    name = 'FooBar',
+    type = 'record',
+    fields = {
         { name = 'A', type = {
-             name = 'nested', type = 'record', fields = {
+             name = 'nested',
+             type = 'record',
+             fields = {
                 { name = 'X', type = 'double' },
                 { name = 'Y', type = 'double' }
              }
@@ -31,6 +35,42 @@ local foobar_decl = {
 local res = {schema.create(foobar_decl)}
 test:is_deeply(res, {true, {}}, 'schema handle is a table (2)')
 local foobar = res[2]
+
+local ok, sch = schema.create({
+    type = "record",
+    name = "test",
+    fields = {
+      { name = "foo", type = {"int", "null"}, default = msgpack.NULL },
+    }
+})
+
+test:ok(not ok, 'default non-NULL compiles not ok')
+test:diag("error: %s", json.encode(sch))
+
+local ok, sch = schema.create({
+    type = "record",
+    name = "test",
+    fields = {
+      { name = "bar", type = "null", default = msgpack.NULL },
+      { name = "foo", type = {"null", "int"}, default = msgpack.NULL },
+    }
+})
+
+test:ok(ok, 'default NULL compiles ok')
+
+local ok, err = schema.validate(sch, {})
+test:diag('output: %s', json.encode(err))
+if test:ok(ok, 'default NULL validates ok') then
+    test:is(err.bar, msgpack.NULL, 'checking default value')
+    test:is(err.foo, msgpack.NULL, 'checking default value')
+end
+
+local ok, err = schema.validate(sch, { foo = { int  = 5 }})
+test:diag('output: %s', json.encode(err))
+if test:ok(ok, 'default NULL validates ok') then
+    test:is(err.bar, msgpack.NULL, 'checking default value')
+    test:is(err.foo.int, 5, 'checking non-default value')
+end
 
 -- XXX expects a schema
 test:is_deeply({pcall(schema.are_compatible, int, 42)},

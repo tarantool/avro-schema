@@ -89,7 +89,7 @@ augment_defaults = function(schema, visited)
         for _, field in ipairs(schema.fields) do
             local fieldt = field.type
             augment_defaults(fieldt, visited)
-            if field.default == nil then
+            if type(field.default) == 'nil' then
                 local fieldtk = fieldt.type or fieldt
                 if type(fieldtk) == 'table' then
                     fieldt = fieldt[1]
