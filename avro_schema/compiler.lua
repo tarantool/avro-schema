@@ -687,7 +687,40 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         end
         il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
     elseif ir_type == '__RECORD__' then
-        return do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+        if ir.from.nullable then
+            -- If record was marked nullable: emit following code fragment:
+            -- {$0 - current slot in the output buffer (ob)}
+            -- {(ipv, ipo) - roughly, current  value in the input buffer (ib)}
+            --
+            -- make sure that ob has a free slot, allocate new otherwise
+            -- if current value in ib is 0 then
+            --   put NULL into output buffer
+            --   promote ob by 1
+            --   promote ib by 2 // need to skip type tag and NULL value slots
+            -- else
+            --   promote ib by 1 // skip tag slot
+            --   emit code to perform standard record contents unflattening
+            -- end
+
+            -- TODO: before intswitch: issue ISINT insn to make sure that value
+            -- is actually integer.
+            local dest = { il.ibranch(1),
+                           il.move(1, 1, 1) }
+
+            extend(code, il.checkobuf(1))
+            insert(code, {
+                       il.intswitch(ipv, ipo),
+                       { il.ibranch(0),
+                         il.putnulc(0),
+                         il.move(1, 1, 2),
+                         il.move(0, 0, 1)
+                       },
+                       dest })
+
+            return do_append_record_unflatten(il, mode, dest, ir, ipv, ipo, ripv)
+        else
+            return do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+        end
     elseif ir_type == '__UNION__' then
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     else -- defer to basic codegen
