@@ -56,3 +56,23 @@ t {
     schema = '"boolean"',
     func = 'flatten', input = '{"key": 42}'
 }
+
+t {
+    schema = '"boolean*"',
+    func = 'flatten', input = 'true', output = '[1, true]'
+}
+
+t {
+    schema = '"boolean*"',
+    func = 'flatten', input = 'null', output = '[0, null]'
+}
+
+t {
+    schema = '"boolean*"',
+    func = 'unflatten', input = '[1, false]', output = 'false'
+}
+
+t {
+    schema = '"boolean*"',
+    func = 'unflatten', input = '[0, null]', output = 'null'
+}

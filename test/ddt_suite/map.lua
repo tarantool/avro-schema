@@ -16,6 +16,11 @@ local string_map_map = [[{
     }
 }]]
 
+local int_map_nullable = [[{
+  "type": "map*",
+  "values": "int"
+}]]
+
 -----------------------------------------------------------------------
 
 t {
@@ -174,4 +179,32 @@ t {
     error = 'e/f: Expecting STR, encountered LONG',
     schema = string_map_map,
     func = 'flatten', input = '{"a":{}, "b":{}, "c":{}, "d":{}, "e":{"f": 1}}'
+}
+
+t {
+    schema = int_map_nullable,
+    func = 'flatten',
+    input  =  '{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}',
+    output = '[1, {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}]'
+}
+
+t {
+    schema = int_map_nullable,
+    func = 'flatten',
+    input  =  'null',
+    output = '[0, null]'
+}
+
+t {
+    schema = int_map_nullable,
+    func = 'unflatten',
+    input = '[1, {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}]',
+    output  =  '{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}'
+}
+
+t {
+    schema = int_map_nullable,
+    func = 'unflatten',
+    input = '[0, null]',
+    output  =  'null'
 }

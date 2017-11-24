@@ -57,3 +57,23 @@ t {
     schema = '"long"',
     func = 'flatten', input = '{"key": 42}' 
 }
+
+t {
+    schema = '"long*"',
+    func = 'flatten', input = '42', output = '[1, 42]'
+}
+
+t {
+    schema = '"long*"',
+    func = 'flatten', input = 'null', output = '[0, null]'
+}
+
+t {
+    schema = '"long*"',
+    func = 'unflatten', input = '[1, 42]', output = '42'
+}
+
+t {
+    schema = '"long*"',
+    func = 'unflatten', input = '[0, null]', output = 'null'
+}

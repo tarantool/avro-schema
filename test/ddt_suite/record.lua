@@ -22,6 +22,27 @@ local person_default = [[{
     ]
 }]]
 
+local record_nullable = [[ {
+    "name": "outer", "type": "record", "fields": [
+        { "name": "r1", "type": {
+                          "name": "tr1",
+                          "type": "record", "fields": [
+                            {"name": "v1", "type": "int"} ,
+                            {"name": "v2", "type": "string"}
+                          ] } },
+        { "name": "r2", "type": "tr1*"},
+        { "name": "dummy", "type": {
+                             "name": "td", "type": "array", "items": "int" }
+                           },
+        { "name": "r3", "type": {
+                          "name": "tr2",
+                          "type": "record*", "fields": [
+                            {"name": "v1", "type": "string"} ,
+                            {"name": "v2", "type": "int"}
+                          ] } },
+       { "name": "r4", "type": "tr2" }
+    ] } ]]
+
 local schemas = { person, person_default }
 
 -----------------------------------------------------------------------
@@ -399,4 +420,76 @@ t {
         ]
     }]],
     func = 'flatten', input = '{}', output = '[{}]'
+}
+
+t {
+    schema = record_nullable,
+    func = 'flatten',  input = [[{
+                                    "r1": {"v1": 1, "v2": "hello" },
+                                    "r2": {"v1": 2, "v2": "hello2" },
+                                    "dummy": [1, 2, 3],
+                                    "r3": {"v1": "world", "v2": 2},
+                                    "r4": {"v1": "WAT", "v2": 3}
+                               }]],
+
+    output = '[1, "hello", 1, [2, "hello2"], [1, 2, 3], 1, ["world", 2], "WAT", 3]'
+}
+
+t {
+    schema = record_nullable,
+    func = 'flatten',  input = [[{
+                                    "r1": {"v1": 1, "v2": "hello" },
+                                    "r2": null,
+                                    "dummy": [1, 2, 3],
+                                    "r3": null,
+                                    "r4": {"v1": "WAT", "v2": 3}
+                               }]],
+
+    output = '[1, "hello", 0, null, [1, 2, 3], 0, null, "WAT", 3]'
+}
+
+t {
+    error = 'r1: Expecting MAP, encountered NIL',
+    schema = record_nullable,
+    func = 'flatten',  input = [[{
+                                    "r1": null,
+                                    "r2": {"v1": 1, "v2": "hello" },
+                                    "dummy": [1, 2, 3],
+                                    "r3": null,
+                                    "r4": {"v1": "WAT", "v2": 3}
+                               }]],
+}
+
+t {
+    error = 'r4: Expecting MAP, encountered NIL',
+    schema = record_nullable,
+    func = 'flatten',  input = [[{
+                                    "r1": {"v1": 1, "v2": "hello" },
+                                    "r2": {"v1": 2, "v2": "hello2" },
+                                    "dummy": [1, 2, 3],
+                                    "r3": {"v1": "WAT", "v2": 3},
+                                    "r4": null
+                               }]],
+}
+
+t {
+    schema = record_nullable,
+    func = 'unflatten',
+    input = '[1, "hello", 1, [2, "hello2"], [1, 2, 3], 1, ["world", 2], "WAT", 3]',
+    output= [[{"r1": {"v1": 1, "v2": "hello" },
+              "r2": {"v1": 2, "v2": "hello2" },
+              "dummy": [1, 2, 3],
+              "r3": {"v1": "world", "v2": 2},
+              "r4": {"v1": "WAT", "v2": 3}}]]
+}
+
+t {
+    schema = record_nullable,
+    func = 'unflatten',
+    input = '[1, "hello", 0, null, [1, 2, 3], 0, null, "WAT", 3]',
+    output= [[{"r1": {"v1": 1, "v2": "hello" },
+              "r2": null,
+              "dummy": [1, 2, 3],
+              "r3": null,
+              "r4": {"v1": "WAT", "v2": 3}}]]
 }

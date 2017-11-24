@@ -1,4 +1,4 @@
--- flatten/unflatten for the schemas below, + most common validation errors 
+-- flatten/unflatten for the schemas below, + most common validation errors
 
 local schema = {
     '["int", "string", "double"]',

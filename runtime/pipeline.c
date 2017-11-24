@@ -176,6 +176,14 @@ int parse_msgpack(struct State *state,
     uint32_t      * restrict stack, *stack_max, *stack_buf;
     uint32_t       len;
 
+#if 0
+    /* Debug  */
+    fprintf(stderr, "parse_msgpack; s: ");
+    for (int i = 0; i < ms; ++i)
+        fprintf(stderr, "%02X ", mi[i]);
+    fprintf(stderr, "\b\n");
+#endif
+
     /* Initialising ptrs with NULL-s is correct, but that would
      * harm branch prediction accuracy. Not checking the buf capacity,
      * because that would hurt performance (there's enough capacity,
@@ -537,6 +545,7 @@ error_alloc:
 int unparse_msgpack(struct State *state,
                     size_t        nitems)
 {
+    //nitems--;
     const uint8_t      * restrict typeid = state->ot - 1;
     const struct Value * restrict value = state->ov - 1;
     const uint8_t      * restrict bank1 = state->b1;
@@ -547,11 +556,46 @@ int unparse_msgpack(struct State *state,
 
     out = state->res;
     out_max = state->res + state->res_capacity;
+
+    const uint8_t * typeid2 = typeid;
+    const struct Value * value2 = value;
+#if 0
+    /* Debug  */
+    for (; typeid2 != typeid_max; typeid2++, value2++) {
+        const uint8_t *cmdname =
+            (*typeid2 == 18) ? "PUTSTRC" :
+            (*typeid2 == 12) ? "PUTMAP" :
+            (*typeid2 == 11) ? "PUTARRAYC" :
+            (*typeid2 == 4) ? "PUTINT / PUTLONG" :
+            (*typeid2 == 8) ? "PUTSTR" :
+            (*typeid2 == 7) ? "PUTDOUBLE" :
+            (*typeid2 == 0) ? "(zero)" : "unknown";
+	if (*typeid2 == 7)
+		fprintf(stderr, "unparse_msgpack; *typeid: 0x%02X (%d) -- %s; value: %llx\n", *typeid2, *typeid2, cmdname, *value2);
+	else
+		fprintf(stderr, "unparse_msgpack; *typeid: 0x%02X (%d) -- %s; value: %d\n", *typeid2, *typeid2, cmdname, *value2);
+    }
+#endif
+    int i = 0;
+
     goto check_buf;
 
     for (; typeid != typeid_max; typeid++, value++) {
-
         /* precondition: at least 10 bytes avail in out */
+
+#if 0
+	    /* Debug  */
+	const uint8_t *cmdname =
+            (*typeid == 18) ? "PUTSTRC" :
+            (*typeid == 12) ? "PUTMAP" :
+            (*typeid == 11) ? "PUTARRAYC" :
+            (*typeid == 4) ? "PUTINT / PUTLONG" :
+            (*typeid == 8) ? "PUTSTR" :
+            (*typeid == 7) ? "PUTDOUBLE" :
+            (*typeid == 0) ? "(zero)" : "unknown";
+        fprintf(stderr, "%02d; unparse_msgpack; in for; *typeid: 0x%02X (%d) -- %s; value: %d\n", i, *typeid, *typeid, cmdname, *value);
+#endif
+        ++i;
 
         switch (*typeid) {
         default:
@@ -829,6 +873,13 @@ copy_data:
 error_alloc:
     return set_error(state, "Out of memory");
 error_badcode:
+#if 0
+    {
+	    char *c = malloc(1024);
+	    sprintf(c, "Internal error: unknown code (%x)", *typeid);
+	    return set_error(state, c);
+    }
+#endif
     return set_error(state, "Internal error: unknown code");
 }
 

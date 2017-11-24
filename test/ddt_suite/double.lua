@@ -62,3 +62,23 @@ t {
     schema = '"double"',
     func = 'flatten', input = '{}'
 }
+
+t {
+    schema = '"double*"',
+    func = 'flatten', input = '42', output = '[1, 42.0]'
+}
+
+t {
+    schema = '"double*"',
+    func = 'flatten', input = 'null', output = '[0, null]'
+}
+
+t {
+    schema = '"double*"',
+    func = 'unflatten', input = '[1, 42]', output = '42.0'
+}
+
+t {
+    schema = '"double*"',
+    func = 'unflatten', input = '[0, null]', output = 'null'
+}

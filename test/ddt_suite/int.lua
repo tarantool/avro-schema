@@ -95,3 +95,23 @@ t {
     schema = '"int"',
     func = 'flatten', input = '-2147483649'
 }
+
+t {
+    schema = '"int*"',
+    func = 'flatten', input = '42', output = '[1, 42]'
+}
+
+t {
+    schema = '"int*"',
+    func = 'flatten', input = 'null', output = '[0, null]'
+}
+
+t {
+    schema = '"int*"',
+    func = 'unflatten', input = '[1, 42]', output = '42'
+}
+
+t {
+    schema = '"int*"',
+    func = 'unflatten', input = '[0, null]', output = 'null'
+}

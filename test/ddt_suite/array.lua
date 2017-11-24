@@ -16,6 +16,11 @@ local string_array_array = [[{
     }
 }]]
 
+local string_array_nullable = [[{
+    "type": "array*",
+    "items": "string"
+}]]
+
 -----------------------------------------------------------------------
 
 t {
@@ -160,4 +165,29 @@ t {
     error = '5/1: Expecting STR, encountered LONG',
     schema = string_array_array,
     func = 'flatten', input = '[[],[],[],[],[1]]'
+}
+
+
+t {
+    schema = string_array_nullable,
+    func = 'flatten',
+    input = '["hello", "world"]', output = '[1, ["hello", "world"]]'
+}
+
+t {
+    schema = string_array_nullable,
+    func = 'flatten',
+    input = 'null', output = '[0, null]'
+}
+
+t {
+    schema = string_array_nullable,
+    func = 'unflatten',
+    input = '[1, ["hello", "world"]]', output = '["hello", "world"]'
+}
+
+t {
+    schema = string_array_nullable,
+    func = 'unflatten',
+    input = '[0, null]', output = 'null'
 }

@@ -3,6 +3,10 @@ local card_face = [[
         ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]}
 ]]
 
+local card_face_nullable = [[
+    {"name": "card_face_nullable", "type": "enum*", "symbols":
+        ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]}
+]]
 
 t {
     schema = card_face,
@@ -86,4 +90,16 @@ t {
     error  = '1: Bad value: -1',
     schema = card_face,
     func = 'unflatten', input = '[-1]'
+}
+
+t {
+    schema = card_face_nullable,
+    func = 'flatten',
+    input = '"HEARTS"', output = '[1, 1]'
+}
+
+t {
+    schema = card_face_nullable,
+    func = 'flatten',
+    input = 'null', output = '[0, null]'
 }
