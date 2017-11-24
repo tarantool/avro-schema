@@ -1,3 +1,6 @@
+local json = require('json')
+json.cfg{encode_use_tostring = true}
+
 local front      = require('avro_schema.frontend')
 local insert     = table.insert
 local find, gsub = string.find, string.gsub
@@ -51,6 +54,9 @@ schema_width = function(s)
     local res = schema_width_cache[s]
     if res then return res end
     if s_type == 'record' then
+        if s.nullable then
+            return 2
+        end
         local width, vlo = 0, false
         for _, field in ipairs(s.fields) do
             local field_width = schema_width(field.type)
@@ -174,16 +180,25 @@ local ir2ilfuncs = {
 --
 -- See new_codegen() below for il:append_code() / __FUNC__ / __CALL__ info.
 local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
-    local ir_type = ir.type 
+    local ir_type = ir.type
     if not ir_type then
         local ilfuncs = ir2ilfuncs[ir]
         assert(ilfuncs, ir)
-        if find(mode, 'c') then insert(code, il[ilfuncs.is] (ipv, ipo)) end
         if find(mode, 'x') then
-            extend(code,
-                   il.checkobuf(1),
-                   il[ilfuncs.put] (0, ipv, ipo),
-                   il.move(0, 0, 1))
+            if ir ~= 'NUL' then
+                extend(code,
+                       il.checkobuf(1),
+                       il[ilfuncs.put] (0, ipv, ipo),
+                       il.move(0, 0, 1))
+            else
+                extend(code,
+                       il.checkobuf(2),
+                       -- il.putarrayc(0, 1),
+                       -- il.move(0, 0, 1),
+                       -- il.putintc(1, 888),
+                       il[ilfuncs.put] (0, ipv, ipo),
+                       il.move(0, 0, 1))
+            end
         end
         if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
     elseif ir_type == 'FIXED' then
@@ -498,7 +513,6 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         end
         if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
-        local to = ir.nested.to
         if find(mode, 'x') and is_record_or_union(to) then
             extend(code,
                    il.checkobuf(1),
@@ -507,11 +521,49 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         end
         il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
     elseif ir_type == '__RECORD__' then
-        if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
+        -- TODO: in case of nullable type extension, ARRAYC of length 2
+        -- will be on top of the record being flattened, so need
+        -- to extend this check, which will take this fact into accout
+        -- if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
         if find(mode, 'x') then
-            do_append_convert_record_flatten(il, code, ir, ipv, ipo)
+            local dest = code
+            if ir.from.nullable then
+                -- If record was marked nullable: emit following code fragment:
+                -- {$0 - current slot in the output buffer (ob)}
+                -- {(ipv, ipo) - roughly, current  value in the input buffer}
+                --  check if ob has at least two vacant slots, if not - extend
+                --  if value(ipv, ipo) is NULL then
+                --    put 0 to the ob
+                --    promote ob by 1 slot
+                --    put NULL constant to the ob
+                --    promote ob by 1 slot
+                --  else
+                --    put 1 to the ob
+                --    promote ob by 1 slot
+                --    emit convenient flattening of record's fields
+                --  end
+                dest = { il.ibranch(0),
+                         il.putintc(0, 1),
+                         il.move(0, 0, 1)}
+
+                extend(code, il.checkobuf(2))
+
+                insert(code, {
+                           il.ifnul(ipv, ipo),
+                           { il.ibranch(1),
+                             il.putintc(0, 0),
+                             il.move(0, 0, 1),
+                             il.putnulc(0),
+                             il.move(0, 0, 1)
+                           },
+                           dest })
+            end
+
+            do_append_convert_record_flatten(il, dest, ir, ipv, ipo)
         end
-        if find(mode, 'n') then insert(code, il.skip(ripv, ipv, ipo)) end
+        if find(mode, 'n') then
+            insert(code, il.pskip(ripv, ipv, ipo))
+        end
     elseif ir_type == '__UNION__' then
         return do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)

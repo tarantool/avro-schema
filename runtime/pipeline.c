@@ -176,6 +176,11 @@ int parse_msgpack(struct State *state,
     uint32_t      * restrict stack, *stack_max, *stack_buf;
     uint32_t       len;
 
+    fprintf(stderr, "parse_msgpack; s: ");
+    for (int i = 0; i < ms; ++i)
+        fprintf(stderr, "%02X ", mi[i]);
+    fprintf(stderr, "\b\n");
+
     /* Initialising ptrs with NULL-s is correct, but that would
      * harm branch prediction accuracy. Not checking the buf capacity,
      * because that would hurt performance (there's enough capacity,
@@ -537,6 +542,7 @@ error_alloc:
 int unparse_msgpack(struct State *state,
                     size_t        nitems)
 {
+    //nitems--;
     const uint8_t      * restrict typeid = state->ot - 1;
     const struct Value * restrict value = state->ov - 1;
     const uint8_t      * restrict bank1 = state->b1;
@@ -547,11 +553,33 @@ int unparse_msgpack(struct State *state,
 
     out = state->res;
     out_max = state->res + state->res_capacity;
+
+    const uint8_t * typeid2 = typeid;
+    const struct Value * value2 = value;
+    for (; typeid2 != typeid_max; typeid2++, value2++) {
+        const uint8_t *cmdname =
+            (*typeid2 == 11) ? "PUTARRAYC" :
+            (*typeid2 == 18) ? "PUTSTRC" :
+            (*typeid2 == 4) ? "PUTINT / PUTLONG" :
+            (*typeid2 == 8) ? "PUTSTR" :
+            (*typeid2 == 0) ? "(zero)" : "unknown";
+        fprintf(stderr, "unparse_msgpack; *typeid: 0x%02X (%d) -- %s; value: %d\n", *typeid2, *typeid2, cmdname, *value2);
+    }
+    int i = 0;
+
     goto check_buf;
 
     for (; typeid != typeid_max; typeid++, value++) {
-
         /* precondition: at least 10 bytes avail in out */
+
+	const uint8_t *cmdname =
+            (*typeid == 11) ? "PUTARRAYC" :
+            (*typeid == 18) ? "PUTSTRC" :
+            (*typeid == 4) ? "PUTINT / PUTLONG" :
+            (*typeid == 8) ? "PUTSTR" :
+            (*typeid == 0) ? "(zero)" : "unknown";
+        fprintf(stderr, "%02d; unparse_msgpack; in for; *typeid: 0x%02X (%d) -- %s; value: %d\n", i, *typeid, *typeid, cmdname, *value);
+        ++i;
 
         switch (*typeid) {
         default:
@@ -916,6 +944,7 @@ int schema_rt_extract_location(struct State *state,
 void schema_rt_xflatten_done(struct State *state,
                              size_t len)
 {
+    fprintf(stderr, "DEBUG: schema_rt_xflatten_done; len: %ld\n", len);
     uint32_t array_len = 0, countdown = 1;
     size_t i;
     for (i = 1; i < len; i++) {
@@ -936,4 +965,5 @@ void schema_rt_xflatten_done(struct State *state,
     }
     state->ot[0] = ArrayValue;
     state->ov[0].xlen = array_len;
+    fprintf(stderr, "DEBUG: schema_rt_xflatten_done; array_len: %d\n", array_len);
 }

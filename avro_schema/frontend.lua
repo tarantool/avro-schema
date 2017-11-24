@@ -57,9 +57,10 @@
 --         (Avro allows mapping a union to non-union and vice versa)
 
 local debug = require('debug')
+local json = require('json')
 local ffi = require('ffi')
 local null = ffi.cast('void *', 0)
-local format, find, gsub = string.format, string.find, string.gsub
+local format, find, gsub, len = string.format, string.find, string.gsub, string.len
 local sub, lower = string.sub, string.lower
 local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
@@ -216,6 +217,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 copy_schema_error('Must have a "type"')
             end
             xtype = tostring(xtype)
+
             if primitive_type[xtype] then
                 return xtype
             elseif xtype == 'record' then
@@ -384,15 +386,25 @@ copy_schema = function(schema, ns, scope, open_rec)
                 copy_schema_error('Unknown Avro type: %s', xtype)
             end
         end
+
     else
         local typeid = tostring(schema)
+        local nullable = nil
+        if sub(typeid, len(typeid), len(typeid)) == '*' then
+            typeid = sub(typeid, 1, len(typeid) - 1)
+            nullable = true
+        end
+
         if primitive_type[typeid] then
             return typeid
         end
         typeid = fullname(typeid, ns)
         schema = scope[typeid]
+        if nullable then
+            schema.nullable = true
+        end
         if schema and schema ~= true then -- ignore alias names
-            return schema
+            return schema, nullable
         end
         copy_schema_error('Unknown Avro type: %s', typeid)
     end
@@ -741,6 +753,14 @@ local build_ir
 -- [mem]      handling loops
 -- [imatch]   normally if from.name ~= to.name, to.aliases are considered;
 --            in imatch mode we consider from.aliases instead
+function debug_print_indent(msg)
+    local bot, top = find_frames(build_ir)
+    for i = bot ,top-1 do
+        io.write(' ')
+    end
+    print(msg)
+end
+
 build_ir = function(from, to, mem, imatch)
     local ptrfrom, ptrto
     local from_union = type(from) == 'table' and not from.type
@@ -809,6 +829,7 @@ build_ir = function(from, to, mem, imatch)
         end
         return { type = 'FIXED', size = from.size }
     elseif from.type == 'record' then
+        print("-->"..json.encode(from))
         local res = mem[to]
         if res then return res end
         local i2o, o2i
@@ -820,7 +841,7 @@ build_ir = function(from, to, mem, imatch)
         local ir = {
             type = '__RECORD__', from = from, to = to, i2o = i2o, o2i = o2i
         }
-        res = { type = 'RECORD', nested = ir }
+        res = { type = 'RECORD', nested = ir, nullable=from.nullable }
         mem[to] = res -- NB: clean on error!
         for i, field in ipairs(from.fields) do
             local o = i2o[i]
