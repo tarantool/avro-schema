@@ -755,7 +755,19 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     else -- defer to basic codegen
         if ir.type == nil and ir.nullable == true then
-            return do_append_code(il, mode, code, ir[1], ipv, ipo, ripv)
+            local dest = { il.ibranch(1),
+                           il.move(1, 1, 1) }
+
+            extend(code, il.checkobuf(1))
+            insert(code, {
+                       il.intswitch(ipv, ipo),
+                       { il.ibranch(0),
+                         il.putnulc(0),
+                         il.move(1, 1, 2),
+                         il.move(0, 0, 1)
+                       },
+                       dest })
+            return do_append_code(il, mode, dest, ir[1], ipv, ipo, ripv)
         else
             return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
         end
