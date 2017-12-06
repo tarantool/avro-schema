@@ -101,6 +101,16 @@ local function fullname(name, ns)
     return format('%s.%s', ns, name)
 end
 
+-- extract nullable flag from the name
+local function extract_nullable(name)
+    if sub(name, len(name), len(name)) == '*' then
+        name = sub(name, 1, len(name) - 1)
+        return true, name
+    else
+        return nil, name
+    end
+end
+
 -- type tags used in unions
 local function type_tag(t)
     return (type(t) == 'string' and t) or t.name or t.type
@@ -113,7 +123,7 @@ local copy_schema_location_info
 local function checkname(schema, ns, scope)
     local xname = schema.name
     if not xname then
-        copy_schema_error('Must have a "name"') 
+        copy_schema_error('Must have a "name"')
     end
     xname = tostring(xname)
     if find(xname, '%.') then
@@ -217,6 +227,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 copy_schema_error('Must have a "type"')
             end
             xtype = tostring(xtype)
+            print(xtype)
 
             if primitive_type[xtype] then
                 return xtype
@@ -389,22 +400,25 @@ copy_schema = function(schema, ns, scope, open_rec)
 
     else
         local typeid = tostring(schema)
-        local nullable = nil
-        if sub(typeid, len(typeid), len(typeid)) == '*' then
-            typeid = sub(typeid, 1, len(typeid) - 1)
-            nullable = true
-        end
+
+        local nullable, typeid = extract_nullable(typeid)
+        print("** "..tostring(nullable))
 
         if primitive_type[typeid] then
-            return typeid
+            if nullable then
+                return {type=typeid, nullable=nullable}
+            else
+                return typeid
+            end
         end
         typeid = fullname(typeid, ns)
         schema = scope[typeid]
-        if nullable then
-            schema.nullable = true
-        end
         if schema and schema ~= true then -- ignore alias names
-            return schema, nullable
+            if nullable then
+                return schema
+            else
+                return {type=schema, nullable=nullable}
+            end
         end
         copy_schema_error('Unknown Avro type: %s', typeid)
     end
@@ -533,6 +547,7 @@ end
 
 -- from.type == to.type and from.name == to.name (considering aliases)
 local function complex_types_may_match(from, to, imatch)
+    print("may_match "..json.encode(from).. " | "..json.encode(to))
     if from.type ~= to.type then return false end
     if from.name == to.name then return true end
     if imatch then
@@ -762,6 +777,7 @@ function debug_print_indent(msg)
 end
 
 build_ir = function(from, to, mem, imatch)
+    print("enter build_ir")
     local ptrfrom, ptrto
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
@@ -805,6 +821,13 @@ build_ir = function(from, to, mem, imatch)
         else
             return nil, build_ir_error(1, 'Types incompatible: %s and %s', from,
                                        type(to) == 'string' and to or to.name or to.type)
+        end
+    elseif primitive_type[from.type] then
+        if from.nullable then
+            print("Return "..json.encode({primitive_type[from.type], nullable=from.nullable}))
+            return {primitive_type[from.type], nullable=from.nullable}
+        else
+            return primitive_type[from.type]
         end
     elseif not complex_types_may_match(from, to, imatch) then
         return nil, build_ir_error(1, 'Types incompatible: %s and %s',
@@ -932,7 +955,9 @@ build_ir_error = function(offset, fmt, ...)
 end
 
 local function create_ir(from, to, imatch)
-    return build_ir(from, to, {}, imatch)
+    local ir = build_ir(from, to, {}, imatch)
+    print("create_ir "..json.encode(ir))
+    return ir
 end
 
 return {

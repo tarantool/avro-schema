@@ -48,15 +48,15 @@ local schema_width
 local schema_width_cache = setmetatable({}, weak_keys)
 schema_width = function(s)
     local s_type = s.type
+    if s.nullable then
+        return 2
+    end
     if type(s) == 'string' or s_type == 'fixed' or s_type == 'enum' then
         return 1 -- don't cache
     end
     local res = schema_width_cache[s]
     if res then return res end
     if s_type == 'record' then
-        if s.nullable then
-            return 2
-        end
         local width, vlo = 0, false
         for _, field in ipairs(s.fields) do
             local field_width = schema_width(field.type)
@@ -183,6 +183,9 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
     local ir_type = ir.type
     if not ir_type then
         local ilfuncs = ir2ilfuncs[ir]
+        print('Do_append_code:')
+        print('  ir: '..json.encode(ir))
+        print('  ilfuncs: '..json.encode(ilfuncs))
         assert(ilfuncs, ir)
         if find(mode, 'x') then
             if ir ~= 'NUL' then
@@ -193,9 +196,6 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
             else
                 extend(code,
                        il.checkobuf(2),
-                       -- il.putarrayc(0, 1),
-                       -- il.move(0, 0, 1),
-                       -- il.putintc(1, 888),
                        il[ilfuncs.put] (0, ipv, ipo),
                        il.move(0, 0, 1))
             end
@@ -503,6 +503,10 @@ end
 -- UNION discriminator and a branch (for XUPDATE)
 local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
     local  ir_type = ir.type
+    print("Do_append_flatten ")
+    print(" IR: "..tostring(json.encode(ir)))
+    print(" IR type: "..tostring(ir_type))
+    print(" mode: "..tostring(mode))
     if     ir_type == 'ENUM' then
         if find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
         if find(mode, 'x') then
@@ -568,7 +572,33 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         return do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)
     else -- defer to basic codegen
-        return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        if ir.type == nil and ir.nullable == true then
+            local dest = code
+            if find(mode, 'x') then
+                dest = { il.ibranch(0),
+                         il.putintc(0, 1),
+                         il.move(0, 0, 1)}
+                do_append_code(il, 'cx', dest, ir[1], ipv, ipo, ripv)
+
+                extend(code, il.checkobuf(2))
+                insert(code, {
+                       il.ifnul(ipv, ipo),
+                       { il.ibranch(1),
+                         il.putintc(0, 0),
+                         il.move(0, 0, 1),
+                         il.putnulc(0),
+                         il.move(0, 0, 1)
+                       },
+                       dest })
+                if find(mode, 'n') then
+                    do_append_code(il, 'n', code, ir[1], ipv, ipo, ripv)
+                end
+                return
+            end
+            return do_append_code(il, mode, dest, ir[1], ipv, ipo, ripv)
+        else
+            return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        end
     end
 end
 
@@ -596,7 +626,7 @@ local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     local to, i2o, o2i = ir.to, ir.i2o, ir.o2i
     local to_fields = to.fields
     local x, putmapc = find(mode, 'x')
-    if x then 
+    if x then
         putmapc = il.putmapc(0, 0)
         extend(code, il.checkobuf(1), putmapc, il.move(0, 0, 1))
     end
@@ -724,7 +754,11 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == '__UNION__' then
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     else -- defer to basic codegen
-        return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        if ir.type == nil and ir.nullable == true then
+            return do_append_code(il, mode, code, ir[1], ipv, ipo, ripv)
+        else
+            return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        end
     end
 end
 
