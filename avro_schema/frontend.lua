@@ -67,6 +67,21 @@ local floor = math.floor
 local clear = require('table.clear')
 local next, type = next, type
 
+function deepcopy(orig)
+    local orig_type = type(orig)
+    local copy
+    if orig_type == 'table' then
+        copy = {}
+        for orig_key, orig_value in next, orig, nil do
+            copy[deepcopy(orig_key)] = deepcopy(orig_value)
+        end
+        setmetatable(copy, deepcopy(getmetatable(orig)))
+    else -- number, string, boolean, etc
+        copy = orig
+    end
+    return copy
+end
+
 -- primitive types
 local primitive_type = {
     null  = 'NUL', boolean = 'BOOL', int   = 'INT', long   = 'LONG',
@@ -194,7 +209,7 @@ copy_schema = function(schema, ns, scope, open_rec)
     local res, ptr -- we depend on these being locals #5 and #6
     if type(schema) == 'table' then
         if scope[schema] then
-            -- this check is necessary for unnamed complex types (union, array, map)
+            -- this check is necessary for unnamed complex types (union, array map)
             copy_schema_error('Infinite loop detected in the data')
         end
         if #schema > 0 then
@@ -227,12 +242,17 @@ copy_schema = function(schema, ns, scope, open_rec)
                 copy_schema_error('Must have a "type"')
             end
             xtype = tostring(xtype)
-            print(xtype)
+            local nullable
+
+            nullable, xtype = extract_nullable(xtype)
+
+            print(xtype, nullable)
 
             if primitive_type[xtype] then
                 return xtype
             elseif xtype == 'record' then
                 res = { type = 'record' }
+                res.nullable = nullable
                 local name, ns = checkname(schema, ns, scope)
                 scope[name] = res
                 res.name = name
@@ -329,7 +349,8 @@ copy_schema = function(schema, ns, scope, open_rec)
                 open_rec[res] = nil
                 return res
             elseif xtype == 'enum' then
-                res = { type = 'enum', symbols = {} }
+                res = { type = 'enum', symbols = {}, nullable = nullable }
+                print("     res: "..json.encode(res))
                 local name, ns = checkname(schema, ns, scope)
                 scope[name] = res
                 res.name = name
@@ -359,7 +380,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 dcache[res] = symbolmap
                 return res
             elseif xtype == 'array' then
-                res = { type = 'array' }
+                res = { type = 'array', nullable = nullable }
                 scope[schema] = true
                 local xitems = schema.items
                 if not xitems then
@@ -369,7 +390,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 scope[schema] = nil
                 return res
             elseif xtype == 'map' then
-                res = { type = 'map' }
+                res = { type = 'map', nullable = nullable }
                 scope[schema] = true
                 local xvalues = schema.values
                 if not xvalues then
@@ -402,7 +423,7 @@ copy_schema = function(schema, ns, scope, open_rec)
         local typeid = tostring(schema)
 
         local nullable, typeid = extract_nullable(typeid)
-        print("** "..tostring(nullable))
+        print("** "..tostring(nullable).." "..typeid)
 
         if primitive_type[typeid] then
             if nullable then
@@ -415,9 +436,13 @@ copy_schema = function(schema, ns, scope, open_rec)
         schema = scope[typeid]
         if schema and schema ~= true then -- ignore alias names
             if nullable then
+                schema = deepcopy(schema)
+                schema.nullable = nullable
+                print("  old: "..json.encode(scope[typeid]))
+                print("  new: "..json.encode(schema))
                 return schema
             else
-                return {type=schema, nullable=nullable}
+                return schema
             end
         end
         copy_schema_error('Unknown Avro type: %s', typeid)
@@ -547,7 +572,9 @@ end
 
 -- from.type == to.type and from.name == to.name (considering aliases)
 local function complex_types_may_match(from, to, imatch)
-    print("may_match "..json.encode(from).. " | "..json.encode(to))
+    print("may_match ")
+    print("  from: "..json.encode(from))
+    print("    to: "..json.encode(to))
     if from.type ~= to.type then return false end
     if from.name == to.name then return true end
     if imatch then
@@ -709,7 +736,7 @@ copy_data = function(schema, data, visited)
 end
 
 -- extract from the call stack a path to the fragment that failed
--- validation; enhance error message 
+-- validation; enhance error message
 local function copy_data_eh(err)
     local top, bottom = find_frames(copy_data)
     local path = {}
@@ -739,7 +766,7 @@ end
 
 copy_field_default = function(fieldtype, default)
     if type(fieldtype) == 'table' and not fieldtype.type then
-        -- "Default values for union fields correspond to the first 
+        -- "Default values for union fields correspond to the first
         --  schema in the union." - the spec
         local ok, res = validate_data(fieldtype[1], default)
         if not ok or res == null then
@@ -778,6 +805,7 @@ end
 
 build_ir = function(from, to, mem, imatch)
     print("enter build_ir")
+    print("  from: "..json.encode(from))
     local ptrfrom, ptrto
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
@@ -838,13 +866,13 @@ build_ir = function(from, to, mem, imatch)
         if not bc then
             return nil, err
         end
-        return { type = 'ARRAY', nested = bc }
+        return { type = 'ARRAY', nullable = from.nullable, nested = bc }
     elseif from.type == 'map'   then
         local bc, err = build_ir(from.values, to.values, mem, imatch)
         if not bc then
             return nil, err
         end
-        return { type = 'MAP', nested = bc }
+        return { type = 'MAP', nullable = from.nullable, nested = bc }
     elseif from.type == 'fixed' then
         if from.size ~= to.size then
             return nil, build_ir_error(nil, 'Size mismatch: %d vs %d',
@@ -894,7 +922,17 @@ Field %s is missing in source schema, and no default value was provided]],
             end
         end
         return res
-    elseif from.type == 'enum' then
+    elseif from.type == 'enum' or (from.type.type == 'enum' and from.nullable == true) then
+        local nullable
+        if from.type.type == 'enum' and from.nullable == true then
+            from = from.type
+            to = to.type
+            nullable = true
+        end
+        print(" INSIDE enum ")
+        print("    from: "..json.encode(to))
+        print("      to: "..json.encode(from))
+        print("    null: "..tostring(nullable))
         local res = mem[to]
         if res then return res end
         local symmap      = get_enum_symbol_map(to)
@@ -908,10 +946,12 @@ Field %s is missing in source schema, and no default value was provided]],
         if not have_common then
             return nil, build_ir_error(nil, 'No common symbols')
         end
-        res = { type = 'ENUM', from = from, to = to, i2o = i2o }
+        res = { type = 'ENUM', nullable=nullable, from = from, to = to, i2o = i2o }
         mem[to] = res
         return res
     else
+        print("ASSERT from is:"..json.encode(from))
+        print("         to is:"..json.encode(to))
         assert(false)
     end
 end

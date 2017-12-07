@@ -341,7 +341,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
     local v_base = il.id(#from_fields) - 1
     -- we append instructions before and after the loop when convenient;
     -- for these reasons we initially accumulate the loop and subsequent
-    -- instructions in code_section2, and append it to code once done 
+    -- instructions in code_section2, and append it to code once done
     local code_section2 = {}
     -- emit parsing loop
     local loop_var, loop_body = append_objforeach(il, code_section2, ipv, ipo)
@@ -382,6 +382,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             end
         end
         local field_ir = unwrap_ir(ir[i])
+        print("  __RECORD__ field IR: "..json.encode(ir[i]))
         local field_default = field.default
         if next_offset then -- at fixed offset, patch
             if i then
@@ -506,14 +507,53 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
     print("Do_append_flatten ")
     print(" IR: "..tostring(json.encode(ir)))
     print(" IR type: "..tostring(ir_type))
+    print(" from: "..json.encode(ir.from))
     print(" mode: "..tostring(mode))
     if     ir_type == 'ENUM' then
-        if find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
+        -- TODO: in case of nullable enum: need to extend the checl
+        if not ir.from.nullable and find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
         if find(mode, 'x') then
-            extend(code,
-                   il.checkobuf(1),
-                   il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
-                   il.move(0, 0, 1))
+            local dest = code
+            if ir.from.nullable then
+                -- If record was marked nullable: emit following code fragment:
+                -- {$0 - current slot in the output buffer (ob)}
+                -- {(ipv, ipo) - roughly, current  value in the input buffer}
+                --  check if ob has at least two vacant slots, if not - extend
+                --  if value(ipv, ipo) is NULL then
+                --    put 0 to the ob
+                --    promote ob by 1 slot
+                --    put NULL constant to the ob
+                --    promote ob by 1 slot
+                --  else
+                --    put 1 to the ob
+                --    promote ob by 1 slot
+                --    emit convenient flattening of record's fields
+                --  end
+                dest = { il.ibranch(0),
+                         il.putintc(0, 1),
+                         il.move(0, 0, 1)}
+
+                extend(code, il.checkobuf(2))
+
+                insert(code, {
+                           il.ifnul(ipv, ipo),
+                           { il.ibranch(1),
+                             il.putintc(0, 0),
+                             il.move(0, 0, 1),
+                             il.putnulc(0),
+                             il.move(0, 0, 1)
+                           },
+                           dest })
+                extend(dest,
+                       il.checkobuf(1),
+                       il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
+                       il.move(0, 0, 1))
+            else
+                extend(code,
+                       il.checkobuf(1),
+                       il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
+                       il.move(0, 0, 1))
+            end
         end
         if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
@@ -571,6 +611,39 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
     elseif ir_type == '__UNION__' then
         return do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)
+    elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
+        print('=== ARRAY. IR: '..json.encode(ir))
+        if ir.nullable == true then
+            local dest = code
+            local orig = code
+            if find(mode, 'x') then
+                dest = { il.ibranch(0),
+                         il.putintc(0, 1),
+                         il.move(0, 0, 1)}
+                do_append_code(il, 'cx', dest, ir, ipv, ipo, ripv)
+
+                extend(code, il.checkobuf(2))
+                insert(code, {
+                       il.ifnul(ipv, ipo),
+                       { il.ibranch(1),
+                         il.putintc(0, 0),
+                         il.move(0, 0, 1),
+                         il.putnulc(0),
+                         il.move(0, 0, 1)
+                       },
+                       dest })
+                code = dest
+            end
+            if find(mode, 'n') then
+                if ir.nullable == true then
+                    insert(orig, il.pskip(ripv, ipv, ipo))
+                else
+                    do_append_code(il, 'n', code, ir, ipv, ipo, ripv)
+                end
+            end
+        else
+            return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        end
     else -- defer to basic codegen
         if ir.type == nil and ir.nullable == true then
             local dest = code
@@ -697,14 +770,46 @@ end
 local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     local  ir_type = ir.type
     if     ir_type == 'ENUM' then
-        if find(mode, 'c') then insert(code, il.isint(ipv, ipo)) end
-        if find(mode, 'x') then
-            extend(code,
-                   il.checkobuf(1),
-                   il.putenumi2s(0, ipv, ipo, make_enumi2s_tab(ir)),
-                   il.move(0, 0, 1))
+        if find(mode, 'c') then
+            insert(code, il.isint(ipv, ipo))
+            -- If enum is nullable then it represented as int pair
+            if ir.from.nullable then
+                -- insert(code, il.isint(ipv, ipo + 1)) ... or NULL
+            end
         end
-        if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
+        if find(mode, 'x') then
+            if ir.from.nullable then
+                local dest = { il.ibranch(1),
+                               il.move(1, 1, 1) }
+
+                extend(code, il.checkobuf(1))
+                insert(code, {
+                           il.intswitch(ipv, ipo),
+                           { il.ibranch(0),
+                             il.putnulc(0),
+                             il.move(1, 1, 2),
+                             il.move(0, 0, 1)
+                           },
+                           dest })
+                extend(dest,
+                       il.checkobuf(1),
+                       il.putenumi2s(0, ipv, ipo, make_enumi2s_tab(ir)),
+                       il.move(0, 0, 1))
+                code = dest
+            else
+                extend(code,
+                       il.checkobuf(1),
+                       il.putenumi2s(0, ipv, ipo, make_enumi2s_tab(ir)),
+                       il.move(0, 0, 1))
+            end
+        end
+        if find(mode, 'n') then
+            local offset = 1
+            if ir.from.nullable then
+                offset = 2
+            end
+            insert(code, il.move(ripv, ipv, ipo + offset))
+        end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
         local from = ir.nested.from
         if is_record_or_union(from) then
@@ -753,6 +858,25 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         end
     elseif ir_type == '__UNION__' then
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+    elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
+        print("Unflatten array IR :"..json.encode(ir))
+        if ir.nullable then
+            local dest = { il.ibranch(1),
+                           il.move(1, 1, 1) }
+            do_append_code(il, mode, dest, ir, ipv, ipo, ripv)
+
+            extend(code, il.checkobuf(1))
+            insert(code, {
+                       il.intswitch(ipv, ipo),
+                       { il.ibranch(0),
+                         il.putnulc(0),
+                         il.move(1, 1, 2),
+                         il.move(0, 0, 1)
+                       },
+                       dest })
+        else
+            do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        end
     else -- defer to basic codegen
         if ir.type == nil and ir.nullable == true then
             local dest = { il.ibranch(1),
