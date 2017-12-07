@@ -183,9 +183,9 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
     local ir_type = ir.type
     if not ir_type then
         local ilfuncs = ir2ilfuncs[ir]
-        print('Do_append_code:')
-        print('  ir: '..json.encode(ir))
-        print('  ilfuncs: '..json.encode(ilfuncs))
+        -- print('Do_append_code:')
+        -- print('  ir: '..json.encode(ir))
+        -- print('  ilfuncs: '..json.encode(ilfuncs))
         assert(ilfuncs, ir)
         if find(mode, 'x') then
             if ir ~= 'NUL' then
@@ -382,7 +382,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             end
         end
         local field_ir = unwrap_ir(ir[i])
-        print("  __RECORD__ field IR: "..json.encode(ir[i]))
+        -- print("  __RECORD__ field IR: "..json.encode(ir[i]))
         local field_default = field.default
         if next_offset then -- at fixed offset, patch
             if i then
@@ -504,11 +504,11 @@ end
 -- UNION discriminator and a branch (for XUPDATE)
 local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
     local  ir_type = ir.type
-    print("Do_append_flatten ")
-    print(" IR: "..tostring(json.encode(ir)))
-    print(" IR type: "..tostring(ir_type))
-    print(" from: "..json.encode(ir.from))
-    print(" mode: "..tostring(mode))
+    -- print("Do_append_flatten ")
+    -- print(" IR: "..tostring(json.encode(ir)))
+    -- print(" IR type: "..tostring(ir_type))
+    -- print(" from: "..json.encode(ir.from))
+    -- print(" mode: "..tostring(mode))
     if     ir_type == 'ENUM' then
         -- TODO: in case of nullable enum: need to extend the checl
         if not ir.from.nullable and find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
@@ -612,7 +612,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         return do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        print('=== ARRAY. IR: '..json.encode(ir))
+        -- print('=== ARRAY. IR: '..json.encode(ir))
         if ir.nullable == true then
             local dest = code
             local orig = code
@@ -859,7 +859,7 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == '__UNION__' then
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        print("Unflatten array IR :"..json.encode(ir))
+        -- print("Unflatten array IR :"..json.encode(ir))
         if ir.nullable then
             local dest = { il.ibranch(1),
                            il.move(1, 1, 1) }

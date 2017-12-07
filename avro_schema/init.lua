@@ -391,7 +391,6 @@ local function compile(...)
         local ok, il_code = pcall(c_emit_code, il, ir, service_fields)
         if not ok then return false, il_code end
         if not debug then
-            print("OPTIMIZE")
             il_code = il.optimize(il_code)
         end
         local dump_il = args.dump_il

@@ -246,8 +246,6 @@ copy_schema = function(schema, ns, scope, open_rec)
 
             nullable, xtype = extract_nullable(xtype)
 
-            print(xtype, nullable)
-
             if primitive_type[xtype] then
                 return xtype
             elseif xtype == 'record' then
@@ -350,7 +348,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 return res
             elseif xtype == 'enum' then
                 res = { type = 'enum', symbols = {}, nullable = nullable }
-                print("     res: "..json.encode(res))
+                -- print("     res: "..json.encode(res))
                 local name, ns = checkname(schema, ns, scope)
                 scope[name] = res
                 res.name = name
@@ -423,7 +421,7 @@ copy_schema = function(schema, ns, scope, open_rec)
         local typeid = tostring(schema)
 
         local nullable, typeid = extract_nullable(typeid)
-        print("** "..tostring(nullable).." "..typeid)
+        -- print("** "..tostring(nullable).." "..typeid)
 
         if primitive_type[typeid] then
             if nullable then
@@ -438,8 +436,8 @@ copy_schema = function(schema, ns, scope, open_rec)
             if nullable then
                 schema = deepcopy(schema)
                 schema.nullable = nullable
-                print("  old: "..json.encode(scope[typeid]))
-                print("  new: "..json.encode(schema))
+                -- print("  old: "..json.encode(scope[typeid]))
+                -- print("  new: "..json.encode(schema))
                 return schema
             else
                 return schema
@@ -572,9 +570,9 @@ end
 
 -- from.type == to.type and from.name == to.name (considering aliases)
 local function complex_types_may_match(from, to, imatch)
-    print("may_match ")
-    print("  from: "..json.encode(from))
-    print("    to: "..json.encode(to))
+    -- print("may_match ")
+    -- print("  from: "..json.encode(from))
+    -- print("    to: "..json.encode(to))
     if from.type ~= to.type then return false end
     if from.name == to.name then return true end
     if imatch then
@@ -804,8 +802,8 @@ function debug_print_indent(msg)
 end
 
 build_ir = function(from, to, mem, imatch)
-    print("enter build_ir")
-    print("  from: "..json.encode(from))
+    -- print("enter build_ir")
+    -- print("  from: "..json.encode(from))
     local ptrfrom, ptrto
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
@@ -852,7 +850,7 @@ build_ir = function(from, to, mem, imatch)
         end
     elseif primitive_type[from.type] then
         if from.nullable then
-            print("Return "..json.encode({primitive_type[from.type], nullable=from.nullable}))
+            -- print("Return "..json.encode({primitive_type[from.type], nullable=from.nullable}))
             return {primitive_type[from.type], nullable=from.nullable}
         else
             return primitive_type[from.type]
@@ -880,7 +878,7 @@ build_ir = function(from, to, mem, imatch)
         end
         return { type = 'FIXED', size = from.size }
     elseif from.type == 'record' then
-        print("-->"..json.encode(from))
+        -- print("-->"..json.encode(from))
         local res = mem[to]
         if res then return res end
         local i2o, o2i
@@ -929,10 +927,10 @@ Field %s is missing in source schema, and no default value was provided]],
             to = to.type
             nullable = true
         end
-        print(" INSIDE enum ")
-        print("    from: "..json.encode(to))
-        print("      to: "..json.encode(from))
-        print("    null: "..tostring(nullable))
+        -- print(" INSIDE enum ")
+        -- print("    from: "..json.encode(to))
+        -- print("      to: "..json.encode(from))
+        -- print("    null: "..tostring(nullable))
         local res = mem[to]
         if res then return res end
         local symmap      = get_enum_symbol_map(to)
@@ -995,9 +993,7 @@ build_ir_error = function(offset, fmt, ...)
 end
 
 local function create_ir(from, to, imatch)
-    local ir = build_ir(from, to, {}, imatch)
-    print("create_ir "..json.encode(ir))
-    return ir
+    return build_ir(from, to, {}, imatch)
 end
 
 return {
