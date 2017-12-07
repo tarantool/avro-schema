@@ -187,6 +187,7 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
         -- print('  ir: '..json.encode(ir))
         -- print('  ilfuncs: '..json.encode(ilfuncs))
         assert(ilfuncs, ir)
+        if find(mode, 'c') then insert(code, il[ilfuncs.is] (ipv, ipo)) end
         if find(mode, 'x') then
             if ir ~= 'NUL' then
                 extend(code,
@@ -557,6 +558,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         end
         if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
+        local to = ir.nested.to
         if find(mode, 'x') and is_record_or_union(to) then
             extend(code,
                    il.checkobuf(1),
@@ -568,7 +570,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         -- TODO: in case of nullable type extension, ARRAYC of length 2
         -- will be on top of the record being flattened, so need
         -- to extend this check, which will take this fact into accout
-        -- if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
+        if find(mode, 'c') and not ir.from.nullable then insert(code, il.ismap(ipv, ipo)) end
         if find(mode, 'x') then
             local dest = code
             if ir.from.nullable then
@@ -651,7 +653,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 dest = { il.ibranch(0),
                          il.putintc(0, 1),
                          il.move(0, 0, 1)}
-                do_append_code(il, 'cx', dest, ir[1], ipv, ipo, ripv)
+                do_append_code(il, 'x', dest, ir[1], ipv, ipo, ripv)
 
                 extend(code, il.checkobuf(2))
                 insert(code, {
@@ -668,7 +670,6 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 end
                 return
             end
-            return do_append_code(il, mode, dest, ir[1], ipv, ipo, ripv)
         else
             return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
         end
