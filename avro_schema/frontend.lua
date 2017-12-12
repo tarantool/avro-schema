@@ -433,7 +433,7 @@ copy_schema = function(schema, ns, scope, open_rec)
         typeid = fullname(typeid, ns)
         schema = scope[typeid]
         if schema and schema ~= true then -- ignore alias names
-            if nullable then
+            if nullable ~= schema.nullable then
                 schema = deepcopy(schema)
                 schema.nullable = nullable
                 -- print("  old: "..json.encode(scope[typeid]))

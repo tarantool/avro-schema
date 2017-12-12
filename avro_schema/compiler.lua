@@ -46,16 +46,17 @@ end
 
 local schema_width
 local schema_width_cache = setmetatable({}, weak_keys)
-schema_width = function(s)
+schema_width = function(s, ignore_nullable)
     local s_type = s.type
-    if s.nullable then
-        return 2
-    end
     if type(s) == 'string' or s_type == 'fixed' or s_type == 'enum' then
+        if s.nullable then
+            return 2
+        end
+
         return 1 -- don't cache
     end
     local res = schema_width_cache[s]
-    if res then return res end
+    if res and ignore_nullable then return res end
     if s_type == 'record' then
         local width, vlo = 0, false
         for _, field in ipairs(s.fields) do
@@ -64,6 +65,12 @@ schema_width = function(s)
             vlo = vlo or field_width < 0
         end
         res = vlo and -width or width
+        -- If nullable - need one extra slot and it is allways VLO
+        -- TODO: might optimize: if only one non-VLO field in the record
+        -- then this record is not VLO, even if nullble
+        if s.nullable and not ignore_nullable then
+            res = 2
+        end
     elseif s_type == nil then -- union
         res = 2
         for _, branch in ipairs(s) do
@@ -74,7 +81,10 @@ schema_width = function(s)
     else
         return -1 -- array/map, don't cache
     end
-    schema_width_cache[s] = res
+
+    if not s.nullable then
+        schema_width_cache[s] = res
+    end
     return res
 end
 
@@ -375,7 +385,13 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         local next_offset
         -- compute next_offset
         if offset then
-            local width = schema_width(field.type)
+            -- print(" calling schema width for "..json.encode(field.type))
+            local width = schema_width(field.type, true)
+            -- print("   ... got " .. tostring(width))
+            if field.type and field.type.nullable then
+                width = width + 2
+            end
+            -- print("  next offest for "..json.encode(field).." is: " ..tostring(width));
             if i and width < 0 then -- variable length, activate append mode
                 insert(code_section2, il.move(0, 0, offset))
             else
@@ -424,6 +440,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         if i then insert(code_section2, il.endvar(v_base + i)) end
     end
     -- sync offset (unless already synced)
+    -- print("offset ("..json.encode(ir.from).." ): "..tostring(offset))
     if offset then insert(code_section2, il.move(0, 0, offset)) end
     append(code, code_section2)
 end
@@ -590,6 +607,8 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 --  end
                 dest = { il.ibranch(0),
                          il.putintc(0, 1),
+                         il.move(0, 0, 1),
+                         il.putarrayc(0, abs(schema_width(ir.from, true))),
                          il.move(0, 0, 1)}
 
                 extend(code, il.checkobuf(2))
@@ -841,7 +860,7 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
             -- TODO: before intswitch: issue ISINT insn to make sure that value
             -- is actually integer.
             local dest = { il.ibranch(1),
-                           il.move(1, 1, 1) }
+                           il.move(1, 1, 2) }
 
             extend(code, il.checkobuf(1))
             insert(code, {

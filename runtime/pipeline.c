@@ -866,6 +866,13 @@ copy_data:
 error_alloc:
     return set_error(state, "Out of memory");
 error_badcode:
+#if 0
+    {
+	    char *c = malloc(1024);
+	    sprintf(c, "Internal error: unknown code (%x)", *typeid);
+	    return set_error(state, c);
+    }
+#endif
     return set_error(state, "Internal error: unknown code");
 }
 
