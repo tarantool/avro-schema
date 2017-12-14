@@ -563,8 +563,9 @@ int unparse_msgpack(struct State *state,
     /* Debug  */
     for (; typeid2 != typeid_max; typeid2++, value2++) {
         const uint8_t *cmdname =
-            (*typeid2 == 11) ? "PUTARRAYC" :
             (*typeid2 == 18) ? "PUTSTRC" :
+            (*typeid2 == 12) ? "PUTMAP" :
+            (*typeid2 == 11) ? "PUTARRAYC" :
             (*typeid2 == 4) ? "PUTINT / PUTLONG" :
             (*typeid2 == 8) ? "PUTSTR" :
             (*typeid2 == 0) ? "(zero)" : "unknown";
@@ -581,8 +582,9 @@ int unparse_msgpack(struct State *state,
 #if 0
 	    /* Debug  */
 	const uint8_t *cmdname =
-            (*typeid == 11) ? "PUTARRAYC" :
             (*typeid == 18) ? "PUTSTRC" :
+            (*typeid == 12) ? "PUTMAP" :
+            (*typeid == 11) ? "PUTARRAYC" :
             (*typeid == 4) ? "PUTINT / PUTLONG" :
             (*typeid == 8) ? "PUTSTR" :
             (*typeid == 0) ? "(zero)" : "unknown";

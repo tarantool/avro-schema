@@ -55,6 +55,9 @@ schema_width = function(s, ignore_nullable)
 
         return 1 -- don't cache
     end
+    if s_type == 'map' and s.nullable then
+        return 2
+    end
     local res = schema_width_cache[s]
     if res and ignore_nullable then return res end
     if s_type == 'record' then
@@ -633,7 +636,6 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         return do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        -- print('=== ARRAY. IR: '..json.encode(ir))
         if ir.nullable == true then
             local dest = code
             local orig = code
@@ -650,14 +652,15 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                          il.putintc(0, 0),
                          il.move(0, 0, 1),
                          il.putnulc(0),
-                         il.move(0, 0, 1)
+                         il.move(0, 0, 1),
+                         il.move(1, 1, 1)
                        },
                        dest })
                 code = dest
             end
             if find(mode, 'n') then
                 if ir.nullable == true then
-                    insert(orig, il.pskip(ripv, ipv, ipo))
+                    insert(dest, il.skip(ripv, ipv, ipo))
                 else
                     do_append_code(il, 'n', code, ir, ipv, ipo, ripv)
                 end

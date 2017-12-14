@@ -870,7 +870,8 @@ build_ir = function(from, to, mem, imatch)
         if not bc then
             return nil, err
         end
-        return { type = 'MAP', nullable = from.nullable, nested = bc }
+        return { type = 'MAP', nullable = from.nullable, nested = bc,
+                 from = from, to = to }
     elseif from.type == 'fixed' then
         if from.size ~= to.size then
             return nil, build_ir_error(nil, 'Size mismatch: %d vs %d',
