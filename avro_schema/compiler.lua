@@ -55,9 +55,17 @@ schema_width = function(s, ignore_nullable)
 
         return 1 -- don't cache
     end
-    if s_type == 'map' and s.nullable then
+    if (s_type == 'array'
+        or s_type == 'map'
+        or s_type == 'int'
+        or s_type == 'long'
+        or s_type == 'boolean'
+        or s_type == 'double'
+        or s_type == 'float'
+        or s_type == 'string') and s.nullable then
         return 2
     end
+
     local res = schema_width_cache[s]
     if res and ignore_nullable then return res end
     if s_type == 'record' then
@@ -675,7 +683,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 dest = { il.ibranch(0),
                          il.putintc(0, 1),
                          il.move(0, 0, 1)}
-                do_append_code(il, 'x', dest, ir[1], ipv, ipo, ripv)
+                do_append_code(il, 'cx', dest, ir[1], ipv, ipo, ripv)
 
                 extend(code, il.checkobuf(2))
                 insert(code, {

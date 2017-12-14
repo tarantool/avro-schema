@@ -72,3 +72,23 @@ t {
     schema = '"string"',
     func = 'flatten', input = '{}'
 }
+
+t {
+    schema = '"string*"',
+    func = 'flatten', input = '"kek"', output = '[1, "kek"]'
+}
+
+t {
+    schema = '"string*"',
+    func = 'flatten', input = 'null', output = '[0, null]'
+}
+
+t {
+    schema = '"string*"',
+    func = 'unflatten', input = '[1, "kek"]', output = '"kek"'
+}
+
+t {
+    schema = '"string*"',
+    func = 'unflatten', input = '[0, null]', output = 'null'
+}

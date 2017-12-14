@@ -247,7 +247,8 @@ copy_schema = function(schema, ns, scope, open_rec)
             nullable, xtype = extract_nullable(xtype)
 
             if primitive_type[xtype] then
-                return xtype
+                res = {type = xtype, nullable = nullable}
+                return res
             elseif xtype == 'record' then
                 res = { type = 'record' }
                 res.nullable = nullable
@@ -848,10 +849,10 @@ build_ir = function(from, to, mem, imatch)
             return nil, build_ir_error(1, 'Types incompatible: %s and %s', from,
                                        type(to) == 'string' and to or to.name or to.type)
         end
-    elseif primitive_type[from.type] then
+    elseif primitive_type[from.type]  then
+        -- print("Return "..json.encode({primitive_type[from.type], nullable=from.nullable}))
         if from.nullable then
-            -- print("Return "..json.encode({primitive_type[from.type], nullable=from.nullable}))
-            return {primitive_type[from.type], nullable=from.nullable}
+            return {primitive_type[from.type], nullable=from.nullable, from = from, to = to}
         else
             return primitive_type[from.type]
         end
@@ -864,7 +865,8 @@ build_ir = function(from, to, mem, imatch)
         if not bc then
             return nil, err
         end
-        return { type = 'ARRAY', nullable = from.nullable, nested = bc }
+        return { type = 'ARRAY', nullable = from.nullable, nested = bc,
+                 from = from, to = to}
     elseif from.type == 'map'   then
         local bc, err = build_ir(from.values, to.values, mem, imatch)
         if not bc then

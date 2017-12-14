@@ -568,8 +568,12 @@ int unparse_msgpack(struct State *state,
             (*typeid2 == 11) ? "PUTARRAYC" :
             (*typeid2 == 4) ? "PUTINT / PUTLONG" :
             (*typeid2 == 8) ? "PUTSTR" :
+            (*typeid2 == 7) ? "PUTDOUBLE" :
             (*typeid2 == 0) ? "(zero)" : "unknown";
-        fprintf(stderr, "unparse_msgpack; *typeid: 0x%02X (%d) -- %s; value: %d\n", *typeid2, *typeid2, cmdname, *value2);
+	if (*typeid2 == 7)
+		fprintf(stderr, "unparse_msgpack; *typeid: 0x%02X (%d) -- %s; value: %llx\n", *typeid2, *typeid2, cmdname, *value2);
+	else
+		fprintf(stderr, "unparse_msgpack; *typeid: 0x%02X (%d) -- %s; value: %d\n", *typeid2, *typeid2, cmdname, *value2);
     }
 #endif
     int i = 0;
@@ -587,6 +591,7 @@ int unparse_msgpack(struct State *state,
             (*typeid == 11) ? "PUTARRAYC" :
             (*typeid == 4) ? "PUTINT / PUTLONG" :
             (*typeid == 8) ? "PUTSTR" :
+            (*typeid == 7) ? "PUTDOUBLE" :
             (*typeid == 0) ? "(zero)" : "unknown";
         fprintf(stderr, "%02d; unparse_msgpack; in for; *typeid: 0x%02X (%d) -- %s; value: %d\n", i, *typeid, *typeid, cmdname, *value);
 #endif
