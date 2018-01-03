@@ -399,9 +399,6 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             -- print(" calling schema width for "..json.encode(field.type))
             local width = schema_width(field.type, true)
             -- print("   ... got " .. tostring(width))
-            if field.type and field.type.nullable then
-                width = width + 2
-            end
             -- print("  next offest for "..json.encode(field).." is: " ..tostring(width));
             if i and width < 0 then -- variable length, activate append mode
                 insert(code_section2, il.move(0, 0, offset))
@@ -424,8 +421,10 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 append_put_field_values(il, code, field.type, field.default)
                 insert(code, il.move(0, 0, -next_offset))
             else
-                insert(code_section2,
-                       il.isset(v_base + i, ipv, ipo, from_fields[i].name))
+                if not (field.type and field.type.nullable) then
+                    insert(code_section2,
+                           il.isset(v_base + i, ipv, ipo, from_fields[i].name))
+                end
             end
         elseif i then -- and not next_offset: v/offset or v/length, append
             local branch = strswitch[i + 1]

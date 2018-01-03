@@ -493,3 +493,47 @@ t {
               "r3": null,
               "r4": {"v1": "WAT", "v2": 3}}]]
 }
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "int*"},
+        {"name": "Y", "type": "string"} ]
+      }]],
+    func = 'flatten',
+    input = [[ { "X": 42, "Y": "kek" } ]],
+    output = ' [1, 42, "kek"]'
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "int*"},
+        {"name": "Y", "type": "string"} ]
+      }]],
+    func = 'unflatten',
+    input = ' [1, 42, "kek"]',
+    output = [[ { "X": 42, "Y": "kek" } ]]
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "int*"},
+        {"name": "Y", "type": "string"} ]
+      }]],
+    func = 'flatten',
+    input = [[ { "X": null, "Y": "kek" } ]],
+    output = ' [0, null, "kek"]'
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "int*"},
+        {"name": "Y", "type": "string"} ]
+      }]],
+    func = 'unflatten',
+    input = ' [0, null, "kek"]',
+    output = [[ { "X": null, "Y": "kek" } ]]
+}

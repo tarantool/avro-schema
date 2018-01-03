@@ -447,3 +447,36 @@ for schema_no = 1,#records do
     }
 
 end
+
+-- nullability
+t {
+    schema = '"string*"',
+    validate = 'null',
+    validate_only = true
+}
+
+t {
+    schema = '"string*"',
+    validate = '"HELLO"',
+    validate_only = true
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record*", "fields": [
+        {"name": "X", "type": "string"}
+      ]
+    }]],
+    validate = '{"X": "HELLO"}',
+    validate_only = true
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record*", "fields": [
+        {"name": "X", "type": "string"}
+      ]
+    }]],
+    validate = 'null',
+    validate_only = true
+}
