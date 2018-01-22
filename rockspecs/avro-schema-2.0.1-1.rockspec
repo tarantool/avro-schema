@@ -1,8 +1,8 @@
 package = 'avro-schema'
-version = 'scm-1'
+version = '2.0.1-1'
 source  = {
-    url    = 'git://github.com/tarantool/avro-schema.git',
-    branch = 'master',
+    url = 'git://github.com/tarantool/avro-schema.git',
+    tag = '2.0.1',
 }
 description = {
     summary  = "Apache Avro schema tools for Tarantool",
