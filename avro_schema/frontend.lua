@@ -212,6 +212,7 @@ copy_schema = function(schema, ns, scope, open_rec)
             -- this check is necessary for unnamed complex types (union, array map)
             copy_schema_error('Infinite loop detected in the data')
         end
+        -- array, describing union [type1, type2...]
         if #schema > 0 then
             local tagmap = {}
             scope[schema] = 1
@@ -247,8 +248,11 @@ copy_schema = function(schema, ns, scope, open_rec)
             nullable, xtype = extract_nullable(xtype)
 
             if primitive_type[xtype] then
-                res = {type = xtype, nullable = nullable}
-                return res
+                -- primitive type normalization
+                if nullable == nil then
+                    return xtype
+                end
+                return {type = xtype, nullable = nullable}
             elseif xtype == 'record' then
                 res = { type = 'record' }
                 res.nullable = nullable

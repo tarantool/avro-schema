@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(42)
+test:plan(50)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -202,6 +202,11 @@ local s260 = string.rep('@', 260)
 local s65400 = string.rep('@', 65400)
 test:is_deeply({strm.unflatten({s260})}, {true, s260}, 'large string 260')
 test:is_deeply({strm.unflatten({s65400})}, {true, s65400}, 'large string 65400')
+
+for _, type in ipairs({"int", "string", "null", "boolean", "long", "float", "double", "bytes"}) do
+    res = {schema.create({type=type})}
+    test:is_deeply(schema.export(res[2]), type, 'schema normalization '..type)
+end
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)
