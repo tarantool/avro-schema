@@ -4,6 +4,7 @@ local c           = require('avro_schema.compiler')
 local il          = require('avro_schema.il')
 local backend_lua = require('avro_schema.backend')
 local rt          = require('avro_schema.runtime')
+local fingerprint = require('avro_schema.fingerprint')
 
 local format, find, sub = string.format, string.find, string.sub
 local insert, remove, concat = table.insert, table.remove, table.concat
@@ -510,7 +511,14 @@ end
 local function export(schema_h)
     return export_helper(get_schema(schema_h), {})
 end
-
+local function get_fingerprint(schema_h, algo, size)
+    if algo == nil then algo = "sha256" end
+    if size == nil then size = 8 end
+    return fingerprint.get_fingerprint(get_schema(schema_h), algo, size)
+end
+local function to_json(schema_h)
+    return fingerprint.avro_json(get_schema(schema_h))
+end
 return {
     are_compatible = are_compatible,
     create         = create,
@@ -519,5 +527,6 @@ return {
     get_types      = get_types,
     is             = is_schema,
     validate       = validate,
-    export         = export
+    export         = export,
+    fingerprint    = get_fingerprint,
 }

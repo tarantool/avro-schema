@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(50)
+test:plan(54)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -206,6 +206,78 @@ test:is_deeply({strm.unflatten({s65400})}, {true, s65400}, 'large string 65400')
 for _, type in ipairs({"int", "string", "null", "boolean", "long", "float", "double", "bytes"}) do
     res = {schema.create({type=type})}
     test:is_deeply(schema.export(res[2]), type, 'schema normalization '..type)
+end
+
+-- fingerprint tests
+local fingerprint_testcases = {
+    {
+        schema = [[
+            {
+              "name": "Pet",
+              "type": "record",
+              "fields": [
+                {"name": "kind", "type": {"name": "Kind", "type": "enum", "symbols": ["CAT", "DOG"]}},
+                {"name": "name", "type": "string"}
+              ]
+            }
+        ]],
+        fingerprint = "42620f01b34833f1e70cf2a9567fc4d3b9cf8b74afba64af0e9dce9a148b1e90"
+    },
+    {
+        schema = [[{"type": "fixed", "name": "Id", "size": 4}]],
+        fingerprint = "ecd9e5c6039fe40543f95176d664e1b9b56dddf1e8b1e3a6d87a6402b12e305d"
+    },
+    {
+        schema = [[
+            {
+              "type": "record",
+              "name": "HandshakeResponse", "namespace": "org.apache.avro.ipc",
+              "fields": [
+                {"name": "match",
+                 "type": {"type": "enum", "name": "HandshakeMatch",
+                          "symbols": ["BOTH", "CLIENT", "NONE"]}},
+                {"name": "serverProtocol",
+                 "type": ["null", "string"]},
+                {"name": "serverHash",
+                 "type": ["null", {"type": "fixed", "name": "MD5", "size": 16}]},
+                {"name": "meta",
+                 "type": ["null", {"type": "map", "values": "bytes"}]}
+              ]
+            }
+        ]],
+        fingerprint = "a303cbbfe13958f880605d70c521a4b7be34d9265ac5a848f25916a67b11d889"
+    },
+    -- in case of type reuse, it should not be copied. It should only contain type name
+    -- {"name": "serverHash", "type": "MD5"}, -- > {"name":"serverHash","type":{"name":"org.apache.avro.ipc.MD5","type":"fixed","size":16}}!!!
+    -- correct fingerprint is "2b2f7a9b22991fe0df9134cb6b5ff7355343e797aaea337e0150e20f3a35800e"
+    {
+        schema = [[
+            {
+              "type": "record",
+              "name": "HandshakeRequest", "namespace":"org.apache.avro.ipc",
+              "fields": [
+                {"name": "clientHash",
+                 "type": {"type": "fixed", "name": "MD5", "size": 16}},
+                {"name": "clientProtocol", "type": ["null", "string"]},
+                {"name": "meta", "type": ["null", {"type": "map", "values": "bytes"}]}
+              ]
+            }
+        ]],
+        fingerprint = "ef17a5460289684db839c86a0c2cdcfe69da9dd0a3047e6a91f6d6bc37f76314"
+
+    },
+}
+
+function string.tohex(str)
+    return (str:gsub('.', function (c)
+        return string.format('%02X', string.byte(c))
+    end))
+end
+
+for i, testcase in ipairs(fingerprint_testcases) do
+    local _, schema_handler = schema.create(json.decode(testcase.schema))
+    local fingerprint = schema.fingerprint(schema_handler, "sha256", 32)
+    test:is(string.lower(string.tohex(fingerprint)), testcase.fingerprint, "Fingerprint testcase "..i)
 end
 
 test:check()
