@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(54)
+test:plan(64)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -279,6 +279,103 @@ for i, testcase in ipairs(fingerprint_testcases) do
     local fingerprint = schema.fingerprint(schema_handler, "sha256", 32)
     test:is(string.lower(string.tohex(fingerprint)), testcase.fingerprint, "Fingerprint testcase "..i)
 end
+
+local schema_preserve_fields_testcases = {
+    {
+        name = "1",
+        schema = {
+            type="int",
+            extra_field="extra_field"
+        },
+        options = {},
+        ast = "int"
+    },
+    {
+        name = "2",
+        schema = {
+            type="int",
+            extra_field="extra_field"
+        },
+        options = {preserve_in_ast={"extra_field"}},
+        ast = {
+            type="int",
+            extra_field="extra_field"
+        }
+    },
+    {
+        name = "3-complex",
+        schema = {
+            type="int",
+            extra_field={extra_field={"extra_field"}}
+        },
+        options = {preserve_in_ast={"extra_field"}},
+        ast = {
+            type="int",
+            extra_field={extra_field={"extra_field"}}
+        }
+    }
+}
+
+for _, testcase in ipairs(schema_preserve_fields_testcases) do
+    res = {schema.create(testcase.schema, testcase.options)}
+    test:is_deeply(schema.export(res[2]), testcase.ast, 'schema extra fields '..testcase.name)
+end
+
+test:is_deeply(
+        {schema.create("int", {
+                                preserve_in_ast={},
+                                preserve_in_fingerprint={"extra_field"},
+                             })},
+        {false, "fingerprint should contain only fields from AST"},
+        'preserve_in_fingerprint contains more fields than AST')
+
+local fingerprint
+res = {schema.create(
+        {
+            type = "record",
+            name = "test",
+            extra_field = "extra_field",
+            fields = {
+                { name = "bar", type = "null", default = msgpack.NULL, extra_field = "extra" },
+                { name = "foo", type = {"null", "int"}, default = msgpack.NULL },
+            }
+        }, nil)}
+fingerprint = schema.fingerprint(res[2], "sha256", 32)
+test:is(string.lower(string.tohex(fingerprint)),
+        "a64098ee437e9020923c6005db88f37a234ed60daae23b26e33d8ae1bf643356",
+        "Fingerprint extra fields 1")
+
+res = {schema.create(
+        {
+            type = "record",
+            name = "test",
+            extra_field = "extra_field",
+            fields = {
+                { name = "bar", type = "null", default = msgpack.NULL, extra_field = "extra" },
+                { name = "foo", type = {"null", "int"}, default = msgpack.NULL },
+            }
+        }, {preserve_in_ast={"extra_field"}, preserve_in_fingerprint={"extra_field"}})}
+fingerprint = schema.fingerprint(res[2], "sha256", 32)
+test:is(string.lower(string.tohex(fingerprint)),
+        "70bd295335daafff0a4512cadc39a4298cd81c460defec530c7372bdd1ec6f44",
+        "Fingerprint extra fields 2")
+
+res = {schema.create(
+        {
+            type = "int",
+            extra_field = "extra_field",
+        }, {preserve_in_ast={"extra_field"}})}
+fingerprint = schema.fingerprint(res[2], "sha256", 32)
+test:is_deeply(schema.export(res[2]), {type = "int", extra_field = "extra_field"},
+        "Prevent primitive type collapse by extra field")
+
+-- avro_json is used for fingerprint
+fingerprint = require("avro_schema.fingerprint")
+test:is(fingerprint.avro_json({field1="1"}), "{}", "avro_json 1")
+test:is(fingerprint.avro_json({field1="1"}, {"field1"}), '{"field1":"1"}', "avro_json 2")
+test:is(fingerprint.avro_json({field2="1", field1="1"}, {"field2", "field1"}),
+        '{"field1":"1","field2":"1"}', "avro_json 3 order")
+
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)

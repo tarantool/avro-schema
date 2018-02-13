@@ -67,7 +67,7 @@ local floor = math.floor
 local clear = require('table.clear')
 local next, type = next, type
 
-function deepcopy(orig)
+local function deepcopy(orig)
     local orig_type = type(orig)
     local copy
     if orig_type == 'table' then
@@ -131,6 +131,7 @@ local function type_tag(t)
     return (type(t) == 'string' and t) or t.name or t.type
 end
 
+local copy_schema
 local copy_schema_error
 local copy_schema_location_info
 
@@ -200,13 +201,22 @@ local dcache = setmetatable({}, { __mode = 'k' })
 
 local copy_field_default
 
+local function copy_fields(from, to, fields)
+    for _,field in ipairs(fields) do
+        if from[field] ~= nil then
+            to[field] = deepcopy(from[field])
+        end
+    end
+end
 -- create a private copy and sanitize recursively;
 -- [ns]       current ns (or nil)
 -- [scope]    a dictionary of named types (ocasionally used for unnamed too)
 -- [open_rec] a set consisting of the current record + parent records;
 --            it is used to reject records containing themselves
-copy_schema = function(schema, ns, scope, open_rec)
-    local res, ptr -- we depend on these being locals #5 and #6
+-- [options]  options table, contains:
+--             - preserve_in_ast: names of attrs which should not be deleted
+copy_schema = function(schema, ns, scope, open_rec, options)
+    local res, ptr -- we depend on these being locals #6 and #7
     if type(schema) == 'table' then
         if scope[schema] then
             -- this check is necessary for unnamed complex types (union, array map)
@@ -219,7 +229,7 @@ copy_schema = function(schema, ns, scope, open_rec)
             res = {}
             for branchno, xbranch in ipairs(schema) do
                 ptr = branchno
-                local branch = copy_schema(xbranch, ns, scope)
+                local branch = copy_schema(xbranch, ns, scope, nil, options)
                 local bxtype, bxname
                 if type(branch) == 'table' and not branch.type then
                     copy_schema_error('Union may not immediately contain other unions')
@@ -248,13 +258,21 @@ copy_schema = function(schema, ns, scope, open_rec)
             nullable, xtype = extract_nullable(xtype)
 
             if primitive_type[xtype] then
+                -- Preserve fields which are asked to be in ast.
+                res = {}
+                copy_fields(schema, res, options.preserve_in_ast)
                 -- primitive type normalization
-                if nullable == nil then
+                if nullable == nil and not next(res) then
                     return xtype
                 end
-                return {type = xtype, nullable = nullable}
+                res.type = xtype
+                res.nullable = nullable
+                return res
             elseif xtype == 'record' then
-                res = { type = 'record' }
+                -- Preserve fields which are asked to be in ast.
+                res = {}
+                copy_fields(schema, res, options.preserve_in_ast)
+                res.type = 'record'
                 res.nullable = nullable
                 local name, ns = checkname(schema, ns, scope)
                 scope[name] = res
@@ -298,19 +316,19 @@ copy_schema = function(schema, ns, scope, open_rec)
                     if not xtype then
                         copy_schema_error('Record field must have a "type"')
                     end
-                    field.type = copy_schema(xtype, ns, scope, open_rec)
+                    field.type = copy_schema(xtype, ns, scope, open_rec, options)
                     if open_rec[field.type] then
                         local path, n = {}
                         for i = 1, 1000000 do
-                            local _, res = debug.getlocal(i, 5)
+                            local _, res = debug.getlocal(i, 6)
                             if res == field.type then
                                 n = i
                                 break
                             end
                         end
                         for i = n, 1, -1 do
-                            local _, res = debug.getlocal(i, 5)
-                            local _, ptr = debug.getlocal(i, 6)
+                            local _, res = debug.getlocal(i, 6)
+                            local _, ptr = debug.getlocal(i, 7)
                             insert(path, res.fields[ptr].name)
                         end
                         error(format('Record %s contains itself via %s',
@@ -389,7 +407,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 if not xitems then
                     copy_schema_error('Array type must have "items"')
                 end
-                res.items = copy_schema(xitems, ns, scope)
+                res.items = copy_schema(xitems, ns, scope, nil, options)
                 scope[schema] = nil
                 return res
             elseif xtype == 'map' then
@@ -399,7 +417,7 @@ copy_schema = function(schema, ns, scope, open_rec)
                 if not xvalues then
                     copy_schema_error('Map type must have "values"')
                 end
-                res.values = copy_schema(xvalues, ns, scope)
+                res.values = copy_schema(xvalues, ns, scope, nil, options)
                 scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
@@ -478,13 +496,14 @@ copy_schema_location_info = function()
     local top, bottom = find_frames(copy_schema)
     local res = {}
     for i = bottom, top, -1 do
-        local _, node = debug.getlocal(i, 5)
-        local _, ptr  = debug.getlocal(i, 6)
+        -- 6 and 7 are res and ptr vars from copy func
+        local _, node = debug.getlocal(i, 6)
+        local _, ptr  = debug.getlocal(i, 7)
         if type(node) == 'table' then
             if node.type == nil then -- union
                 insert(res, '<union>')
                 if i <= top + 1 then
-                    local _, next_node = debug.getlocal(i - 1, 6)
+                    local _, next_node = debug.getlocal(i - 1, 7)
                     if i == top or (i == top + 1 and
                                     not (next_node and next_node.name)) then
                         insert(res, format('<branch-%d>', ptr))
@@ -525,8 +544,8 @@ copy_schema_error = function(fmt, ...)
 end
 
 -- validate schema definition (creates a copy)
-local function create_schema(schema)
-    return copy_schema(schema, nil, {})
+local function create_schema(schema, options)
+    return copy_schema(schema, nil, {}, nil, options)
 end
 
 -- get a mapping from a (string) type tag -> union branch id

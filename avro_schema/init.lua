@@ -5,6 +5,7 @@ local il          = require('avro_schema.il')
 local backend_lua = require('avro_schema.backend')
 local rt          = require('avro_schema.runtime')
 local fingerprint = require('avro_schema.fingerprint')
+local utils       = require('avro_schema.utils')
 
 local format, find, sub = string.format, string.find, string.sub
 local insert, remove, concat = table.insert, table.remove, table.concat
@@ -22,6 +23,7 @@ local rt_universal_decode = rt.universal_decode
 local install_lua_backend = backend_lua.install
 
 -- We give away a handle but we never expose schema data.
+-- {schema=schema, options=options}
 local schema_by_handle = setmetatable( {}, { __mode = 'k' } )
 
 local function get_schema(handle)
@@ -29,7 +31,7 @@ local function get_schema(handle)
     if not schema then
         error(format('Not a schema: %s', handle), 0)
     end
-    return schema
+    return schema.schema
 end
 
 local function is_schema(schema_handle)
@@ -62,7 +64,7 @@ local function get_ir(from_schema, to_schema, inverse)
 end
 
 local function schema_to_string(handle)
-    local schema = schema_by_handle[handle]
+    local schema = get_schema(handle)
     return format('Schema (%s)',
                   handle[1] or (type(schema) ~= 'table' and schema) or
                   schema.name or schema.type or 'union')
@@ -119,16 +121,53 @@ augment_defaults = function(schema, visited)
     end
 end
 
+local function create_options_validate(options)
+    options = options or {}
+    options = table.deepcopy(options)
+    if type(options) ~= 'table' then
+        return false, "Options should be a table"
+    end
+    if type(options.preserve_in_ast) ~= 'table' then
+        options.preserve_in_ast = {}
+    end
+    for _, f_ast in ipairs(options.preserve_in_ast) do
+        if type(f_ast) ~= 'string' then
+            return false, "preserve fields should be of string type"
+        end
+    end
+    if type(options.preserve_in_fingerprint) ~= 'table' then
+        options.preserve_in_fingerprint = {}
+    end
+    -- preserve_in_fingerprint should not contain fields which are not
+    -- presented in preserve_in_ast
+    for _, f_f in ipairs(options.preserve_in_fingerprint) do
+        if type(f_f) ~= 'string' then
+            return false, "preserve fields should be of string type"
+        end
+        if not utils.table_contains(options.preserve_in_ast, f_f) then
+            return false, "fingerprint should contain only fields from AST"
+        end
+    end
+    return true, options
+end
+
 local function create(raw_schema, options)
-    local ok, schema = pcall(f_create_schema, raw_schema)
+    local ok
+    ok, options = create_options_validate(options)
+    if ok == false then
+        return false, options
+    end
+    local schema
+    ok, schema = pcall(f_create_schema, raw_schema, options)
     if not ok then
         return false, schema
     end
-    if type(options) == 'table' and options.defaults == 'auto' then
+    if options.defaults == 'auto' then
         augment_defaults(schema, {})
     end
     local schema_handle = setmetatable({}, schema_handle_mt)
-    schema_by_handle[schema_handle] = schema
+    schema_by_handle[schema_handle] = {schema = schema,
+                                       options = options}
     return true, schema_handle
 end
 
@@ -511,10 +550,12 @@ end
 local function export(schema_h)
     return export_helper(get_schema(schema_h), {})
 end
-local function get_fingerprint(schema_h, algo, size)
-    if algo == nil then algo = "sha256" end
+local function get_fingerprint(schema_h, hash, size)
+    if hash == nil then hash = "sha256" end
     if size == nil then size = 8 end
-    return fingerprint.get_fingerprint(get_schema(schema_h), algo, size)
+    local schema = schema_by_handle[schema_h]
+    return fingerprint.get_fingerprint(schema.schema, hash,
+                                       size, schema.options)
 end
 local function to_json(schema_h)
     return fingerprint.avro_json(get_schema(schema_h))
