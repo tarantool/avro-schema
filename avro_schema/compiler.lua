@@ -426,6 +426,13 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                            il.isset(v_base + i, ipv, ipo, from_fields[i].name))
                 end
             end
+
+            -- If field is nullable, set tag to NULL by default
+            if field.type.nullable then
+                insert(code, il.checkobuf(2))
+                insert(code, il.putintc(offset, 0));
+                insert(code, il.putnulc(offset + 1))
+            end
         elseif i then -- and not next_offset: v/offset or v/length, append
             local branch = strswitch[i + 1]
             il:append_code('cn', branch, field_ir, loop_var, 1, loop_var)
@@ -446,6 +453,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                                     field.type, field.default) 
         end
         offset = next_offset
+
         -- kill variable (if any)
         if i then insert(code_section2, il.endvar(v_base + i)) end
     end
@@ -690,6 +698,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                        { il.ibranch(1),
                          il.putintc(0, 0),
                          il.move(0, 0, 1),
+                         il.checkobuf(1),
                          il.putnulc(0),
                          il.move(0, 0, 1)
                        },

@@ -628,7 +628,7 @@ copy_data = function(schema, data, visited)
     -- Due to this technique, a error message is often misleading,
     -- e.x. "attempt to perform arithmetic on a string value". Unless
     -- a message starts with '@', we replace it (see copy_data_eh).
-    if schema.nullable and data == null then
+    if schema.nullable and (data == null or data == nil) then
         return null
     end
     if     schematype == 'null' then
@@ -703,6 +703,8 @@ copy_data = function(schema, data, visited)
                 if     data[field.name] then
                 elseif type(field.default) ~= 'nil' then
                     res[field.name] = table.deepcopy(field.default)
+                elseif field.type and field.type.nullable then
+                    res[field.name] = null
                 else
                     error(format('@Field %s missing', field.name), 0)
                 end

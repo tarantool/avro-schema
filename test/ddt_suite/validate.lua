@@ -480,3 +480,17 @@ t {
     validate = 'null',
     validate_only = true
 }
+
+-- gh-35: a regression test. Make sure, that if field
+-- marked nullable, then this means to validator that
+-- absense of such a field in data means it is NULL.
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "string"},
+        {"name": "Y", "type": "string*"}
+      ]
+    }]],
+    validate = '{"X": "HELLO"}',
+    validate_only = true
+}

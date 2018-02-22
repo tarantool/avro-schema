@@ -537,3 +537,17 @@ t {
     input = ' [0, null, "kek"]',
     output = [[ { "X": null, "Y": "kek" } ]]
 }
+
+-- gh-35: a regression test. Make sure, that if field
+-- marked nullable, then this means to flattener that
+-- absense of such a field in data means it is NULL.
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "int*"},
+        {"name": "Y", "type": "string"} ]
+      }]],
+    func = 'flatten',
+    input = [[ { "Y": "kek" } ]],
+    output = ' [0, null, "kek"]'
+}
