@@ -200,7 +200,7 @@ local ir2ilfuncs = {
 --    Excludes checks implied by 'c'.
 --
 -- See new_codegen() below for il:append_code() / __FUNC__ / __CALL__ info.
-local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
     local ir_type = ir.type
     if not ir_type then
         local ilfuncs = ir2ilfuncs[ir]
@@ -235,12 +235,31 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == 'ARRAY' then
         if find(mode, 'c') then insert(code, il.isarray(ipv, ipo)) end
         if find(mode, 'x') then
+            -- print("ARRAY code gen ipv="..ipv.."; ipo="..ipo)
+            -- print(" IR-nested: "..require('json').encode(ir.nested))
             extend(code,
                    il.checkobuf(1),
                    il.putarray(0, ipv, ipo),
                    il.move(0, 0, 1))
             local loop_var, loop_body = append_objforeach(il, code, ipv, ipo)
-            il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
+            if ir.nested.nullable then
+                if is_flatten then
+                    extend(loop_body,
+                           il.checkobuf(1),
+                           il.putarrayc(0, 2),
+                           il.move(0, 0, 1))
+                    il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
+                else
+                    extend(loop_body,
+                           il.isarray(loop_var, 0))
+                    local nested_var, nested_body = append_objforeach(il, loop_body, loop_var, ipo)
+
+                    il:append_code('cxn', nested_body, ir.nested, nested_var, 0, nested_var)
+                    extend(loop_body, il.move(loop_var, loop_var, 3))
+                end
+            else
+                    il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
+            end
         end
         if find(mode, 'n') then insert(code, il.skip(ripv, ipv, ipo)) end
     elseif ir_type == 'MAP' then
@@ -278,7 +297,7 @@ end
 -- into a separate function. In the later case, synthesized
 -- __FUNC__ / __CALL__ IR objects are passed down the chain
 -- to allow for customization.
-local function new_codegen(il, funcs, next_appender, root_ir, root_func)
+local function new_codegen(il, funcs, next_appender, root_ir, root_func, is_flatten)
     local open_records = {}
     local cache = { [root_ir] = {
         type = '__CALL__', func = root_func, nested = root_ir }
@@ -307,13 +326,13 @@ local function new_codegen(il, funcs, next_appender, root_ir, root_func)
                     -- only an entry point, but also called by other funcs
                     call.func[1].name = il.id()
                 end
-                return next_appender(il, mode, code, call, ipv, ipo, ripv)
+                return next_appender(il, mode, code, call, ipv, ipo, ripv, is_flatten)
             end
             open_records[ir] = true
-            next_appender(il, mode, code, ir, ipv, ipo, ripv)
+            next_appender(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
             open_records[ir] = nil
         else
-            return next_appender(il, mode, code, ir, ipv, ipo, ripv)
+            return next_appender(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
         end
     end
     return setmetatable({ append_code = appender }, { __index = il })
@@ -658,7 +677,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 dest = { il.ibranch(0),
                          il.putintc(0, 1),
                          il.move(0, 0, 1)}
-                do_append_code(il, 'cx', dest, ir, ipv, ipo, ripv)
+                do_append_code(il, 'cx', dest, ir, ipv, ipo, ripv, true)
 
                 extend(code, il.checkobuf(2))
                 insert(code, {
@@ -677,11 +696,11 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 if ir.nullable == true then
                     insert(dest, il.skip(ripv, ipv, ipo))
                 else
-                    do_append_code(il, 'n', code, ir, ipv, ipo, ripv)
+                    do_append_code(il, 'n', code, ir, ipv, ipo, ripv, true)
                 end
             end
         else
-            return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+            return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
         end
     else -- defer to basic codegen
         if ir.type == nil and ir.nullable == true then
@@ -690,7 +709,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                 dest = { il.ibranch(0),
                          il.putintc(0, 1),
                          il.move(0, 0, 1)}
-                do_append_code(il, 'cx', dest, ir[1], ipv, ipo, ripv)
+                do_append_code(il, 'cx', dest, ir[1], ipv, ipo, ripv, true)
 
                 extend(code, il.checkobuf(2))
                 insert(code, {
@@ -698,18 +717,17 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                        { il.ibranch(1),
                          il.putintc(0, 0),
                          il.move(0, 0, 1),
-                         il.checkobuf(1),
                          il.putnulc(0),
                          il.move(0, 0, 1)
                        },
                        dest })
                 if find(mode, 'n') then
-                    do_append_code(il, 'n', code, ir[1], ipv, ipo, ripv)
+                    do_append_code(il, 'n', code, ir[1], ipv, ipo, ripv, true)
                 end
                 return
             end
         else
-            return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+            return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
         end
     end
 end
@@ -819,14 +837,14 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         if find(mode, 'x') then
             if ir.from.nullable then
                 local dest = { il.ibranch(1),
-                               il.move(1, 1, 1) }
+                               il.move(ipv, ipv, 1) }
 
                 extend(code, il.checkobuf(1))
                 insert(code, {
                            il.intswitch(ipv, ipo),
                            { il.ibranch(0),
                              il.putnulc(0),
-                             il.move(1, 1, 2),
+                             il.move(ipv, ipv, 2),
                              il.move(0, 0, 1)
                            },
                            dest })
@@ -879,14 +897,14 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
             -- TODO: before intswitch: issue ISINT insn to make sure that value
             -- is actually integer.
             local dest = { il.ibranch(1),
-                           il.move(1, 1, 2) }
+                           il.move(ipv, ipv, 2) }
 
             extend(code, il.checkobuf(1))
             insert(code, {
                        il.intswitch(ipv, ipo),
                        { il.ibranch(0),
                          il.putnulc(0),
-                         il.move(1, 1, 2),
+                         il.move(ipv, ipv, 2),
                          il.move(0, 0, 1)
                        },
                        dest })
@@ -901,7 +919,7 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         -- print("Unflatten array IR :"..json.encode(ir))
         if ir.nullable then
             local dest = { il.ibranch(1),
-                           il.move(1, 1, 1) }
+                           il.move(ipv, ipv, 1) }
             do_append_code(il, mode, dest, ir, ipv, ipo, ripv)
 
             extend(code, il.checkobuf(1))
@@ -909,7 +927,7 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
                        il.intswitch(ipv, ipo),
                        { il.ibranch(0),
                          il.putnulc(0),
-                         il.move(1, 1, 2),
+                         il.move(ipv, ipv, 2),
                          il.move(0, 0, 1)
                        },
                        dest })
@@ -919,14 +937,14 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     else -- defer to basic codegen
         if ir.type == nil and ir.nullable == true then
             local dest = { il.ibranch(1),
-                           il.move(1, 1, 1) }
+                           il.move(ipv, ipv, 1) }
 
             extend(code, il.checkobuf(1))
             insert(code, {
                        il.intswitch(ipv, ipo),
                        { il.ibranch(0),
                          il.putnulc(0),
-                         il.move(1, 1, 2),
+                         il.move(ipv, ipv, 2),
                          il.move(0, 0, 1)
                        },
                        dest })
@@ -958,7 +976,7 @@ local function emit_code(il, ir, service_fields)
         { il.declfunc(3, 1) }
     }
 
-    local f_codegen = new_codegen(il, funcs, do_append_flatten,   ir, funcs[1])
+    local f_codegen = new_codegen(il, funcs, do_append_flatten,   ir, funcs[1], true)
     local u_codegen = new_codegen(il, funcs, do_append_unflatten, ir, funcs[2])
 
     f_codegen:append_code('cxn', funcs[1], ir, 1, 0, 1)

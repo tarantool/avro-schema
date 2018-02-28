@@ -21,6 +21,10 @@ local string_array_nullable = [[{
     "items": "string"
 }]]
 
+local string_array_items_nullable = [[{
+    "type": "array",
+    "items": "string*"
+}]]
 -----------------------------------------------------------------------
 
 t {
@@ -190,4 +194,28 @@ t {
     schema = string_array_nullable,
     func = 'unflatten',
     input = '[0, null]', output = 'null'
+}
+
+t {
+    schema = string_array_items_nullable,
+    func = 'flatten',
+    input = '[null, null]', output = '[[[0, null], [0, null]]]'
+}
+
+t {
+    schema = string_array_items_nullable,
+    func = 'unflatten',
+    input = '[[[0, null], [0, null]]]', output = '[null, null]'
+}
+
+t {
+    schema = string_array_items_nullable,
+    func = 'flatten',
+    input = '[null, "hello"]', output = '[[[0, null], [1, "hello"]]]'
+}
+
+t {
+    schema = string_array_items_nullable,
+    func = 'unflatten',
+    input = '[[[0, null], [1, "hello"]]]', output = '[null, "hello"]'
 }
