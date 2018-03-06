@@ -1,8 +1,8 @@
 package = 'avro-schema'
-version = 'scm-1'
+version = '2.1.1-1'
 source  = {
-    url    = 'git://github.com/tarantool/avro-schema.git',
-    branch = 'master',
+    url = 'git://github.com/tarantool/avro-schema.git',
+    tag = '2.1.1',
 }
 description = {
     summary  = "Apache Avro schema tools for Tarantool",
@@ -19,12 +19,12 @@ external_dependencies = {
     };
 }
 build = {
-    type = 'cmake',
+    type = 'cmake';
     variables = {
         TARANTOOL_DIR="$(TARANTOOL_DIR)";
-        CMAKE_BUILD_TYPE="RelWithDebInfo",
-        TARANTOOL_INSTALL_LIBDIR="$(LIBDIR)",
-        TARANTOOL_INSTALL_LUADIR="$(LUADIR)",
-    },
+        CMAKE_BUILD_TYPE="RelWithDebInfo";
+        TARANTOOL_INSTALL_LIBDIR="$(LIBDIR)";
+        TARANTOOL_INSTALL_LUADIR="$(LUADIR)";
+    };
 }
 -- vim: syntax=lua
