@@ -123,7 +123,7 @@ end
 
 local function create_options_validate(options)
     options = options or {}
-    options = frontend.deepcopy(options)
+    options = table.deepcopy(options)
     if type(options) ~= 'table' then
         return false, "Options should be a table"
     end
