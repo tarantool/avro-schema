@@ -389,7 +389,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 local symbolmap = {}
                 for symbolno, symbol in ipairs(xsymbols) do
                     symbol = tostring(symbol)
-                    if not validname(symbol) then
+                    if not validname(symbol) and not options.utf8_enums then
                         copy_schema_error('Bad enum symbol name: %s', symbol)
                     end
                     if symbolmap[symbol] then
