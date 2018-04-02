@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(64)
+test:plan(67)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -376,6 +376,22 @@ test:is(fingerprint.avro_json({field1="1"}, {"field1"}), '{"field1":"1"}', "avro
 test:is(fingerprint.avro_json({field2="1", field1="1"}, {"field2", "field1"}),
         '{"field1":"1","field2":"1"}', "avro_json 3 order")
 
+-- check that schema which uses any type cannot be compiled
+res = {schema.create({
+    name = "foo",
+    type = "record",
+    fields = {
+        {
+            name = "X",
+            type = "any"
+        }
+    }
+})}
+test:is(true, res[1], "Schema created successfully")
+res = {schema.compile(res[2])}
+test:is(false, res[1], "Schema cannot be compiled")
+test:like(res[2], "ANY: not supported in compiled schemas",
+    "any: compile error message")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)

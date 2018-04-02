@@ -494,3 +494,55 @@ t {
     validate = '{"X": "HELLO"}',
     validate_only = true
 }
+
+-- any
+t {
+    schema = '"any"',
+    validate = 'null',
+    validate_only = true
+}
+
+t {
+    schema = '"any"',
+    validate = '"string"',
+    validate_only = true
+}
+
+t {
+    schema = '"any"',
+    validate = '["1", 1, null, {"1":2}]',
+    validate_only = true
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "any"},
+      ]
+    }]],
+    schema = '"any"',
+    validate = '{"X":123}',
+    validate_only = true
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X", "type": "any"},
+      ]
+    }]],
+    schema = '"any"',
+    validate = '{}',
+    validate_only = true
+}
+
+t {
+    schema = [[{
+      "name": "foo", "type": "record", "fields": [
+        {"name": "X*", "type": "any"},
+      ]
+    }]],
+    schema = '"any"',
+    validate = '{}',
+    validate_only = true
+}
