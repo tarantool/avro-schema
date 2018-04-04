@@ -66,6 +66,13 @@ local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
 local clear = require('table.clear')
 local next, type = next, type
+-- states of type declaration
+local TYPE_STATE = {
+    NEVER_USED = nil, -- not referenced and not defined
+    -- referenced but not defined; only for forward_reference = true
+    REFERENCED = 0,
+    DEFINED = 1, -- defined and possibly referenced
+}
 
 local function deepcopy(orig)
     local orig_type = type(orig)
@@ -135,6 +142,59 @@ local copy_schema
 local copy_schema_error
 local copy_schema_location_info
 
+-- Add new type definition to scope.
+-- Can be used to add a completed type and a blank type which will be filled
+-- soon.
+-- Note: `scope_get_type` may return different table in case of nullability and
+-- forward_reference.
+local function scope_add_type(context, typeid, xtype)
+    local scope = context.scope
+    local _, typeid = extract_nullable(typeid)
+    xtype.nullable = nil
+    if context.type_state[typeid] == TYPE_STATE.DEFINED then
+        copy_schema_error('Type name already defined: %s', typeid)
+    end
+    -- make the type store name in canonical form
+    xtype.name = typeid
+    -- In case of forward_reference it is necessary to check if this type is
+    -- used already somewhere, and reuse the same table for the type.
+    if context.type_state[typeid] == TYPE_STATE.REFERENCED then
+        local deferred_def = scope[typeid]
+        assert(deferred_def)
+        assert(next(deferred_def) == nil)
+        for k, v in pairs(xtype) do
+            deferred_def[k] = v
+        end
+    else
+        assert(context.type_state[typeid] == TYPE_STATE.NEVER_USED)
+        scope[typeid] = xtype
+        scope[typeid .. "*"] = { nullable = true }
+    end
+    context.type_state[typeid] = TYPE_STATE.DEFINED
+end
+
+-- Get a type by its `typeid` and nullability.
+-- Note: the function returns different tables for nullable and non-nullable
+-- types.
+local function scope_get_type(context, typeid, nullable)
+    local scope = context.scope
+    local _, typeid = extract_nullable(typeid)
+    local full_type = nullable and typeid .. "*" or typeid
+    if scope[full_type] then
+        assert(context.type_state[typeid] == TYPE_STATE.REFERENCED or
+        context.type_state[typeid] == TYPE_STATE.DEFINED)
+        return scope[full_type]
+    end
+    if not context.options.forward_reference then
+        copy_schema_error('Unknown Avro type: %s', typeid)
+    end
+    assert(context.type_state[typeid] == TYPE_STATE.NEVER_USED)
+        context.type_state[typeid] = TYPE_STATE.REFERENCED
+    scope[typeid] = {}
+    scope[typeid .. "*"] = { nullable = true }
+    return scope[full_type]
+end
+
 -- handle @name attribute of a named type
 local function checkname(schema, context, ns)
     local scope = context.scope
@@ -159,7 +219,7 @@ local function checkname(schema, context, ns)
         copy_schema_error('Redefining primitive type name: %s', xname)
     end
     xname = fullname(xname, ns)
-    if scope[xname] then
+    if context.type_state[xname] == TYPE_STATE.DEFINED then
         copy_schema_error('Type name already defined: %s', xname)
     end
     return xname, ns
@@ -220,7 +280,10 @@ local LOCAL_VAR_POS_ptr = 6
 --   options: options passed by a user, contains:
 --     preserve_in_ast: names of attrs which should not be deleted
 --     utf8_enums: allow utf8 enum items
---   scope: a dictionary of named types (ocasionally used for unnamed too)
+--     forward_reference: allow use type before definition
+--   scope: a dictionary of named types (occasionally used for unnamed too)
+--   type_state: a dictionary which stores which types are referenced (in case
+--               if forward_reference) and which are already defined
 -- ns: current namespace (or nil)
 -- open_rec: a set consisting of the current record + parent records;
 --           it is used to reject records containing themselves
@@ -280,13 +343,11 @@ copy_schema = function(schema, context, ns, open_rec)
                 return res
             elseif xtype == 'record' then
                 -- Preserve fields which are asked to be in ast.
-                res = {}
+                res = {type = 'record'}
                 copy_fields(schema, res, context.options.preserve_in_ast)
-                res.type = 'record'
-                res.nullable = nullable
                 local name, ns = checkname(schema, context, ns)
-                context.scope[name] = res
-                res.name = name
+                scope_add_type(context, name, res)
+                res = scope_get_type(context, name, nullable)
                 res.aliases = checkaliases(schema, context, ns)
                 open_rec = open_rec or {}
                 open_rec[res] = 1
@@ -380,11 +441,11 @@ copy_schema = function(schema, context, ns, open_rec)
                 open_rec[res] = nil
                 return res
             elseif xtype == 'enum' then
-                res = { type = 'enum', symbols = {}, nullable = nullable }
-                -- print("     res: "..json.encode(res))
+                res = { type = 'enum' }
                 local name, ns = checkname(schema, context, ns)
-                context.scope[name] = res
-                res.name = name
+                scope_add_type(context, name, res)
+                res = scope_get_type(context, name, nullable)
+                res.symbols = {}
                 res.aliases = checkaliases(schema, context, ns)
                 local xsymbols = schema.symbols
                 if not xsymbols then
@@ -432,10 +493,10 @@ copy_schema = function(schema, context, ns, open_rec)
                 context.scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
-                res = { type = 'fixed', nullable = nullable }
+                res = { type = 'fixed' }
                 local name, ns = checkname(schema, context, ns)
-                context.scope[name] = res
-                res.name = name
+                scope_add_type(context, name, res)
+                res = scope_get_type(context, name, nullable)
                 res.aliases = checkaliases(schema, context, ns)
                 local xsize = schema.size
                 if xsize==nil then
@@ -455,7 +516,6 @@ copy_schema = function(schema, context, ns, open_rec)
         local typeid = tostring(schema)
 
         local nullable, typeid = extract_nullable(typeid)
-        -- print("** "..tostring(nullable).." "..typeid)
 
         if primitive_type[typeid] then
             if nullable then
@@ -465,19 +525,7 @@ copy_schema = function(schema, context, ns, open_rec)
             end
         end
         typeid = fullname(typeid, ns)
-        schema = context.scope[typeid]
-        if schema and schema ~= true then -- ignore alias names
-            if nullable ~= schema.nullable then
-                schema = deepcopy(schema)
-                schema.nullable = nullable
-                -- print("  old: "..json.encode(scope[typeid]))
-                -- print("  new: "..json.encode(schema))
-                return schema
-            else
-                return schema
-            end
-        end
-        copy_schema_error('Unknown Avro type: %s', typeid)
+        return scope_get_type(context, typeid, nullable)
     end
 end
 
@@ -555,9 +603,48 @@ copy_schema_error = function(fmt, ...)
     end
 end
 
+local function copy_fields_non_deep(from, to)
+    for k, v in pairs(from) do
+        to[k] = v
+    end
+end
+
+local function postprocess_copy_schema(context)
+    local scope = context.scope
+    for typeid, _ in pairs(context.type_state) do
+        assert(type(typeid) == "string")
+        local nullable, typeid = extract_nullable(typeid)
+        local type_non_nullable = scope[typeid]
+        local type_nullable = scope[typeid .. "*"]
+        copy_fields_non_deep(type_non_nullable, type_nullable)
+        copy_fields_non_deep(type_nullable, type_non_nullable)
+        type_nullable.nullable = true
+        type_non_nullable.nullable = nil
+    end
+end
+
 -- validate schema definition (creates a copy)
 local function create_schema(schema, options)
-    return copy_schema(schema, {scope={}, options=options})
+    local context = {
+        scope = {},
+        -- `TYPE_STATE` union; stores only nonnullable equivalents of typeids
+        type_state = {},
+        options = options
+    }
+    local res
+    if not options.forward_reference then
+        res = copy_schema(schema, context)
+    else
+        res =  copy_schema(schema, context)
+        -- Check if all references are resolved.
+        for typeid, state in pairs(context.type_state) do
+            if state == TYPE_STATE.REFERENCED then
+                copy_schema_error('Unknown Avro type: %s', typeid)
+            end
+        end
+    end
+    postprocess_copy_schema(context)
+    return res
 end
 
 -- get a mapping from a (string) type tag -> union branch id
