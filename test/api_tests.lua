@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(67)
+test:plan(69)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -392,6 +392,80 @@ res = {schema.compile(res[2])}
 test:is(false, res[1], "Schema cannot be compiled")
 test:like(res[2], "ANY: not supported in compiled schemas",
     "any: compile error message")
+
+-- check `deffered_definition` option
+local deferred_orig = {
+    {
+        name = "X",
+        type = "record",
+        fields = {
+            {
+                name = "reference_second",
+                type = "second"
+            },
+            {
+                name = "f2",
+                type = {
+                    name = "second",
+                    type = "record",
+                    fields = {
+                        {
+                            name = "f1",
+                            type = "double"
+                        },
+                        {
+                            name = "reference_first",
+                            type = "first"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    {
+        name = "first",
+        type = "fixed",
+        size = 16
+    }
+}
+local deferred_canonical = {
+    {
+        name = "X",
+        type = "record",
+        fields = {
+            {
+                name = "reference_second",
+                type = {
+                    type = "record",
+                    name = "second",
+                    fields = {
+                        {
+                            name = "f1",
+                            type = "double"
+                        },
+                        {
+                            name = "reference_first",
+                            type = {
+                                name = "first",
+                                type = "fixed",
+                                size = 16
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                name = "f2",
+                type = "second"
+            }
+        }
+    },
+    "first"
+}
+res = {schema.create(deferred_orig, {deferred_definition = true})}
+test:is(res[1], true, "Schema created successfully")
+res = schema.export(res[2])
+test:is_deeply(res, deferred_canonical, "Exported schema should be canonical.")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)

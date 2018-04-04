@@ -135,6 +135,24 @@ local copy_schema
 local copy_schema_error
 local copy_schema_location_info
 
+-- add new type definition to scope
+local function scope_add_type(scope, options, typeid, xtype)
+    -- make the type allways store name in canonical form
+    xtype.name = typeid
+    -- In case of deferred_definition it is necessary to check if this type is
+    -- used already somewhere, and reuse the same table for type.
+    if options.deferred_definition and
+        options.deferred_definitions[typeid] then
+        local deferred_def = options.deferred_definitions[typeid]
+        for k, v in pairs(xtype) do
+            deferred_def[k] = v
+        end
+        return deferred_def
+    end
+    scope[typeid] = xtype
+    return xtype
+end
+
 -- handle @name attribute of a named type
 local function checkname(schema, ns, scope)
     local xname = schema.name
@@ -275,8 +293,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 res.type = 'record'
                 res.nullable = nullable
                 local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
-                res.name = name
+                res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 open_rec = open_rec or {}
                 open_rec[res] = 1
@@ -373,8 +390,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 res = { type = 'enum', symbols = {}, nullable = nullable }
                 -- print("     res: "..json.encode(res))
                 local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
-                res.name = name
+                res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 local xsymbols = schema.symbols
                 if not xsymbols then
@@ -423,8 +439,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             elseif xtype == 'fixed' then
                 res = { type = 'fixed' }
                 local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
-                res.name = name
+                res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 local xsize = schema.size
                 if xsize==nil then
@@ -455,6 +470,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
         end
         typeid = fullname(typeid, ns)
         schema = scope[typeid]
+
         if schema and schema ~= true then -- ignore alias names
             if nullable ~= schema.nullable then
                 schema = deepcopy(schema)
@@ -466,7 +482,18 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 return schema
             end
         end
-        copy_schema_error('Unknown Avro type: %s', typeid)
+        -- in case of deferred definitions just create a table for the type
+        -- which would be filled wiht type when definition is found
+        if options.deferred_definition then
+            local deferred_def = options.deferred_definitions[typeid]
+            if deferred_def == nil then
+                deferred_def = {}
+                options.deferred_definitions[typeid] = deferred_def
+            end
+            return deferred_def
+        else
+            copy_schema_error('Unknown Avro type: %s', typeid)
+        end
     end
 end
 
@@ -545,7 +572,24 @@ end
 
 -- validate schema definition (creates a copy)
 local function create_schema(schema, options)
-    return copy_schema(schema, nil, {}, nil, options)
+    if not options.deferred_definition then
+        return copy_schema(schema, nil, {}, nil, options)
+    else
+        local res
+        local scope = {}
+        -- table for definitions which are used but not defined yet
+        options.deferred_definitions = {}
+        res = copy_schema(schema, nil, scope, nil, options)
+        for typeid, deferred_def in pairs(options.deferred_definitions) do
+            -- deferred_def is still blank
+            if not next(deferred_def) then
+                copy_schema_error('Unknown Avro type: %s', typeid)
+            end
+        end
+        options.deferred_definition = true
+        options.deferred_definitions = nil
+        return res
+    end
 end
 
 -- get a mapping from a (string) type tag -> union branch id
