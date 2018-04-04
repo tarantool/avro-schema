@@ -514,7 +514,11 @@ get_types_helper = function(res, pos, rec)
         elseif not ftype.type then -- union
             pos = pos + 2
         else
-            res[pos] = ftype.name or ftype.type
+            local ftype_type = ftype.type
+            if ftype.nullable then
+                ftype_type = ftype.type .. "*"
+            end
+            res[pos] = ftype.name or ftype_type
             pos = pos + 1
         end
     end
