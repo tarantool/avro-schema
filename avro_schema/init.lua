@@ -532,23 +532,8 @@ local function get_types(schema_h)
     end
 end
 
-local export_helper
-export_helper = function(node, already_built)
-    if type(node) ~= 'table' then
-        return node
-    elseif already_built[node] then
-        return node.name
-    else
-        already_built[node] = true
-        local res = {}
-        for k, v in pairs(node) do
-            res[k] = k == 'default' and v or export_helper(v, already_built)
-        end
-        return res
-    end
-end
 local function export(schema_h)
-    return export_helper(get_schema(schema_h), {})
+    return front.export_helper(get_schema(schema_h), {})
 end
 local function get_fingerprint(schema_h, hash, size)
     if hash == nil then hash = "sha256" end

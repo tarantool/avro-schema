@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(69)
+test:plan(70)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -467,6 +467,50 @@ test:is(res[1], true, "Schema created successfully")
 res = schema.export(res[2])
 test:is_deeply(res, forward_canonical,
     "Exported schema should be canonical.")
+
+-- check if nullable reference is not exported as a definition
+local nullable_reference = {
+    name = "X",
+    type = "record",
+    fields = {
+        {
+            name = "first",
+            type = {
+                name = "first",
+                type = "fixed",
+                size = 16
+            }
+        },
+        {
+            name = "second",
+            type = "first*"
+        }
+    }
+}
+-- TODO: remove this after #38
+local nullable_reference_export = {
+    name = "X",
+    type = "record",
+    fields = {
+        {
+            name = "first",
+            type = {
+                name = "first",
+                type = "fixed",
+                size = 16
+            }
+        },
+        {
+            name = "second",
+            -- nullable fields are still exported as without * sign
+            type = "first"
+        }
+    }
+}
+res = {schema.create(nullable_reference)}
+res = schema.export(res[2])
+test:is_deeply(res, nullable_reference_export,
+    "Export nullable reference")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)
