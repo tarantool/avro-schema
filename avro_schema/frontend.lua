@@ -296,7 +296,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 open_rec = open_rec or {}
-                open_rec[res] = 1
+                open_rec[name] = 1
                 local xfields = schema.fields
                 if not xfields then
                     copy_schema_error('Record type must have "fields"')
@@ -334,7 +334,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                         copy_schema_error('Record field must have a "type"')
                     end
                     field.type = copy_schema(xtype, ns, scope, open_rec, options)
-                    if open_rec[field.type] then
+                    if open_rec[type_tag(field.type)] then
                         local path, n = {}
                         for i = 1, 1000000 do
                             local _, res = debug.getlocal(i, 6)
@@ -384,7 +384,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                     field.hidden = not not xfield.hidden or nil -- extension
                 end
                 dcache[res] = fieldmap
-                open_rec[res] = nil
+                open_rec[name] = nil
                 return res
             elseif xtype == 'enum' then
                 res = { type = 'enum', symbols = {}, nullable = nullable }
