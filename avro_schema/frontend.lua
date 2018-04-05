@@ -1050,10 +1050,77 @@ local function create_ir(from, to, imatch)
     return build_ir(from, to, {}, imatch)
 end
 
+-- This function takes AST and produces canonical form of the avro schema.
+-- All tables from AST are copied, so that user cannot spoil AST.
+local export_helper
+export_helper = function(node, already_built)
+    already_built = already_built or {}
+    if type(node) ~= 'table' then
+        if primitive_type[node] then
+            return node
+        end
+        -- This have to be data the user asked to preserve.
+        return node
+    end
+    if #node > 0 then -- union
+        local res = {}
+        for i, branch in ipairs(node) do
+            res[i] = export_helper(branch, already_built)
+        end
+        return res
+    else
+        local xtype = node.type
+        if primitive_type[xtype] then
+            return table.deepcopy(node)
+        elseif xtype == 'record' then
+            if already_built[node.name] then
+                return node.name
+            end
+            already_built[node.name] = true
+            local res = {fields = {}}
+            utils.copy_fields_except(node, res, {"fields"})
+            for i, field in ipairs(node.fields) do
+                local xfield = {
+                    name = field.name,
+                    type = export_helper(field.type, already_built)
+                }
+                res.fields[i] = xfield
+            end
+            return res
+        elseif xtype == "enum" then
+            if already_built[node.name] then
+                return node.name
+            end
+            already_built[node.name] = true
+            return table.deepcopy(node)
+        elseif xtype == 'array' then
+            local res = {}
+            utils.copy_fields_except(node, res, {"items"})
+            res.items = exoprt_helper(node.items, already_built)
+            return res
+        elseif xtype == 'map' then
+            local res = {}
+            utils.copy_fields_except(node, res, {"values"})
+            res.values = export_helper(node.values, already_built)
+            return res
+        elseif xtype == 'fixed' then
+            if already_built[node.name] then
+                return node.name
+            end
+            already_built[node.name] = true
+            return table.deepcopy(node)
+        else
+            -- This have to be data the user asked to preserve.
+            return table.deepcopy(node)
+        end
+    end
+end
+
 return {
     create_schema         = create_schema,
     validate_data         = validate_data,
     create_ir             = create_ir,
     get_enum_symbol_map   = get_enum_symbol_map,
-    get_union_tag_map     = get_union_tag_map
+    get_union_tag_map     = get_union_tag_map,
+    export_helper         = export_helper
 }
