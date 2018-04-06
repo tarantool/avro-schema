@@ -421,7 +421,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
-                res = { type = 'fixed' }
+                res = { type = 'fixed', nullable = nullable }
                 local name, ns = checkname(schema, ns, scope)
                 scope[name] = res
                 res.name = name
