@@ -544,3 +544,20 @@ t {
     validate = '{}',
     validate_only = true
 }
+
+t {
+    schema = [[
+        {
+            "type": "record",
+            "name": "X",
+            "fields": [
+                {
+                    "name": "f1",
+                    "type": "float*"
+                }
+            ]
+        }
+    ]],
+    validate = '{"f1":3.1415}',
+    validate_only = true
+}
