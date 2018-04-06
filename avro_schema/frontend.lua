@@ -68,21 +68,6 @@ local floor = math.floor
 local clear = require('table.clear')
 local next, type = next, type
 
-local function deepcopy(orig)
-    local orig_type = type(orig)
-    local copy
-    if orig_type == 'table' then
-        copy = {}
-        for orig_key, orig_value in next, orig, nil do
-            copy[deepcopy(orig_key)] = deepcopy(orig_value)
-        end
-        setmetatable(copy, deepcopy(getmetatable(orig)))
-    else -- number, string, boolean, etc
-        copy = orig
-    end
-    return copy
-end
-
 -- primitive types
 local primitive_type = {
     null  = 'NUL', boolean = 'BOOL', int   = 'INT', long   = 'LONG',
@@ -467,7 +452,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
 
         if schema and schema ~= true then -- ignore alias names
             if nullable ~= schema.nullable then
-                schema = deepcopy(schema)
+                schema = table.deepcopy(schema)
                 schema.nullable = nullable
                 -- print("  old: "..json.encode(scope[typeid]))
                 -- print("  new: "..json.encode(schema))
