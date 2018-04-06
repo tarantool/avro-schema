@@ -59,6 +59,7 @@
 local debug = require('debug')
 local json = require('json')
 local ffi = require('ffi')
+local utils = require('avro_schema.utils')
 local null = ffi.cast('void *', 0)
 local format, find, gsub, len = string.format, string.find, string.gsub, string.len
 local sub, lower = string.sub, string.lower
@@ -248,14 +249,6 @@ local dcache = setmetatable({}, { __mode = 'k' })
 
 local copy_field_default
 
-local function copy_fields(from, to, fields)
-    for _,field in ipairs(fields) do
-        if from[field] ~= nil then
-            to[field] = deepcopy(from[field])
-        end
-    end
-end
-
 -- The position of local vars in copy_schema function; used for debug purposes.
 local LOCAL_VAR_POS_res = 5
 local LOCAL_VAR_POS_ptr = 6
@@ -318,7 +311,8 @@ copy_schema = function(schema, context, ns, open_rec)
             if primitive_type[xtype] then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, context.options.preserve_in_ast)
+                utils.copy_fields(schema, res,
+                    {fields=context.options.preserve_in_ast})
                 -- primitive type normalization
                 if nullable == nil and not next(res) then
                     return xtype
@@ -329,7 +323,8 @@ copy_schema = function(schema, context, ns, open_rec)
             elseif xtype == 'record' then
                 -- Preserve fields which are asked to be in ast.
                 res = {type = 'record'}
-                copy_fields(schema, res, context.options.preserve_in_ast)
+                utils.copy_fields(schema, res,
+                    {fields=context.options.preserve_in_ast})
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
