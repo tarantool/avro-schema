@@ -59,6 +59,7 @@
 local debug = require('debug')
 local json = require('json')
 local ffi = require('ffi')
+local utils = require('avro_schema.utils')
 local null = ffi.cast('void *', 0)
 local format, find, gsub, len = string.format, string.find, string.gsub, string.len
 local sub, lower = string.sub, string.lower
@@ -219,13 +220,6 @@ local dcache = setmetatable({}, { __mode = 'k' })
 
 local copy_field_default
 
-local function copy_fields(from, to, fields)
-    for _,field in ipairs(fields) do
-        if from[field] ~= nil then
-            to[field] = deepcopy(from[field])
-        end
-    end
-end
 -- create a private copy and sanitize recursively;
 -- [ns]       current ns (or nil)
 -- [scope]    a dictionary of named types (ocasionally used for unnamed too)
@@ -278,7 +272,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             if primitive_type[xtype] then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, options.preserve_in_ast)
+                utils.copy_fields(schema, res, options.preserve_in_ast)
                 -- primitive type normalization
                 if nullable == nil and not next(res) then
                     return xtype
@@ -289,7 +283,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             elseif xtype == 'record' then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, options.preserve_in_ast)
+                utils.copy_fields(schema, res, options.preserve_in_ast)
                 res.type = 'record'
                 res.nullable = nullable
                 local name, ns = checkname(schema, ns, scope)
