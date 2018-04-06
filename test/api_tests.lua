@@ -247,9 +247,6 @@ local fingerprint_testcases = {
         ]],
         fingerprint = "a303cbbfe13958f880605d70c521a4b7be34d9265ac5a848f25916a67b11d889"
     },
-    -- in case of type reuse, it should not be copied. It should only contain type name
-    -- {"name": "serverHash", "type": "MD5"}, -- > {"name":"serverHash","type":{"name":"org.apache.avro.ipc.MD5","type":"fixed","size":16}}!!!
-    -- correct fingerprint is "2b2f7a9b22991fe0df9134cb6b5ff7355343e797aaea337e0150e20f3a35800e"
     {
         schema = [[
             {
@@ -259,12 +256,12 @@ local fingerprint_testcases = {
                 {"name": "clientHash",
                  "type": {"type": "fixed", "name": "MD5", "size": 16}},
                 {"name": "clientProtocol", "type": ["null", "string"]},
+                {"name": "serverHash", "type": "MD5"},
                 {"name": "meta", "type": ["null", {"type": "map", "values": "bytes"}]}
               ]
             }
         ]],
-        fingerprint = "ef17a5460289684db839c86a0c2cdcfe69da9dd0a3047e6a91f6d6bc37f76314"
-
+        fingerprint = "2b2f7a9b22991fe0df9134cb6b5ff7355343e797aaea337e0150e20f3a35800e"
     },
 }
 
