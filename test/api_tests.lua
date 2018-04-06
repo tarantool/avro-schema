@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(70)
+test:plan(72)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -468,6 +468,44 @@ res = schema.export(res[2])
 test:is_deeply(res, forward_canonical,
     "Exported schema should be canonical.")
 
+local nullable_orig = [[ {
+"name": "outer", "type": "record", "fields":
+    [{ "name": "r1", "type":
+        {"name": "tr1", "type": "record", "fields":
+            [{"name": "v1", "type": "int"} ,
+            {"name": "v2", "type": "string*"} ] } },
+    { "name": "r2", "type": "tr1*"},
+    { "name": "dummy", "type": {
+         "name": "td", "type": "array", "items": "int" }},
+    { "name": "r3", "type": {
+          "name": "tr2", "type": "record*", "fields": [
+                {"name": "v1", "type": "string"} ,
+                {"name": "v2", "type": "int*"} ] } },
+   { "name": "r4", "type": "tr2" }]
+}]]
+
+-- TODO: the `nullable_orig` should be used after #74
+local nullable_exported = [[
+{"type":"record","fields":
+    [{"name":"r1","type":
+        {"type":"record","fields":
+            [{"name":"v1","type":"int"},
+            {"name":"v2","type":{"type":"string*"}}],
+        "name":"tr1"}},
+    {"name":"r2","type":"tr1*"},
+    {"name":"dummy","type":{"type":"array","items":"int"}},
+    {"name":"r3","type":
+        {"type":"record*","name":"tr2","fields":
+            [{"name":"v1","type":"string"},
+            {"name":"v2","type":{"type":"int*"}}]}},
+    {"name":"r4","type":"tr2"}],
+"name":"outer"}
+]]
+res = {schema.create(json.decode(nullable_orig))}
+test:is(res[1], true, "Schema created successfully")
+res = schema.export(res[2])
+test:is_deeply(res, json.decode(nullable_exported), "Exported schema is valid.")
+
 -- check if nullable reference is not exported as a definition
 local nullable_reference = {
     name = "X",
@@ -487,29 +525,9 @@ local nullable_reference = {
         }
     }
 }
--- TODO: remove this after #38
-local nullable_reference_export = {
-    name = "X",
-    type = "record",
-    fields = {
-        {
-            name = "first",
-            type = {
-                name = "first",
-                type = "fixed",
-                size = 16
-            }
-        },
-        {
-            name = "second",
-            -- nullable fields are still exported as without * sign
-            type = "first"
-        }
-    }
-}
 res = {schema.create(nullable_reference)}
 res = schema.export(res[2])
-test:is_deeply(res, nullable_reference_export,
+test:is_deeply(res, nullable_reference,
     "Export nullable reference")
 
 test:check()
