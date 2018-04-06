@@ -416,7 +416,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
-                res = { type = 'fixed' }
+                res = { type = 'fixed', nullable = nullable }
                 local name, ns = checkname(schema, ns, scope)
                 res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
