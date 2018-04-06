@@ -664,7 +664,7 @@ copy_data = function(schema, data, visited)
             end
         end
         return data
-    elseif schematype == 'double' or schema == 'float' then
+    elseif schematype == 'double' or schematype == 'float' then
         return 0 + tonumber(data)
     elseif schematype == 'bytes' or schematype == 'string' then
         if type(data) ~= 'string' then
