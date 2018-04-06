@@ -1050,6 +1050,22 @@ local function create_ir(from, to, imatch)
     return build_ir(from, to, {}, imatch)
 end
 
+local function get_packed_nullable_type(node)
+    assert(type(node) == "table")
+    assert(type(node.name) == "string")
+    return node.nullable and node.name .. "*" or node.name
+end
+
+local function pack_nullable_to_type(node)
+    assert(type(node) == "table")
+    assert(type(node.type) == "string")
+    assert(not node.type:endswith("*"))
+    if node.nullable then
+        node.nullable = nil
+        node.type = node.type .. "*"
+    end
+end
+
 -- This function takes AST and produces canonical form of the avro schema.
 -- All tables from AST are copied, so that user cannot spoil AST.
 local export_helper
@@ -1071,10 +1087,12 @@ export_helper = function(node, already_built)
     else
         local xtype = node.type
         if primitive_type[xtype] then
-            return table.deepcopy(node)
+            local res = table.deepcopy(node)
+            pack_nullable_to_type(res)
+            return res
         elseif xtype == 'record' then
             if already_built[node.name] then
-                return node.name
+                return get_packed_nullable_type(node)
             end
             already_built[node.name] = true
             local res = {fields = {}}
@@ -1086,29 +1104,36 @@ export_helper = function(node, already_built)
                 }
                 res.fields[i] = xfield
             end
+            pack_nullable_to_type(res)
             return res
         elseif xtype == "enum" then
             if already_built[node.name] then
-                return node.name
+                return get_packed_nullable_type(node)
             end
             already_built[node.name] = true
-            return table.deepcopy(node)
+            local res = table.deepcopy(node)
+            pack_nullable_to_type(res)
+            return res
         elseif xtype == 'array' then
             local res = {}
             utils.copy_fields_except(node, res, {"items"})
-            res.items = exoprt_helper(node.items, already_built)
+            res.items = export_helper(node.items, already_built)
+            pack_nullable_to_type(res)
             return res
         elseif xtype == 'map' then
             local res = {}
             utils.copy_fields_except(node, res, {"values"})
             res.values = export_helper(node.values, already_built)
+            pack_nullable_to_type(res)
             return res
         elseif xtype == 'fixed' then
             if already_built[node.name] then
-                return node.name
+                return get_packed_nullable_type(node)
             end
             already_built[node.name] = true
-            return table.deepcopy(node)
+            local res = table.deepcopy(node)
+            pack_nullable_to_type(res)
+            return res
         else
             -- This have to be data the user asked to preserve.
             return table.deepcopy(node)
