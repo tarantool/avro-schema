@@ -517,10 +517,9 @@ t {
 t {
     schema = [[{
       "name": "foo", "type": "record", "fields": [
-        {"name": "X", "type": "any"},
+        {"name": "X", "type": "any"}
       ]
     }]],
-    schema = '"any"',
     validate = '{"X":123}',
     validate_only = true
 }
@@ -528,21 +527,20 @@ t {
 t {
     schema = [[{
       "name": "foo", "type": "record", "fields": [
-        {"name": "X", "type": "any"},
+        {"name": "X", "type": "any"}
       ]
     }]],
-    schema = '"any"',
     validate = '{}',
-    validate_only = true
+    validate_only = true,
+    validate_error = 'Field X missing'
 }
 
 t {
     schema = [[{
       "name": "foo", "type": "record", "fields": [
-        {"name": "X*", "type": "any"},
+        {"name": "X", "type": "any*"}
       ]
     }]],
-    schema = '"any"',
     validate = '{}',
     validate_only = true
 }
