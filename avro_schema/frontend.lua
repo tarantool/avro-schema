@@ -136,7 +136,8 @@ local copy_schema_error
 local copy_schema_location_info
 
 -- handle @name attribute of a named type
-local function checkname(schema, ns, scope)
+local function checkname(schema, context, ns)
+    local scope = context.scope
     local xname = schema.name
     if not xname then
         copy_schema_error('Must have a "name"')
@@ -165,7 +166,8 @@ local function checkname(schema, ns, scope)
 end
 
 -- handle @aliases attribute of a named type
-local function checkaliases(schema, ns, scope)
+local function checkaliases(schema, context, ns)
+    local scope = context.scope
     local xaliases = schema.aliases
     if not xaliases then
         return
@@ -208,28 +210,36 @@ local function copy_fields(from, to, fields)
         end
     end
 end
+
+-- The position of local vars in copy_schema function; used for debug purposes.
+local LOCAL_VAR_POS_res = 5
+local LOCAL_VAR_POS_ptr = 6
+
 -- create a private copy and sanitize recursively;
--- [ns]       current ns (or nil)
--- [scope]    a dictionary of named types (ocasionally used for unnamed too)
--- [open_rec] a set consisting of the current record + parent records;
---            it is used to reject records containing themselves
--- [options]  options table, contains:
---             - preserve_in_ast: names of attrs which should not be deleted
-copy_schema = function(schema, ns, scope, open_rec, options)
-    local res, ptr -- we depend on these being locals #6 and #7
+-- context : table; stores necessary for parsing variables
+--   options: options passed by a user, contains:
+--     preserve_in_ast: names of attrs which should not be deleted
+--     utf8_enums: allow utf8 enum items
+--   scope: a dictionary of named types (ocasionally used for unnamed too)
+-- ns: current namespace (or nil)
+-- open_rec: a set consisting of the current record + parent records;
+--           it is used to reject records containing themselves
+copy_schema = function(schema, context, ns, open_rec)
+    -- the position of this local vars must correspond to `LOCAL_VAR_POS_*`
+    local res, ptr
     if type(schema) == 'table' then
-        if scope[schema] then
+        if context.scope[schema] then
             -- this check is necessary for unnamed complex types (union, array map)
             copy_schema_error('Infinite loop detected in the data')
         end
         -- array, describing union [type1, type2...]
         if #schema > 0 then
             local tagmap = {}
-            scope[schema] = 1
+            context.scope[schema] = 1
             res = {}
             for branchno, xbranch in ipairs(schema) do
                 ptr = branchno
-                local branch = copy_schema(xbranch, ns, scope, nil, options)
+                local branch = copy_schema(xbranch, context, ns)
                 local bxtype, bxname
                 if type(branch) == 'table' and not branch.type then
                     copy_schema_error('Union may not immediately contain other unions')
@@ -241,7 +251,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 res[branchno] = branch
                 tagmap[bxid] = branchno
             end
-            scope[schema] = nil
+            context.scope[schema] = nil
             dcache[res] = tagmap
             return res
         else
@@ -260,7 +270,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             if primitive_type[xtype] then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, options.preserve_in_ast)
+                copy_fields(schema, res, context.options.preserve_in_ast)
                 -- primitive type normalization
                 if nullable == nil and not next(res) then
                     return xtype
@@ -271,13 +281,13 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             elseif xtype == 'record' then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, options.preserve_in_ast)
+                copy_fields(schema, res, context.options.preserve_in_ast)
                 res.type = 'record'
                 res.nullable = nullable
-                local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
+                local name, ns = checkname(schema, context, ns)
+                context.scope[name] = res
                 res.name = name
-                res.aliases = checkaliases(schema, ns, scope)
+                res.aliases = checkaliases(schema, context, ns)
                 open_rec = open_rec or {}
                 open_rec[res] = 1
                 local xfields = schema.fields
@@ -316,19 +326,19 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                     if not xtype then
                         copy_schema_error('Record field must have a "type"')
                     end
-                    field.type = copy_schema(xtype, ns, scope, open_rec, options)
+                    field.type = copy_schema(xtype, context, ns, open_rec)
                     if open_rec[field.type] then
                         local path, n = {}
                         for i = 1, 1000000 do
-                            local _, res = debug.getlocal(i, 6)
+                            local _, res = debug.getlocal(i, LOCAL_VAR_POS_res)
                             if res == field.type then
                                 n = i
                                 break
                             end
                         end
                         for i = n, 1, -1 do
-                            local _, res = debug.getlocal(i, 6)
-                            local _, ptr = debug.getlocal(i, 7)
+                            local _, res = debug.getlocal(i, LOCAL_VAR_POS_res)
+                            local _, ptr = debug.getlocal(i, LOCAL_VAR_POS_ptr)
                             insert(path, res.fields[ptr].name)
                         end
                         error(format('Record %s contains itself via %s',
@@ -372,10 +382,10 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             elseif xtype == 'enum' then
                 res = { type = 'enum', symbols = {}, nullable = nullable }
                 -- print("     res: "..json.encode(res))
-                local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
+                local name, ns = checkname(schema, context, ns)
+                context.scope[name] = res
                 res.name = name
-                res.aliases = checkaliases(schema, ns, scope)
+                res.aliases = checkaliases(schema, context, ns)
                 local xsymbols = schema.symbols
                 if not xsymbols then
                     copy_schema_error('Enum type must have "symbols"')
@@ -389,7 +399,8 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 local symbolmap = {}
                 for symbolno, symbol in ipairs(xsymbols) do
                     symbol = tostring(symbol)
-                    if not validname(symbol) and not options.utf8_enums then
+                    if not validname(symbol)
+                            and not context.options.utf8_enums then
                         copy_schema_error('Bad enum symbol name: %s', symbol)
                     end
                     if symbolmap[symbol] then
@@ -402,30 +413,30 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 return res
             elseif xtype == 'array' then
                 res = { type = 'array', nullable = nullable }
-                scope[schema] = true
+                context.scope[schema] = true
                 local xitems = schema.items
                 if not xitems then
                     copy_schema_error('Array type must have "items"')
                 end
-                res.items = copy_schema(xitems, ns, scope, nil, options)
-                scope[schema] = nil
+                res.items = copy_schema(xitems, context, ns)
+                context.scope[schema] = nil
                 return res
             elseif xtype == 'map' then
                 res = { type = 'map', nullable = nullable }
-                scope[schema] = true
+                context.scope[schema] = true
                 local xvalues = schema.values
                 if not xvalues then
                     copy_schema_error('Map type must have "values"')
                 end
-                res.values = copy_schema(xvalues, ns, scope, nil, options)
-                scope[schema] = nil
+                res.values = copy_schema(xvalues, context, ns)
+                context.scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
                 res = { type = 'fixed', nullable = nullable }
-                local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
+                local name, ns = checkname(schema, context, ns)
+                context.scope[name] = res
                 res.name = name
-                res.aliases = checkaliases(schema, ns, scope)
+                res.aliases = checkaliases(schema, context, ns)
                 local xsize = schema.size
                 if xsize==nil then
                     copy_schema_error('Fixed type must have "size"')
@@ -454,7 +465,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             end
         end
         typeid = fullname(typeid, ns)
-        schema = scope[typeid]
+        schema = context.scope[typeid]
         if schema and schema ~= true then -- ignore alias names
             if nullable ~= schema.nullable then
                 schema = deepcopy(schema)
@@ -497,13 +508,14 @@ copy_schema_location_info = function()
     local res = {}
     for i = bottom, top, -1 do
         -- 6 and 7 are res and ptr vars from copy func
-        local _, node = debug.getlocal(i, 6)
-        local _, ptr  = debug.getlocal(i, 7)
+        local _, node = debug.getlocal(i, LOCAL_VAR_POS_res)
+        local _, ptr  = debug.getlocal(i, LOCAL_VAR_POS_ptr)
         if type(node) == 'table' then
             if node.type == nil then -- union
                 insert(res, '<union>')
                 if i <= top + 1 then
-                    local _, next_node = debug.getlocal(i - 1, 7)
+                    local _, next_node =
+                        debug.getlocal(i - 1, LOCAL_VAR_POS_res)
                     if i == top or (i == top + 1 and
                                     not (next_node and next_node.name)) then
                         insert(res, format('<branch-%d>', ptr))
@@ -545,7 +557,7 @@ end
 
 -- validate schema definition (creates a copy)
 local function create_schema(schema, options)
-    return copy_schema(schema, nil, {}, nil, options)
+    return copy_schema(schema, {scope={}, options=options})
 end
 
 -- get a mapping from a (string) type tag -> union branch id
