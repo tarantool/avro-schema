@@ -111,3 +111,94 @@ Quering schema field types (the order matches `get_names`):
 ```lua
 avro_schema.get_types(schema)
 ```
+
+## References
+
+Named types are ones that have mandatory `name` field in the definition:
+record, fixed, enum.
+
+Named types can be referenced after the first definition (in depth-first,
+left-to-right traversal).
+
+Example:
+
+```
+{
+    name = 'user',
+    type = 'record',
+    fields = {
+        {name = 'uid', type = 'long'},
+        {
+            name = 'nested',
+            type = {
+                type = 'record',
+                name = 'nested_record',
+                fields = {
+                    {name = 'x', type = 'long'},
+                    {name = 'y', type = 'long'}
+                }
+            }
+        },
+        {
+            name = 'another_nested',
+            type = 'nested_record'
+        }
+    }
+}
+```
+
+Notes:
+
+* A reference is a usage of a type (not a value), so the effect is like you
+  define the same type with an another name.
+* A field of a record also has a name, but it is not a type, so you cannot
+  reference a field by a name.
+* A record can be referenced inside of itself only as part of a union or an
+  array.
+* An array and a map are unnamed and cannot be referenced by a name, consider
+  related discussions below.
+
+### Related discussions
+
+* [[Avro-user] Why Array and Map are not named type ?][1].
+* [AEP 102 - Named Unions][2].
+
+## Nullability (extension)
+
+The problem statement: the union like `{'null', 'long'}` assumed valid values
+like `null` and `{long = 42}`. In other words, valid values are `null` and an
+object with one field, whose name determines the type (see [JSON Encoding][3]
+section of the avro-schema standard). We cannot express a type that accepts
+`null` or `42`. That is the problem that is solved by the nullability
+extension.
+
+A type can be marked as nullable using asterisk symbol after the type:
+
+```lua
+{
+    name = 'user',
+    type = 'record',
+    fields = {
+        {name = 'uid', type = 'long'},
+        {name = 'first_name', type = 'string'},
+        {name = 'middle_name', type = 'string*'},
+        {name = 'last_name', type = 'string'}
+    }
+}
+```
+
+The following types can be marked as a nullable:
+
+* All primitive types: null, boolean, int, long, float, double, bytes, string.
+* All named complex types: record, fixed, enum.
+* Almost all unnamed complex types: array, map (except union).
+
+Notes:
+
+* A type reference can be non-nullable or nullable (asterisk-marked)
+  independently of the original type definition.
+* Use standard `{'null', ...}` to make a union nullable type.
+
+[1]: http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
+[2]: https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
+[3]: http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
