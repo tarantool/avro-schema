@@ -34,7 +34,7 @@ filling in default values for missing fields.
 
 ## Checking if Schemas are Compatible
 To facilitate data evolution Avro defines certain schema mapping rules.
-If schemas `A` and `B` are compatible, one can convert data from `A` to `B`. 
+If schemas `A` and `B` are compatible, one can convert data from `A` to `B`.
 ```lua
 ok = avro_schema.are_compatible(schema1, schema2)
 ok = avro_schema.are_compatible(schema2, schema1, "downgrade")
@@ -45,9 +45,9 @@ Allowed modifications include:
   3. removing fields (data simply dropped during conversion);
   4. modifying unions and enums (provided that type definitions retain some similarity);
   5. type promotions are allowed (e.x. `int` is compatible with `long` but not vice versa).
-  
+
 Let's assume that `B` is newer than `A`. `A` defines `Apple` (a record type). `B` renames it to `Banana`.
-Upgrading data from `A` to `B` is possible, since `Banana` is marked as an alias of the `Apple`. 
+Upgrading data from `A` to `B` is possible, since `Banana` is marked as an alias of the `Apple`.
 Unfortunately, downgrading doesn't work since in `A` the record type `Apple` has no aliases.
 
 To make it work we implement `downgrade` mode. In the downgrade mode, name mapping rules consider
@@ -95,7 +95,7 @@ avro_schema.compile({schema1, schema2, debug = true, dump_il = "output.il"})
   * `unflatten`
   * `flatten_msgpack`
   * `unflatten_msgpack`
-  
+
 ## Miscelania
 Checking if an object is a schema:
 ```lua
