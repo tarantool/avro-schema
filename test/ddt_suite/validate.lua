@@ -448,6 +448,23 @@ for schema_no = 1,#records do
 
 end
 
+_G['schema_no'] = nil
+
+-- gh-64: treat lack of value (B) as null
+t {
+    schema = [[{
+        "name": "foo",
+        "type": "record",
+        "fields": [
+            {"name": "A", "type": "string"},
+            {"name": "B", "type": ["null", "string"]},
+            {"name": "C", "type": "int"}
+        ]
+    }]],
+    validate = '{"A":"Hello, world!","C":42}',
+    validate_only = true,
+}
+
 -- nullability
 t {
     schema = '"string*"',

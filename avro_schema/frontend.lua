@@ -701,9 +701,19 @@ copy_data = function(schema, data, visited)
             ptr = nil
             for _,field in ipairs(schema.fields) do
                 if     data[field.name] then
+                    -- a field is present in data
                 elseif type(field.default) ~= 'nil' then
+                    -- no field in data & the field has default that is not
+                    -- nil/box.NULL
                     res[field.name] = table.deepcopy(field.default)
                 elseif field.type and field.type.nullable then
+                    -- no field in data & the field has a nullable type
+                    res[field.name] = null
+                elseif field.type and type(field.type) == 'table' and
+                        #field.type > 0 and
+                        get_union_tag_map(field.type)['null'] then
+                    -- no field in data & the field has a type that is an union
+                    -- with 'null' as one of variants
                     res[field.name] = null
                 else
                     error(format('@Field %s missing', field.name), 0)
