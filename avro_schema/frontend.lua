@@ -665,7 +665,24 @@ copy_data = function(schema, data, visited)
         end
         return data
     elseif schematype == 'double' or schematype == 'float' then
-        return 0 + tonumber(data)
+        local xtype = type(data)
+        if xtype == "number" then
+            return data
+        else
+            if xtype == "cdata" then
+                local xdata = tonumber(data)
+                if xdata == nil then
+                    -- `tonumber` returns `nil` in case of an error
+                    -- crutch: replace data with typeof(data) to produce more
+                    -- readable error message
+                    data = ffi.typeof(data)
+                    error()
+                else
+                    return xdata
+                end
+            end
+        end
+        error()
     elseif schematype == 'bytes' or schematype == 'string' then
         if type(data) ~= 'string' then
             error()

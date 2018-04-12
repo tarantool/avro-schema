@@ -169,8 +169,27 @@ t {
 
 t {
     schema = '"float"',
+    validate = ffi.new("char", 1),
+    validate_only = true
+}
+
+t {
+    schema = '"float"',
     validate = '"Hello!"',
     validate_error = 'Not a float: Hello!'
+}
+
+t {
+    schema = '"float"',
+    validate = '"0"',
+    validate_error = 'Not a float: 0'
+}
+
+
+t {
+    schema = '"float"',
+    validate = ffi.new("const char *", "some string"),
+    validate_error = 'Not a float: ctype<const char *>'
 }
 
 -- double
@@ -195,8 +214,26 @@ t {
 
 t {
     schema = '"double"',
+    validate = ffi.new("char", 1),
+    validate_only = true
+}
+
+t {
+    schema = '"double"',
     validate = '"Hello!"',
     validate_error = 'Not a double: Hello!'
+}
+
+t {
+    schema = '"double"',
+    validate = '"0"',
+    validate_error = 'Not a double: 0'
+}
+
+t {
+    schema = '"double"',
+    validate = ffi.new("const char *", "some string"),
+    validate_error = 'Not a double: ctype<const char *>'
 }
 
 -- string
