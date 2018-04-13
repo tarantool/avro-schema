@@ -183,7 +183,7 @@ test:is(schema.is({}), false, 'table is not a schema')
 
 -- validate
 local inf_loop_foobar = {
-    A = {1, 2},
+    A = {X = 1, Y = 2},
     C = {int = 42},
     D = 'Hello, world!'
 }

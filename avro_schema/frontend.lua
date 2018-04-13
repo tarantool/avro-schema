@@ -690,18 +690,23 @@ copy_data = function(schema, data, visited)
         -- record, enum, array, map, fixed
         if     schematype == 'record' then
             local fieldmap = get_record_field_map(schema)
-            for k,v in pairs(data) do
+            -- check if the data contains unknown fields
+            for k, _ in pairs(data) do
                 ptr = k
                 local field = schema.fields[fieldmap[k]]
                 if not field or field.name ~= k then
                     error('@Unknown field', 0)
                 end
-                res[k] = copy_data(field.type, v, visited)
+                ptr = nil
             end
-            ptr = nil
-            for _,field in ipairs(schema.fields) do
-                if     data[field.name] then
+            -- copy data
+            for _, field in ipairs(schema.fields) do
+                if data[field.name] then
                     -- a field is present in data
+                    ptr = field.name
+                    res[field.name] =
+                        copy_data(field.type, data[field.name], visited)
+                    ptr = nil
                 elseif type(field.default) ~= 'nil' then
                     -- no field in data & the field has default that is not
                     -- nil/box.NULL
