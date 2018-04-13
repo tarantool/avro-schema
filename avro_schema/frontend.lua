@@ -59,6 +59,7 @@
 local debug = require('debug')
 local json = require('json')
 local ffi = require('ffi')
+local utils = require('avro_schema.utils')
 local null = ffi.cast('void *', 0)
 local format, find, gsub, len = string.format, string.find, string.gsub, string.len
 local sub, lower = string.sub, string.lower
@@ -66,21 +67,6 @@ local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
 local clear = require('table.clear')
 local next, type = next, type
-
-local function deepcopy(orig)
-    local orig_type = type(orig)
-    local copy
-    if orig_type == 'table' then
-        copy = {}
-        for orig_key, orig_value in next, orig, nil do
-            copy[deepcopy(orig_key)] = deepcopy(orig_value)
-        end
-        setmetatable(copy, deepcopy(getmetatable(orig)))
-    else -- number, string, boolean, etc
-        copy = orig
-    end
-    return copy
-end
 
 -- primitive types
 local primitive_type = {
@@ -134,6 +120,24 @@ end
 local copy_schema
 local copy_schema_error
 local copy_schema_location_info
+
+-- add new type definition to scope
+local function scope_add_type(scope, options, typeid, xtype)
+    -- make the type allways store name in canonical form
+    xtype.name = typeid
+    -- In case of deferred_definition it is necessary to check if this type is
+    -- used already somewhere, and reuse the same table for type.
+    if options.deferred_definition and
+        options.deferred_definitions[typeid] then
+        local deferred_def = options.deferred_definitions[typeid]
+        for k, v in pairs(xtype) do
+            deferred_def[k] = v
+        end
+        return deferred_def
+    end
+    scope[typeid] = xtype
+    return xtype
+end
 
 -- handle @name attribute of a named type
 local function checkname(schema, ns, scope)
@@ -201,13 +205,6 @@ local dcache = setmetatable({}, { __mode = 'k' })
 
 local copy_field_default
 
-local function copy_fields(from, to, fields)
-    for _,field in ipairs(fields) do
-        if from[field] ~= nil then
-            to[field] = deepcopy(from[field])
-        end
-    end
-end
 -- create a private copy and sanitize recursively;
 -- [ns]       current ns (or nil)
 -- [scope]    a dictionary of named types (ocasionally used for unnamed too)
@@ -260,7 +257,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             if primitive_type[xtype] then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, options.preserve_in_ast)
+                utils.copy_fields(schema, res, options.preserve_in_ast)
                 -- primitive type normalization
                 if nullable == nil and not next(res) then
                     return xtype
@@ -271,15 +268,14 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             elseif xtype == 'record' then
                 -- Preserve fields which are asked to be in ast.
                 res = {}
-                copy_fields(schema, res, options.preserve_in_ast)
+                utils.copy_fields(schema, res, options.preserve_in_ast)
                 res.type = 'record'
                 res.nullable = nullable
                 local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
-                res.name = name
+                res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 open_rec = open_rec or {}
-                open_rec[res] = 1
+                open_rec[name] = 1
                 local xfields = schema.fields
                 if not xfields then
                     copy_schema_error('Record type must have "fields"')
@@ -317,7 +313,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                         copy_schema_error('Record field must have a "type"')
                     end
                     field.type = copy_schema(xtype, ns, scope, open_rec, options)
-                    if open_rec[field.type] then
+                    if open_rec[type_tag(field.type)] then
                         local path, n = {}
                         for i = 1, 1000000 do
                             local _, res = debug.getlocal(i, 6)
@@ -367,14 +363,13 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                     field.hidden = not not xfield.hidden or nil -- extension
                 end
                 dcache[res] = fieldmap
-                open_rec[res] = nil
+                open_rec[name] = nil
                 return res
             elseif xtype == 'enum' then
                 res = { type = 'enum', symbols = {}, nullable = nullable }
                 -- print("     res: "..json.encode(res))
                 local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
-                res.name = name
+                res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 local xsymbols = schema.symbols
                 if not xsymbols then
@@ -423,8 +418,7 @@ copy_schema = function(schema, ns, scope, open_rec, options)
             elseif xtype == 'fixed' then
                 res = { type = 'fixed', nullable = nullable }
                 local name, ns = checkname(schema, ns, scope)
-                scope[name] = res
-                res.name = name
+                res = scope_add_type(scope, options, name, res)
                 res.aliases = checkaliases(schema, ns, scope)
                 local xsize = schema.size
                 if xsize==nil then
@@ -455,9 +449,10 @@ copy_schema = function(schema, ns, scope, open_rec, options)
         end
         typeid = fullname(typeid, ns)
         schema = scope[typeid]
+
         if schema and schema ~= true then -- ignore alias names
             if nullable ~= schema.nullable then
-                schema = deepcopy(schema)
+                schema = table.deepcopy(schema)
                 schema.nullable = nullable
                 -- print("  old: "..json.encode(scope[typeid]))
                 -- print("  new: "..json.encode(schema))
@@ -466,7 +461,18 @@ copy_schema = function(schema, ns, scope, open_rec, options)
                 return schema
             end
         end
-        copy_schema_error('Unknown Avro type: %s', typeid)
+        -- in case of deferred definitions just create a table for the type
+        -- which would be filled wiht type when definition is found
+        if options.deferred_definition then
+            local deferred_def = options.deferred_definitions[typeid]
+            if deferred_def == nil then
+                deferred_def = {}
+                options.deferred_definitions[typeid] = deferred_def
+            end
+            return deferred_def
+        else
+            copy_schema_error('Unknown Avro type: %s', typeid)
+        end
     end
 end
 
@@ -545,7 +551,24 @@ end
 
 -- validate schema definition (creates a copy)
 local function create_schema(schema, options)
-    return copy_schema(schema, nil, {}, nil, options)
+    if not options.deferred_definition then
+        return copy_schema(schema, nil, {}, nil, options)
+    else
+        local res
+        local scope = {}
+        -- table for definitions which are used but not defined yet
+        options.deferred_definitions = {}
+        res = copy_schema(schema, nil, scope, nil, options)
+        for typeid, deferred_def in pairs(options.deferred_definitions) do
+            -- deferred_def is still blank
+            if not next(deferred_def) then
+                copy_schema_error('Unknown Avro type: %s', typeid)
+            end
+        end
+        options.deferred_definition = true
+        options.deferred_definitions = nil
+        return res
+    end
 end
 
 -- get a mapping from a (string) type tag -> union branch id
@@ -1042,10 +1065,102 @@ local function create_ir(from, to, imatch)
     return build_ir(from, to, {}, imatch)
 end
 
+local function get_packed_nullable_type(node)
+    assert(type(node) == "table")
+    assert(type(node.name) == "string")
+    return node.nullable and node.name .. "*" or node.name
+end
+
+local function pack_nullable_to_type(node)
+    assert(type(node) == "table")
+    assert(type(node.type) == "string")
+    assert(not node.type:endswith("*"))
+    if node.nullable then
+        node.nullable = nil
+        node.type = node.type .. "*"
+    end
+end
+
+-- This function takes AST and produces canonical form of the avro schema.
+-- All tables from AST are copied, so that user cannot spoil AST.
+local export_helper
+export_helper = function(node, already_built)
+    already_built = already_built or {}
+    if type(node) ~= 'table' then
+        if primitive_type[node] then
+            return node
+        end
+        -- This have to be data the user asked to preserve.
+        return node
+    end
+    if #node > 0 then -- union
+        local res = {}
+        for i, branch in ipairs(node) do
+            res[i] = export_helper(branch, already_built)
+        end
+        return res
+    else
+        local xtype = node.type
+        if primitive_type[xtype] then
+            local res = table.deepcopy(node)
+            pack_nullable_to_type(res)
+            return res
+        elseif xtype == 'record' then
+            if already_built[node.name] then
+                return get_packed_nullable_type(node)
+            end
+            already_built[node.name] = true
+            local res = {fields = {}}
+            utils.copy_fields_except(node, res, {"fields"})
+            for i, field in ipairs(node.fields) do
+                local xfield = {
+                    name = field.name,
+                    type = export_helper(field.type, already_built)
+                }
+                res.fields[i] = xfield
+            end
+            pack_nullable_to_type(res)
+            return res
+        elseif xtype == "enum" then
+            if already_built[node.name] then
+                return get_packed_nullable_type(node)
+            end
+            already_built[node.name] = true
+            local res = table.deepcopy(node)
+            pack_nullable_to_type(res)
+            return res
+        elseif xtype == 'array' then
+            local res = {}
+            utils.copy_fields_except(node, res, {"items"})
+            res.items = export_helper(node.items, already_built)
+            pack_nullable_to_type(res)
+            return res
+        elseif xtype == 'map' then
+            local res = {}
+            utils.copy_fields_except(node, res, {"values"})
+            res.values = export_helper(node.values, already_built)
+            pack_nullable_to_type(res)
+            return res
+        elseif xtype == 'fixed' then
+            if already_built[node.name] then
+                return get_packed_nullable_type(node)
+            end
+            already_built[node.name] = true
+            local res = table.deepcopy(node)
+            pack_nullable_to_type(res)
+            return res
+        else
+            -- This have to be data the user asked to preserve.
+            return table.deepcopy(node)
+        end
+    end
+end
+
 return {
     create_schema         = create_schema,
     validate_data         = validate_data,
     create_ir             = create_ir,
     get_enum_symbol_map   = get_enum_symbol_map,
-    get_union_tag_map     = get_union_tag_map
+    get_union_tag_map     = get_union_tag_map,
+    export_helper         = export_helper
 }

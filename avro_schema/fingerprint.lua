@@ -3,6 +3,7 @@
 -- rules for avro fingerptint generation and Parsing Canonical Form generation.
 
 local json = require "json"
+local frontend = require "avro_schema.frontend"
 -- Tarantool specific module
 local digest = require "digest"
 
@@ -75,6 +76,9 @@ local function get_fingerprint(schema, algo, size, options)
     if digest[algo] == nil or type(digest[algo]) ~= "function" then
         raise_error("The hash function %s is not supported", algo)
     end
+    -- We have to call export first to replace type definitions on type
+    -- references (all except the first).
+    schema = frontend.export_helper(schema)
     local fp = digest[algo](avro_json(schema, options.preserve_in_fingerprint))
     return fp:sub(1, size)
 end

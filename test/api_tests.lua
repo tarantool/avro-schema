@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(67)
+test:plan(71)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -247,9 +247,6 @@ local fingerprint_testcases = {
         ]],
         fingerprint = "a303cbbfe13958f880605d70c521a4b7be34d9265ac5a848f25916a67b11d889"
     },
-    -- in case of type reuse, it should not be copied. It should only contain type name
-    -- {"name": "serverHash", "type": "MD5"}, -- > {"name":"serverHash","type":{"name":"org.apache.avro.ipc.MD5","type":"fixed","size":16}}!!!
-    -- correct fingerprint is "2b2f7a9b22991fe0df9134cb6b5ff7355343e797aaea337e0150e20f3a35800e"
     {
         schema = [[
             {
@@ -259,12 +256,12 @@ local fingerprint_testcases = {
                 {"name": "clientHash",
                  "type": {"type": "fixed", "name": "MD5", "size": 16}},
                 {"name": "clientProtocol", "type": ["null", "string"]},
+                {"name": "serverHash", "type": "MD5"},
                 {"name": "meta", "type": ["null", {"type": "map", "values": "bytes"}]}
               ]
             }
         ]],
-        fingerprint = "ef17a5460289684db839c86a0c2cdcfe69da9dd0a3047e6a91f6d6bc37f76314"
-
+        fingerprint = "2b2f7a9b22991fe0df9134cb6b5ff7355343e797aaea337e0150e20f3a35800e"
     },
 }
 
@@ -392,6 +389,117 @@ res = {schema.compile(res[2])}
 test:is(false, res[1], "Schema cannot be compiled")
 test:like(res[2], "ANY: not supported in compiled schemas",
     "any: compile error message")
+
+-- check `deffered_definition` option
+local deferred_orig = {
+    {
+        name = "X",
+        type = "record",
+        fields = {
+            {
+                name = "reference_second",
+                type = "second"
+            },
+            {
+                name = "f2",
+                type = {
+                    name = "second",
+                    type = "record",
+                    fields = {
+                        {
+                            name = "f1",
+                            type = "double"
+                        },
+                        {
+                            name = "reference_first",
+                            type = "first"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    {
+        name = "first",
+        type = "fixed",
+        size = 16
+    }
+}
+local deferred_canonical = {
+    {
+        name = "X",
+        type = "record",
+        fields = {
+            {
+                name = "reference_second",
+                type = {
+                    type = "record",
+                    name = "second",
+                    fields = {
+                        {
+                            name = "f1",
+                            type = "double"
+                        },
+                        {
+                            name = "reference_first",
+                            type = {
+                                name = "first",
+                                type = "fixed",
+                                size = 16
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                name = "f2",
+                type = "second"
+            }
+        }
+    },
+    "first"
+}
+res = {schema.create(deferred_orig, {deferred_definition = true})}
+test:is(res[1], true, "Schema created successfully")
+res = schema.export(res[2])
+test:is_deeply(res, deferred_canonical, "Exported schema should be canonical.")
+
+local nullable_orig = [[ {
+"name": "outer", "type": "record", "fields":
+    [{ "name": "r1", "type":
+        {"name": "tr1", "type": "record", "fields":
+            [{"name": "v1", "type": "int"} ,
+            {"name": "v2", "type": "string*"} ] } },
+    { "name": "r2", "type": "tr1*"},
+    { "name": "dummy", "type": {
+         "name": "td", "type": "array", "items": "int" }},
+    { "name": "r3", "type": {
+          "name": "tr2", "type": "record*", "fields": [
+                {"name": "v1", "type": "string"} ,
+                {"name": "v2", "type": "int*"} ] } },
+   { "name": "r4", "type": "tr2" }]
+}]]
+
+local nullable_exported = [[
+{"type":"record","fields":
+    [{"name":"r1","type":
+        {"type":"record","fields":
+            [{"name":"v1","type":"int"},
+            {"name":"v2","type":{"type":"string*"}}],
+        "name":"tr1"}},
+    {"name":"r2","type":"tr1*"},
+    {"name":"dummy","type":{"type":"array","items":"int"}},
+    {"name":"r3","type":
+        {"type":"record*","name":"tr2","fields":
+            [{"name":"v1","type":"string"},
+            {"name":"v2","type":{"type":"int*"}}]}},
+    {"name":"r4","type":"tr2"}],
+"name":"outer"}
+]]
+res = {schema.create(json.decode(nullable_orig))}
+test:is(res[1], true, "Schema created successfully")
+res = schema.export(res[2])
+test:is_deeply(res, json.decode(nullable_exported), "Exported schema is valid.")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)
