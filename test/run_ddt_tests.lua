@@ -6,6 +6,7 @@ local debug          = require('debug')
 local json           = require('json')
 local fio            = require('fio')
 local schema         = require('avro_schema')
+local ffi            = require('ffi')
 local max            = math.max
 local base64_encode  = digest.base64_encode
 local format, gsub   = string.format, string.gsub
@@ -242,7 +243,7 @@ local stages = {
 
 -- test-id is <file-name>-<line>
 local test_name, test_env
-local test_env_ignore = {_G = true, t = true}
+local test_env_ignore = {_G = true, t = true, ffi = true}
 local function test_id(caller)
     local keys = {}
     for k in pairs(test_env) do
@@ -283,7 +284,7 @@ local function run_tests(dir)
         local result, extra = loadfile(path)
         if not result then error(extra) end
         local test = result
-        test_env = { t = t }
+        test_env = { t = t, ffi = ffi }
         test_env._G = test_env
         setfenv(test, test_env)
         test_name = gsub(gsub(path, '.*/', ''), '%.lua$', '')
