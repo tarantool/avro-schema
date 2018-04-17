@@ -312,23 +312,20 @@ copy_schema = function(schema, context, ns, open_rec)
             end
             xtype = tostring(xtype)
             local nullable
-
             nullable, xtype = extract_nullable(xtype)
+            res = {}
+            preserve_user_fields(schema, res, context)
+            res.type = xtype
+            res.nullable = nullable
 
             if primitive_type[xtype] then
-                res = {}
-                preserve_user_fields(schema, res, context)
                 -- primitive type normalization
-                if nullable == nil and not next(res) then
+                -- check if res contains only one item
+                if not next(res, next(res)) then
                     return xtype
                 end
-                res.type = xtype
-                res.nullable = nullable
                 return res
             elseif xtype == 'record' then
-                -- Preserve fields which are asked to be in ast.
-                res = {type = 'record'}
-                preserve_user_fields(schema, res, context)
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
@@ -426,8 +423,6 @@ copy_schema = function(schema, context, ns, open_rec)
                 open_rec[name] = nil
                 return res
             elseif xtype == 'enum' then
-                res = { type = 'enum' }
-                preserve_user_fields(schema, res, context)
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
@@ -459,8 +454,6 @@ copy_schema = function(schema, context, ns, open_rec)
                 dcache[res] = symbolmap
                 return res
             elseif xtype == 'array' then
-                res = { type = 'array', nullable = nullable }
-                preserve_user_fields(schema, res, context)
                 context.scope[schema] = true
                 local xitems = schema.items
                 if not xitems then
@@ -470,8 +463,6 @@ copy_schema = function(schema, context, ns, open_rec)
                 context.scope[schema] = nil
                 return res
             elseif xtype == 'map' then
-                res = { type = 'map', nullable = nullable }
-                preserve_user_fields(schema, res, context)
                 context.scope[schema] = true
                 local xvalues = schema.values
                 if not xvalues then
@@ -481,8 +472,6 @@ copy_schema = function(schema, context, ns, open_rec)
                 context.scope[schema] = nil
                 return res
             elseif xtype == 'fixed' then
-                res = { type = 'fixed' }
-                preserve_user_fields(schema, res, context)
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
@@ -497,6 +486,8 @@ copy_schema = function(schema, context, ns, open_rec)
                 res.size = xsize
                 return res
             else
+                -- crutch for valid error handling
+                res = nil
                 copy_schema_error('Unknown Avro type: %s', xtype)
             end
         end
