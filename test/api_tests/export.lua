@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(26)
+test:plan(27)
 
 -- nested records, union, reference to earlier declared type
 local foobar_decl = {
@@ -110,6 +110,44 @@ for i, testcase in ipairs(fingerprint_testcases) do
         "Fingerprint testcase "..i)
 end
 
+local preserve_different_types_schema = {
+    type = "record",
+    name = "X",
+    extra_field = "X",
+    fields = {
+        {
+            name = "f1",
+            type = "int",
+            extra_field = "f1"
+        },
+        {
+            name = "f2",
+            type = {
+                type = "array",
+                extra_field = "f2",
+                items = "int"
+            }
+        },
+        {
+            name = "f3",
+            type = {
+                type = "map",
+                extra_field = "f3",
+                values = "int"
+            }
+        },
+        {
+            name = "f4",
+            type = {
+                type = "fixed",
+                extra_field = "f4",
+                size = 4,
+                name = "f4"
+            }
+        },
+    }
+}
+
 local schema_preserve_fields_testcases = {
     {
         name = "1",
@@ -144,6 +182,12 @@ local schema_preserve_fields_testcases = {
             extra_field={extra_field={"extra_field"}}
         }
     },
+    {
+        name = "4-different-types",
+        schema = preserve_different_types_schema,
+        options = {preserve_in_ast={"extra_field"}},
+        ast = preserve_different_types_schema,
+     }
 }
 
 for _, testcase in ipairs(schema_preserve_fields_testcases) do
