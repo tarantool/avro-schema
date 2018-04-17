@@ -240,6 +240,13 @@ local function checkaliases(schema, context, ns)
     return aliases
 end
 
+local function preserve_user_fields(schema, res, context)
+    local fields = context.options.preserve_in_ast
+    -- fields are allways an array, possibly empty
+    assert(type(fields) == "table")
+    utils.copy_fields(schema, res, {fields=fields})
+end
+
 -- it makes sense to cache certain derived data
 -- keyed by schema node,
 --   <union>  -> tagstr_to_branch_no_map
@@ -309,10 +316,8 @@ copy_schema = function(schema, context, ns, open_rec)
             nullable, xtype = extract_nullable(xtype)
 
             if primitive_type[xtype] then
-                -- Preserve fields which are asked to be in ast.
                 res = {}
-                utils.copy_fields(schema, res,
-                    {fields=context.options.preserve_in_ast})
+                preserve_user_fields(schema, res, context)
                 -- primitive type normalization
                 if nullable == nil and not next(res) then
                     return xtype
@@ -323,8 +328,7 @@ copy_schema = function(schema, context, ns, open_rec)
             elseif xtype == 'record' then
                 -- Preserve fields which are asked to be in ast.
                 res = {type = 'record'}
-                utils.copy_fields(schema, res,
-                    {fields=context.options.preserve_in_ast})
+                preserve_user_fields(schema, res, context)
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
@@ -346,6 +350,7 @@ copy_schema = function(schema, context, ns, open_rec)
                 for fieldno, xfield in ipairs(xfields) do
                     ptr = fieldno
                     local field = {}
+                    preserve_user_fields(field, xfield, context)
                     res.fields[fieldno] = field
                     if type(xfield) ~= 'table' then
                         copy_schema_error('Record field must be a list')
@@ -422,6 +427,7 @@ copy_schema = function(schema, context, ns, open_rec)
                 return res
             elseif xtype == 'enum' then
                 res = { type = 'enum' }
+                preserve_user_fields(schema, res, context)
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
@@ -454,6 +460,7 @@ copy_schema = function(schema, context, ns, open_rec)
                 return res
             elseif xtype == 'array' then
                 res = { type = 'array', nullable = nullable }
+                preserve_user_fields(schema, res, context)
                 context.scope[schema] = true
                 local xitems = schema.items
                 if not xitems then
@@ -464,6 +471,7 @@ copy_schema = function(schema, context, ns, open_rec)
                 return res
             elseif xtype == 'map' then
                 res = { type = 'map', nullable = nullable }
+                preserve_user_fields(schema, res, context)
                 context.scope[schema] = true
                 local xvalues = schema.values
                 if not xvalues then
@@ -474,6 +482,7 @@ copy_schema = function(schema, context, ns, open_rec)
                 return res
             elseif xtype == 'fixed' then
                 res = { type = 'fixed' }
+                preserve_user_fields(schema, res, context)
                 local name, ns = checkname(schema, context, ns)
                 scope_add_type(context, name, res)
                 res = scope_get_type(context, name, nullable)
@@ -493,7 +502,10 @@ copy_schema = function(schema, context, ns, open_rec)
         end
 
     else
-        local typeid = tostring(schema)
+        local typeid = schema
+        if type(typeid) ~= "string" then
+            copy_schema_error('Unknown Avro type: %s', tostring(typeid))
+        end
 
         local nullable, typeid = extract_nullable(typeid)
 
