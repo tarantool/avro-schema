@@ -43,27 +43,50 @@ end
 local function is_record_or_union(s)
     return type(s) == 'table' and (s.type or 'record') == 'record'
 end
+local default_type_size = {
+    -- complex
+    array      = -1, enum  = 1,
+    fixed      = 1, map    = -1,
+    -- scalars
+    boolean    = 1, bytes  = 1,
+    double     = 1, float  = 1,
+    int        = 1, long   = 1,
+    null       = 1, string = 1,
+    -- not allowed
+    any = 0 -- TODO disallow `any` on build ir stage
+}
+
+local default_nullable_type_size = {
+    -- complex
+    array      = 2, enum   = 2,
+    fixed      = 2, map    = 2,
+    -- scalars
+    boolean    = 2, bytes  = 2,
+    double     = 2, float  = 2,
+    int        = 2, long   = 2,
+    null       = 2, string = 2,
+    -- not allowed
+    any = 0 -- TODO disallow `any` on build ir stage
+}
 
 local schema_width
 local schema_width_cache = setmetatable({}, weak_keys)
 schema_width = function(s, ignore_nullable)
-    local s_type = s.type
-    if type(s) == 'string' or s_type == 'fixed' or s_type == 'enum' then
-        if s.nullable then
-            return 2
+    if type(s) == "string" then
+        if default_type_size[s] then
+            return default_type_size[s]
+        else
+            error("Invalid type " .. s)
         end
-
-        return 1 -- don't cache
     end
-    if (s_type == 'array'
-        or s_type == 'map'
-        or s_type == 'int'
-        or s_type == 'long'
-        or s_type == 'boolean'
-        or s_type == 'double'
-        or s_type == 'float'
-        or s_type == 'string') and s.nullable then
-        return 2
+    assert(type(s) == "table")
+    local s_type = s.type
+    if default_type_size[s_type] then
+        -- default type encapsulated into a table
+        if s.nullable then
+            return default_nullable_type_size[s_type]
+        end
+        return default_type_size[s_type]
     end
 
     local res = schema_width_cache[s]
@@ -90,7 +113,7 @@ schema_width = function(s, ignore_nullable)
             end
         end
     else
-        return -1 -- array/map, don't cache
+        error("Invalid type " .. tostring(s_type))
     end
 
     if not s.nullable then
