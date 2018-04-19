@@ -237,8 +237,8 @@ res = {schema.create(
             preserve_in_fingerprint={"extra_field"}})}
 fingerprint = schema.fingerprint(res[2], "sha256", 32)
 test:is(string.lower(string.tohex(fingerprint)),
-        "70bd295335daafff0a4512cadc39a4298cd81c460defec530c7372bdd1ec6f44",
-        "Fingerprint extra fields 2")
+    "ed1e8b275fe8c436839bdb2962f7595bbef6bc364dfdcd47d3d1334888350711",
+    "Fingerprint extra fields 2")
 
 res = {schema.create(
         {
