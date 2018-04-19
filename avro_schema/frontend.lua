@@ -350,7 +350,7 @@ copy_schema = function(schema, context, ns, open_rec)
                 for fieldno, xfield in ipairs(xfields) do
                     ptr = fieldno
                     local field = {}
-                    preserve_user_fields(field, xfield, context)
+                    preserve_user_fields(xfield, field, context)
                     res.fields[fieldno] = field
                     if type(xfield) ~= 'table' then
                         copy_schema_error('Record field must be a list')
@@ -1195,9 +1195,9 @@ export_helper = function(node, already_built)
             utils.copy_fields(node, res, {exclude={"fields"}})
             for i, field in ipairs(node.fields) do
                 local xfield = {
-                    name = field.name,
                     type = export_helper(field.type, already_built)
                 }
+                utils.copy_fields(field, xfield, {exclude={"type"}})
                 res.fields[i] = xfield
             end
             pack_nullable_to_type(res)
