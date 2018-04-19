@@ -289,10 +289,13 @@ copy_schema = function(schema, context, ns, open_rec)
                 ptr = branchno
                 local branch = copy_schema(xbranch, context, ns)
                 local bxtype, bxname
-                if type(branch) == 'table' and not branch.type then
+                -- use `xbranch` for the checks, because `branch` may be not
+                -- initialized (but its nullable/non-nullable mirror is
+                -- initialized)
+                if type(xbranch) == 'table' and not xbranch.type then
                     copy_schema_error('Union may not immediately contain other unions')
                 end
-                local bxid = type_tag(branch)
+                local bxid = type_tag(xbranch)
                 if tagmap[bxid] then
                     copy_schema_error('Union contains %s twice', bxid)
                 end
