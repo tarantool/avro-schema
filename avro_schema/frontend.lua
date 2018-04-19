@@ -1185,6 +1185,12 @@ export_helper = function(node, already_built)
         if primitive_type[xtype] then
             local res = table.deepcopy(node)
             pack_nullable_to_type(res)
+            -- if `type` is the only field in `res` then the type
+            -- should be canonized: {type="int"} -> "int"
+            assert(res.type)
+            if utils.has_only(res, "type") then
+                return res.type
+            end
             return res
         elseif xtype == 'record' then
             if already_built[node.name] then
