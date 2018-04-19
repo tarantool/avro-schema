@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(45)
+test:plan(46)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -131,10 +131,19 @@ test:is(schema.are_compatible(barfoo, foobar, 'downgrade'), true,
 
 -- create, infinite loop
 local inf_loop_union_decl = { 'null' }
-inf_loop_union_decl[2] = inf_loop_union_decl
+inf_loop_union_decl[2] = {
+    type = "record",
+    name = "infinite_union",
+    fields = {
+        {
+            name = "f1",
+            type = inf_loop_union_decl
+        }
+    }
+}
 test:is_deeply({schema.create(inf_loop_union_decl)},
-               {false, '<union>/<branch-2>: Infinite loop detected in the data'},
-               'create / infinite loop (union)')
+   {false, '<union>/infinite_union/f1: Infinite loop detected in the data'},
+   'create / infinite loop (union)')
 -- compile
 local res = {schema.compile(int)}
 test:test("compile / int", function(test)
@@ -290,6 +299,24 @@ test:is(res[1], true, "Schema created successfully")
 res = schema.export(res[2])
 test:is_deeply(res, forward_canonical,
     "Exported schema should be canonical.")
+
+-- Due to e719015 the nullable and non-nullable types are two different tables.
+-- As only one table is initialized during copy_schema call, there is a time
+-- when the other table is blank. This is a regression test for #77
+local deferred_type_initialization_for_nullable_type = {
+    {
+        name = "Foo",
+        type = "record*",
+        fields = {
+            {
+                name = "foo",
+                type = "float"
+            }
+        }
+    }
+}
+res = {schema.create(deferred_type_initialization_for_nullable_type)}
+test:is(res[1], true, "deferred initialization of nullable/non-nullable types")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)
