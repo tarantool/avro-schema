@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(27)
+test:plan(35)
 
 -- nested records, union, reference to earlier declared type
 local foobar_decl = {
@@ -35,6 +35,17 @@ for _, type in ipairs(
         }) do
     res = {schema.create({type=type})}
     test:is_deeply(schema.export(res[2]), type, 'schema normalization '..type)
+end
+
+-- nullable scalar export
+for _, type in ipairs(
+        {
+            "int*", "string*", "null*", "boolean*", "long*",
+            "float", "double*", "bytes*"
+        }) do
+    res = {schema.create({type=type})}
+    test:is_deeply(schema.export(res[2]), type,
+        'nullable scalar normalization '..type)
 end
 
 -- fingerprint tests
@@ -266,35 +277,18 @@ local nullable_orig = [[ {
             {"name": "v2", "type": "string*"} ] } },
     { "name": "r2", "type": "tr1*"},
     { "name": "dummy", "type": {
-         "name": "td", "type": "array", "items": "int" }},
+        "type": "array", "items": "int" }},
     { "name": "r3", "type": {
           "name": "tr2", "type": "record*", "fields": [
                 {"name": "v1", "type": "string"} ,
                 {"name": "v2", "type": "int*"} ] } },
    { "name": "r4", "type": "tr2" }]
 }]]
-
--- TODO: the `nullable_orig` should be used after #74
-local nullable_exported = [[
-{"type":"record","fields":
-    [{"name":"r1","type":
-        {"type":"record","fields":
-            [{"name":"v1","type":"int"},
-            {"name":"v2","type":{"type":"string*"}}],
-        "name":"tr1"}},
-    {"name":"r2","type":"tr1*"},
-    {"name":"dummy","type":{"type":"array","items":"int"}},
-    {"name":"r3","type":
-        {"type":"record*","name":"tr2","fields":
-            [{"name":"v1","type":"string"},
-            {"name":"v2","type":{"type":"int*"}}]}},
-    {"name":"r4","type":"tr2"}],
-"name":"outer"}
-]]
-res = {schema.create(json.decode(nullable_orig))}
+nullable_orig = json.decode(nullable_orig)
+res = {schema.create(nullable_orig)}
 test:is(res[1], true, "Schema created successfully")
 res = schema.export(res[2])
-test:is_deeply(res, json.decode(nullable_exported), "Exported schema is valid.")
+test:is_deeply(res, nullable_orig, "Exported schema is valid.")
 
 -- check if nullable reference is not exported as a definition
 local nullable_reference = {

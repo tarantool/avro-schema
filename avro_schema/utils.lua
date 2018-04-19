@@ -45,8 +45,16 @@ local function copy_fields(from, to, opts)
         end
     end
 end
+--
+--- Check if given table has only one specific key.
+function has_only(t, key)
+    local fst_key = next(t)
+    local snd_key = next(t, fst_key)
+    return fst_key == key and snd_key == nil
+end
 
 return {
     table_contains = table_contains,
-    copy_fields = copy_fields
+    copy_fields = copy_fields,
+    has_only = has_only
 }
