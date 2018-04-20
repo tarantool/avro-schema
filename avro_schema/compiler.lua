@@ -421,9 +421,12 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             il.move(v_base + i, loop_var, 1)
         }
         strswitch[i + 1] = branch
+        -- Check that fields which are only in input schema were in passed
+        -- data. It should be performed here, because only fields from output
+        -- schema are checked in the loop below.
         if not i2o[i] then -- missing from target schema
             il:append_code('cn', branch, ir[i], loop_var, 1, loop_var)
-            if type(field.default) == 'nil' then
+            if type(field.default) == 'nil' and not field.nullable then
                 -- mandatory field, add a check
                 insert(code_section2,
                        il.isset(v_base + i, ipv, ipo, field.name))
