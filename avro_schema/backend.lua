@@ -19,6 +19,8 @@ local random_bytes   = digest.base64_decode([[
 X1CntcveBDc4inHKyWfyXw5iCjg1f3TmeX88pZ2Galb9tXpTt1uBO0pZrkU5NW1/4Ki9g8fAwElq
 B3dRsBscsg==]])
     
+-- The procedure gives ids to variables which then used to generate its names.
+-- The general rule is to give the same number as it was in `ir` representation.
 local sched_variables_helper
 sched_variables_helper = function(block, n, varmap, reusequeue)
     for i = 1, #block do
@@ -31,7 +33,7 @@ sched_variables_helper = function(block, n, varmap, reusequeue)
                 var = n + 1
                 n = var
             end
-            varmap[o.ipv] = var
+            varmap[o.ipv] = o.ipv
         elseif o.op == opcode.ENDVAR then
             insert(reusequeue, varmap[o.ipv])
         end
@@ -591,22 +593,43 @@ emit_nested_block = function(ctx, block, cc, res)
     insert(queue, cc)
 end
 
-local locals_tab = {
-    [0] = 'local x%d',
-    'local x%d, x%d',
-    'local x%d, x%d, x%d'
-}
+-- The procedure emits local variables with names corresponding to their
+-- register numbers in `ir` representation
+local function emit_locals(varmap, nservice_fields, res)
+    if nservice_fields then
+        -- Allocate variables for service_fields like this:
+        -- local sf1
+        -- local sf2 ...
+        for num = 1, nservice_fields do
+            insert(res, format('local sf%d', num))
+        end
+    end
+    local var_nums = {}
+    for i, num in pairs(varmap) do
+        table.insert(var_nums, num)
+    end
+    local pos = 0
+    -- generate batches like: local x1, x2, x3, x4
+    -- until it there are 4 or more variables still
+    while pos < #var_nums - 4 do
+        insert(res, format('local x%d, x%d, x%d, x%d',
+            var_nums[pos + 1],
+            var_nums[pos + 2],
+            var_nums[pos + 3],
+            var_nums[pos + 4]))
+        pos = pos + 4
+    end
+    -- emit variables by one if less then 4 left
+    while pos < #var_nums do
+        insert(res, format('local x%d',
+            var_nums[pos + 1]))
+        pos = pos + 1
+    end
+end
 
 local function emit_func_body(il, func, nlocals_min, res)
     local nlocals, varmap = sched_func_variables(func)
-    if nlocals_min and nlocals_min > nlocals then
-        nlocals = nlocals_min
-    end
-    for i = 1, nlocals, 4 do
-        insert(res, format(locals_tab[nlocals - i] or
-                           'local x%d, x%d, x%d, x%d',
-                           i, i+1, i+2, i+3))
-    end
+    emit_locals(varmap, nlocals_min, res)
     if il.enable_loop_peeling then
         peel_annotate(func, 0)
     end
