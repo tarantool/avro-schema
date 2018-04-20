@@ -251,16 +251,16 @@ local function gen_fetch_service_fields(service_fields)
     local code = {}
     for i, field in ipairs(service_fields) do
         if field == 'boolean' then
-            insert(code, format('x%d = r.t[%d] == 3', i, i))
+            insert(code, format('sf%d = r.t[%d] == 3', i, i))
         elseif field == 'int' then
-            insert(code, format('x%d = tonumber(r.v[%d].ival)', i, i))
+            insert(code, format('sf%d = tonumber(r.v[%d].ival)', i, i))
         elseif field == 'long' then
-            insert(code, format('x%d = r.v[%d].ival', i, i))
+            insert(code, format('sf%d = r.v[%d].ival', i, i))
         elseif field == 'float' or field == 'double' then
-            insert(code, format('x%d = r.v[%d].dval', i, i))
+            insert(code, format('sf%d = r.v[%d].dval', i, i))
         elseif field == 'string' or field == 'bytes' then
             insert(code, format([[
-x%d = ffi_string(r.b1-r.v[%d].xoff, r.v[%d].xlen)]], i, i, i))
+sf%d = ffi_string(r.b1-r.v[%d].xoff, r.v[%d].xlen)]], i, i, i))
         else
             assert(false)
         end
@@ -346,7 +346,7 @@ r = rt_regs; v0 = 0; v1 = 0
 decode_proc(r, data)
 r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool]],
         conversion_complete = concat(u_complete, '\n'),
-        func_return = 'return v0' .. param_list(n, 'x'),
+        func_return = 'return v0' .. param_list(n, 'sf'),
         iter_prolog = 'if _ < 16 then goto continue end' -- artificially bump iter count
     })
 
