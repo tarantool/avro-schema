@@ -58,13 +58,13 @@ local default_type_size = {
 
 local default_nullable_type_size = {
     -- complex
-    array      = 2, enum   = 2,
-    fixed      = 2, map    = 2,
+    array      = -1, enum   = 1,
+    fixed      = 1, map    = -1,
     -- scalars
-    boolean    = 2, bytes  = 2,
-    double     = 2, float  = 2,
-    int        = 2, long   = 2,
-    null       = 2, string = 2,
+    boolean    = 1, bytes  = 1,
+    double     = 1, float  = 1,
+    int        = 1, long   = 1,
+    null       = 1, string = 1,
     -- not allowed
     any = 0 -- TODO disallow `any` on build ir stage
 }
@@ -212,6 +212,35 @@ local ir2ilfuncs = {
     STR2BIN  = { is = 'isstr',    put = 'putstr2bin' }
 }
 
+-- This function is helper for nullable type code emmitting
+-- It checks if the argument is nullable, then
+-- 1. if nullable: store it to the output buffer
+-- 2. if non-nullable: execute code for non-nullable version of the type
+--
+-- It is implemented by emitting the first part straight in this function
+-- and returning non-null branch, so that it can be extended with a basic
+-- procedure (for non-null type).
+local function do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+    local null_branch = { il.ibranch(1) }
+    local non_null_branch = { il.ibranch(0) }
+    insert(code, {
+           il.ifnul(ipv, ipo),
+           null_branch,
+           non_null_branch})
+    -- emit type specific code directly to the non_null_branch
+    code = non_null_branch
+    if find(mode, 'x') then
+        extend(null_branch,
+               il.checkobuf(1),
+               il.putnulc(0),
+               il.move(0, 0, 1))
+    end
+    if find(mode, 'n') then
+        insert(null_branch, il.move(ripv, ipv, ipo + 1))
+    end
+    return code
+end
+
 -- mode: c - check, x - transform, n - get next
 --  * CHECK - ensure an object at [$ipv + ipo] matches
 --    the IR (a shallow check, ex: in an array ignore contents)
@@ -224,12 +253,16 @@ local ir2ilfuncs = {
 --
 -- See new_codegen() below for il:append_code() / __FUNC__ / __CALL__ info.
 local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
+    if ir.nullable then
+        code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+    end
     local ir_type = ir.type
     if not ir_type then
+        -- extract basic type
+        ir = ir[1] or ir
+        assert(ir)
         local ilfuncs = ir2ilfuncs[ir]
-        -- print('Do_append_code:')
-        -- print('  ir: '..json.encode(ir))
-        -- print('  ilfuncs: '..json.encode(ilfuncs))
+        -- "ANY: not supported" is reported here
         assert(ilfuncs, ir)
         if find(mode, 'c') then insert(code, il[ilfuncs.is] (ipv, ipo)) end
         if find(mode, 'x') then
@@ -258,33 +291,17 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
     elseif ir_type == 'ARRAY' then
         if find(mode, 'c') then insert(code, il.isarray(ipv, ipo)) end
         if find(mode, 'x') then
-            -- print("ARRAY code gen ipv="..ipv.."; ipo="..ipo)
-            -- print(" IR-nested: "..require('json').encode(ir.nested))
             extend(code,
                    il.checkobuf(1),
                    il.putarray(0, ipv, ipo),
                    il.move(0, 0, 1))
-            local loop_var, loop_body = append_objforeach(il, code, ipv, ipo)
-            if ir.nested.nullable then
-                if is_flatten then
-                    extend(loop_body,
-                           il.checkobuf(1),
-                           il.putarrayc(0, 2),
-                           il.move(0, 0, 1))
-                    il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
-                else
-                    extend(loop_body,
-                           il.isarray(loop_var, 0))
-                    local nested_var, nested_body = append_objforeach(il, loop_body, loop_var, ipo)
-
-                    il:append_code('cxn', nested_body, ir.nested, nested_var, 0, nested_var)
-                    extend(loop_body, il.move(loop_var, loop_var, 3))
-                end
-            else
-                    il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
-            end
+            local loop_var, loop_body = append_objforeach(il, code,
+                ipv, ipo)
+            il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
         end
-        if find(mode, 'n') then insert(code, il.skip(ripv, ipv, ipo)) end
+        if find(mode, 'n') then
+            insert(code, il.skip(ripv, ipv, ipo))
+        end
     elseif ir_type == 'MAP' then
         if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
         if find(mode, 'x') then
@@ -474,9 +491,8 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
 
             -- If field is nullable, set tag to NULL by default
             if field.type.nullable then
-                insert(code, il.checkobuf(2))
-                insert(code, il.putintc(offset, 0));
-                insert(code, il.putnulc(offset + 1))
+                insert(code, il.checkobuf(1))
+                insert(code, il.putnulc(offset))
             end
         elseif i then -- and not next_offset: v/offset or v/length, append
             local branch = strswitch[i + 1]
@@ -591,50 +607,15 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
     -- print(" from: "..json.encode(ir.from))
     -- print(" mode: "..tostring(mode))
     if     ir_type == 'ENUM' then
-        -- TODO: in case of nullable enum: need to extend the checl
-        if not ir.from.nullable and find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
+        if ir.from.nullable then
+            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+        end
+        if find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
         if find(mode, 'x') then
-            local dest = code
-            if ir.from.nullable then
-                -- If record was marked nullable: emit following code fragment:
-                -- {$0 - current slot in the output buffer (ob)}
-                -- {(ipv, ipo) - roughly, current  value in the input buffer}
-                --  check if ob has at least two vacant slots, if not - extend
-                --  if value(ipv, ipo) is NULL then
-                --    put 0 to the ob
-                --    promote ob by 1 slot
-                --    put NULL constant to the ob
-                --    promote ob by 1 slot
-                --  else
-                --    put 1 to the ob
-                --    promote ob by 1 slot
-                --    emit convenient flattening of record's fields
-                --  end
-                dest = { il.ibranch(0),
-                         il.putintc(0, 1),
-                         il.move(0, 0, 1)}
-
-                extend(code, il.checkobuf(2))
-
-                insert(code, {
-                           il.ifnul(ipv, ipo),
-                           { il.ibranch(1),
-                             il.putintc(0, 0),
-                             il.move(0, 0, 1),
-                             il.putnulc(0),
-                             il.move(0, 0, 1)
-                           },
-                           dest })
-                extend(dest,
-                       il.checkobuf(1),
-                       il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
-                       il.move(0, 0, 1))
-            else
-                extend(code,
-                       il.checkobuf(1),
-                       il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
-                       il.move(0, 0, 1))
-            end
+            extend(code,
+                   il.checkobuf(1),
+                   il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
+                   il.move(0, 0, 1))
         end
         if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
@@ -696,65 +677,9 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         return do_append_union_flatten(il, mode, code, ir,
                                        ipv, ipo, ripv, xgap)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        if ir.nullable == true then
-            local dest = code
-            local orig = code
-            if find(mode, 'x') then
-                dest = { il.ibranch(0),
-                         il.putintc(0, 1),
-                         il.move(0, 0, 1)}
-                do_append_code(il, 'cx', dest, ir, ipv, ipo, ripv, true)
-
-                extend(code, il.checkobuf(2))
-                insert(code, {
-                       il.ifnul(ipv, ipo),
-                       { il.ibranch(1),
-                         il.putintc(0, 0),
-                         il.move(0, 0, 1),
-                         il.putnulc(0),
-                         il.move(0, 0, 1),
-                         il.move(1, 1, 1)
-                       },
-                       dest })
-                code = dest
-            end
-            if find(mode, 'n') then
-                if ir.nullable == true then
-                    insert(dest, il.skip(ripv, ipv, ipo))
-                else
-                    do_append_code(il, 'n', code, ir, ipv, ipo, ripv, true)
-                end
-            end
-        else
-            return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
-        end
+        return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
     else -- defer to basic codegen
-        if ir.type == nil and ir.nullable == true then
-            local dest = code
-            if find(mode, 'x') then
-                dest = { il.ibranch(0),
-                         il.putintc(0, 1),
-                         il.move(0, 0, 1)}
-                do_append_code(il, 'cx', dest, ir[1], ipv, ipo, ripv, true)
-
-                extend(code, il.checkobuf(2))
-                insert(code, {
-                       il.ifnul(ipv, ipo),
-                       { il.ibranch(1),
-                         il.putintc(0, 0),
-                         il.move(0, 0, 1),
-                         il.putnulc(0),
-                         il.move(0, 0, 1)
-                       },
-                       dest })
-                if find(mode, 'n') then
-                    do_append_code(il, 'n', code, ir[1], ipv, ipo, ripv, true)
-                end
-                return
-            end
-        else
-            return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
-        end
+        return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
     end
 end
 
@@ -853,38 +778,15 @@ end
 local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     local  ir_type = ir.type
     if     ir_type == 'ENUM' then
-        if find(mode, 'c') then
-            insert(code, il.isint(ipv, ipo))
-            -- If enum is nullable then it represented as int pair
-            if ir.from.nullable then
-                -- insert(code, il.isint(ipv, ipo + 1)) ... or NULL
-            end
+        if ir.from.nullable then
+            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
         end
+        if find(mode, 'c') then insert(code, il.isint(ipv, ipo)) end
         if find(mode, 'x') then
-            if ir.from.nullable then
-                local dest = { il.ibranch(1),
-                               il.move(ipv, ipv, 1) }
-
-                extend(code, il.checkobuf(1))
-                insert(code, {
-                           il.intswitch(ipv, ipo),
-                           { il.ibranch(0),
-                             il.putnulc(0),
-                             il.move(ipv, ipv, 2),
-                             il.move(0, 0, 1)
-                           },
-                           dest })
-                extend(dest,
-                       il.checkobuf(1),
-                       il.putenumi2s(0, ipv, ipo, make_enumi2s_tab(ir)),
-                       il.move(0, 0, 1))
-                code = dest
-            else
-                extend(code,
-                       il.checkobuf(1),
-                       il.putenumi2s(0, ipv, ipo, make_enumi2s_tab(ir)),
-                       il.move(0, 0, 1))
-            end
+            extend(code,
+                   il.checkobuf(1),
+                   il.putenumi2s(0, ipv, ipo, make_enumi2s_tab(ir)),
+                   il.move(0, 0, 1))
         end
         if find(mode, 'n') then
             local offset = 1
@@ -942,42 +844,9 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == '__UNION__' then
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        -- print("Unflatten array IR :"..json.encode(ir))
-        if ir.nullable then
-            local dest = { il.ibranch(1),
-                           il.move(ipv, ipv, 1) }
-            do_append_code(il, mode, dest, ir, ipv, ipo, ripv)
-
-            extend(code, il.checkobuf(1))
-            insert(code, {
-                       il.intswitch(ipv, ipo),
-                       { il.ibranch(0),
-                         il.putnulc(0),
-                         il.move(ipv, ipv, 2),
-                         il.move(0, 0, 1)
-                       },
-                       dest })
-        else
-            do_append_code(il, mode, code, ir, ipv, ipo, ripv)
-        end
+        do_append_code(il, mode, code, ir, ipv, ipo, ripv)
     else -- defer to basic codegen
-        if ir.type == nil and ir.nullable == true then
-            local dest = { il.ibranch(1),
-                           il.move(ipv, ipv, 1) }
-
-            extend(code, il.checkobuf(1))
-            insert(code, {
-                       il.intswitch(ipv, ipo),
-                       { il.ibranch(0),
-                         il.putnulc(0),
-                         il.move(ipv, ipv, 2),
-                         il.move(0, 0, 1)
-                       },
-                       dest })
-            return do_append_code(il, mode, dest, ir[1], ipv, ipo, ripv)
-        else
-            return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
-        end
+        return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
     end
 end
 
