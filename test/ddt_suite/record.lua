@@ -502,7 +502,7 @@ t {
       }]],
     func = 'flatten',
     input = [[ { "X": 42, "Y": "kek" } ]],
-    output = ' [1, 42, "kek"]'
+    output = ' [42, "kek"]'
 }
 
 t {
@@ -512,7 +512,7 @@ t {
         {"name": "Y", "type": "string"} ]
       }]],
     func = 'unflatten',
-    input = ' [1, 42, "kek"]',
+    input = ' [42, "kek"]',
     output = [[ { "X": 42, "Y": "kek" } ]]
 }
 
@@ -524,7 +524,7 @@ t {
       }]],
     func = 'flatten',
     input = [[ { "X": null, "Y": "kek" } ]],
-    output = ' [0, null, "kek"]'
+    output = ' [null, "kek"]'
 }
 
 t {
@@ -534,7 +534,7 @@ t {
         {"name": "Y", "type": "string"} ]
       }]],
     func = 'unflatten',
-    input = ' [0, null, "kek"]',
+    input = ' [null, "kek"]',
     output = [[ { "X": null, "Y": "kek" } ]]
 }
 
@@ -549,5 +549,5 @@ t {
       }]],
     func = 'flatten',
     input = [[ { "Y": "kek" } ]],
-    output = ' [0, null, "kek"]'
+    output = ' [null, "kek"]'
 }

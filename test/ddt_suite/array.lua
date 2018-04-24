@@ -175,47 +175,47 @@ t {
 t {
     schema = string_array_nullable,
     func = 'flatten',
-    input = '["hello", "world"]', output = '[1, ["hello", "world"]]'
+    input = '["hello", "world"]', output = '[["hello", "world"]]'
 }
 
 t {
     schema = string_array_nullable,
     func = 'flatten',
-    input = 'null', output = '[0, null]'
+    input = 'null', output = '[null]'
 }
 
 t {
     schema = string_array_nullable,
     func = 'unflatten',
-    input = '[1, ["hello", "world"]]', output = '["hello", "world"]'
+    input = '[["hello", "world"]]', output = '["hello", "world"]'
 }
 
 t {
     schema = string_array_nullable,
     func = 'unflatten',
-    input = '[0, null]', output = 'null'
+    input = '[null]', output = 'null'
 }
 
 t {
     schema = string_array_items_nullable,
     func = 'flatten',
-    input = '[null, null]', output = '[[[0, null], [0, null]]]'
+    input = '[null, null]', output = '[[null, null]]'
 }
 
 t {
     schema = string_array_items_nullable,
     func = 'unflatten',
-    input = '[[[0, null], [0, null]]]', output = '[null, null]'
+    input = '[[null, null]]', output = '[null, null]'
 }
 
 t {
     schema = string_array_items_nullable,
     func = 'flatten',
-    input = '[null, "hello"]', output = '[[[0, null], [1, "hello"]]]'
+    input = '[null, "hello"]', output = '[[null, "hello"]]'
 }
 
 t {
     schema = string_array_items_nullable,
     func = 'unflatten',
-    input = '[[[0, null], [1, "hello"]]]', output = '[null, "hello"]'
+    input = '[[null, "hello"]]', output = '[null, "hello"]'
 }
