@@ -71,7 +71,10 @@ local default_nullable_type_size = {
 
 local schema_width
 local schema_width_cache = setmetatable({}, weak_keys)
-schema_width = function(s, ignore_nullable)
+-- How many places in an array should be reserved for the structure.
+-- In case of negative result, the number of required places in obuf can be
+-- different from the returned number.
+schema_width = function(s)
     if type(s) == "string" then
         if default_type_size[s] then
             return default_type_size[s]
@@ -90,8 +93,10 @@ schema_width = function(s, ignore_nullable)
     end
 
     local res = schema_width_cache[s]
-    if res and ignore_nullable then return res end
+    if res then return res end
     if s_type == 'record' then
+        -- Extra space for an array in case of nullable record
+        if s.nullable then return -1 end
         local width, vlo = 0, false
         for _, field in ipairs(s.fields) do
             local field_width = schema_width(field.type)
@@ -99,12 +104,6 @@ schema_width = function(s, ignore_nullable)
             vlo = vlo or field_width < 0
         end
         res = vlo and -width or width
-        -- If nullable - need one extra slot and it is allways VLO
-        -- TODO: might optimize: if only one non-VLO field in the record
-        -- then this record is not VLO, even if nullble
-        if s.nullable and not ignore_nullable then
-            res = 2
-        end
     elseif s_type == nil then -- union
         res = 2
         for _, branch in ipairs(s) do
@@ -116,10 +115,26 @@ schema_width = function(s, ignore_nullable)
         error("Invalid type " .. tostring(s_type))
     end
 
-    if not s.nullable then
-        schema_width_cache[s] = res
-    end
+    schema_width_cache[s] = res
     return res
+end
+
+-- The function calculates how many places in the array internals of the
+-- record take.
+--
+local function record_internal_width(s)
+    if s.type ~= "record" then
+        return schema_width(s)
+    end
+    local width = 0
+    local vlo = false
+    for _, field in ipairs(s.fields) do
+        local field_width = schema_width(field.type)
+        width = width + abs(field_width)
+        vlo = vlo or field_width < 0
+    end
+    width = vlo and -width or width
+    return width
 end
 
 -----------------------------------------------------------------------
@@ -458,10 +473,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         local next_offset
         -- compute next_offset
         if offset then
-            -- print(" calling schema width for "..json.encode(field.type))
-            local width = schema_width(field.type, true)
-            -- print("   ... got " .. tostring(width))
-            -- print("  next offest for "..json.encode(field).." is: " ..tostring(width));
+            local width = schema_width(field.type)
             if i and width < 0 then -- variable length, activate append mode
                 insert(code_section2, il.move(0, 0, offset))
             else
@@ -628,47 +640,23 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
         end
         il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
     elseif ir_type == '__RECORD__' then
-        -- TODO: in case of nullable type extension, ARRAYC of length 2
-        -- will be on top of the record being flattened, so need
-        -- to extend this check, which will take this fact into accout
-        if find(mode, 'c') and not ir.from.nullable then insert(code, il.ismap(ipv, ipo)) end
+        if ir.from.nullable then
+            -- If null is passed, then just a null is encoded.
+            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+        end
+        if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
         if find(mode, 'x') then
-            local dest = code
+            -- If nullable record is passed to the input the record would be
+            -- encoded as a subarray.
             if ir.from.nullable then
-                -- If record was marked nullable: emit following code fragment:
-                -- {$0 - current slot in the output buffer (ob)}
-                -- {(ipv, ipo) - roughly, current  value in the input buffer}
-                --  check if ob has at least two vacant slots, if not - extend
-                --  if value(ipv, ipo) is NULL then
-                --    put 0 to the ob
-                --    promote ob by 1 slot
-                --    put NULL constant to the ob
-                --    promote ob by 1 slot
-                --  else
-                --    put 1 to the ob
-                --    promote ob by 1 slot
-                --    emit convenient flattening of record's fields
-                --  end
-                dest = { il.ibranch(0),
-                         il.putintc(0, 1),
-                         il.move(0, 0, 1),
-                         il.putarrayc(0, abs(schema_width(ir.from, true))),
-                         il.move(0, 0, 1)}
+                local record_width = abs(record_internal_width(ir.to))
+                extend(code,
+                    il.checkobuf(1),
+                    il.putarrayc(0, record_width),
+                    il.move(0, 0, 1))
 
-                extend(code, il.checkobuf(2))
-
-                insert(code, {
-                           il.ifnul(ipv, ipo),
-                           { il.ibranch(1),
-                             il.putintc(0, 0),
-                             il.move(0, 0, 1),
-                             il.putnulc(0),
-                             il.move(0, 0, 1)
-                           },
-                           dest })
             end
-
-            do_append_convert_record_flatten(il, dest, ir, ipv, ipo)
+            do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         end
         if find(mode, 'n') then
             insert(code, il.pskip(ripv, ipv, ipo))
@@ -808,39 +796,13 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
         il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
     elseif ir_type == '__RECORD__' then
         if ir.from.nullable then
-            -- If record was marked nullable: emit following code fragment:
-            -- {$0 - current slot in the output buffer (ob)}
-            -- {(ipv, ipo) - roughly, current  value in the input buffer (ib)}
-            --
-            -- make sure that ob has a free slot, allocate new otherwise
-            -- if current value in ib is 0 then
-            --   put NULL into output buffer
-            --   promote ob by 1
-            --   promote ib by 2 // need to skip type tag and NULL value slots
-            -- else
-            --   promote ib by 1 // skip tag slot
-            --   emit code to perform standard record contents unflattening
-            -- end
-
-            -- TODO: before intswitch: issue ISINT insn to make sure that value
-            -- is actually integer.
-            local dest = { il.ibranch(1),
-                           il.move(ipv, ipv, 2) }
-
-            extend(code, il.checkobuf(1))
-            insert(code, {
-                       il.intswitch(ipv, ipo),
-                       { il.ibranch(0),
-                         il.putnulc(0),
-                         il.move(ipv, ipv, 2),
-                         il.move(0, 0, 1)
-                       },
-                       dest })
-
-            return do_append_record_unflatten(il, mode, dest, ir, ipv, ipo, ripv)
-        else
-            return do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+            if find(mode, 'c') then
+                extend(code, il.isarray(ipv, ipo))
+            end
+            extend(code, il.move(ipv, ipv, 1))
         end
+        return do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == '__UNION__' then
         return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then

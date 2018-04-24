@@ -432,7 +432,7 @@ t {
                                     "r4": {"v1": "WAT", "v2": 3}
                                }]],
 
-    output = '[1, "hello", 1, [2, "hello2"], [1, 2, 3], 1, ["world", 2], "WAT", 3]'
+    output = '[1, "hello", [2, "hello2"], [1, 2, 3], ["world", 2], "WAT", 3]'
 }
 
 t {
@@ -445,7 +445,7 @@ t {
                                     "r4": {"v1": "WAT", "v2": 3}
                                }]],
 
-    output = '[1, "hello", 0, null, [1, 2, 3], 0, null, "WAT", 3]'
+    output = '[1, "hello", null, [1, 2, 3], null, "WAT", 3]'
 }
 
 t {
@@ -475,7 +475,7 @@ t {
 t {
     schema = record_nullable,
     func = 'unflatten',
-    input = '[1, "hello", 1, [2, "hello2"], [1, 2, 3], 1, ["world", 2], "WAT", 3]',
+    input = '[1, "hello", [2, "hello2"], [1, 2, 3], ["world", 2], "WAT", 3]',
     output= [[{"r1": {"v1": 1, "v2": "hello" },
               "r2": {"v1": 2, "v2": "hello2" },
               "dummy": [1, 2, 3],
@@ -486,7 +486,7 @@ t {
 t {
     schema = record_nullable,
     func = 'unflatten',
-    input = '[1, "hello", 0, null, [1, 2, 3], 0, null, "WAT", 3]',
+    input = '[1, "hello", null, [1, 2, 3], null, "WAT", 3]',
     output= [[{"r1": {"v1": 1, "v2": "hello" },
               "r2": null,
               "dummy": [1, 2, 3],
