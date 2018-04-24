@@ -65,20 +65,20 @@ t {
 
 t {
     schema = '"float*"',
-    func = 'flatten', input = '42', output = '! [1, 42.0]'
+    func = 'flatten', input = '42', output = '! [42.0]'
 }
 
 t {
     schema = '"float*"',
-    func = 'flatten', input = 'null', output = '[0, null]'
+    func = 'flatten', input = 'null', output = '[null]'
 }
 
 t {
     schema = '"float*"',
-    func = 'unflatten', input = '[1, 42]', output = '! 42.0'
+    func = 'unflatten', input = '[42]', output = '! 42.0'
 }
 
 t {
     schema = '"float*"',
-    func = 'unflatten', input = '[0, null]', output = 'null'
+    func = 'unflatten', input = '[null]', output = 'null'
 }

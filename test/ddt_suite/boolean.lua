@@ -59,20 +59,20 @@ t {
 
 t {
     schema = '"boolean*"',
-    func = 'flatten', input = 'true', output = '[1, true]'
+    func = 'flatten', input = 'true', output = '[true]'
 }
 
 t {
     schema = '"boolean*"',
-    func = 'flatten', input = 'null', output = '[0, null]'
+    func = 'flatten', input = 'null', output = '[null]'
 }
 
 t {
     schema = '"boolean*"',
-    func = 'unflatten', input = '[1, false]', output = 'false'
+    func = 'unflatten', input = '[false]', output = 'false'
 }
 
 t {
     schema = '"boolean*"',
-    func = 'unflatten', input = '[0, null]', output = 'null'
+    func = 'unflatten', input = '[null]', output = 'null'
 }

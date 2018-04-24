@@ -66,5 +66,5 @@ t { -- test nullable fixed
     validate = '{"f2":1}',
     func = 'flatten',
     input = '{"f2":1}',
-    output = '[0, null, 1]'
+    output = '[null, 1]'
 }

@@ -98,20 +98,20 @@ t {
 
 t {
     schema = '"int*"',
-    func = 'flatten', input = '42', output = '[1, 42]'
+    func = 'flatten', input = '42', output = '[42]'
 }
 
 t {
     schema = '"int*"',
-    func = 'flatten', input = 'null', output = '[0, null]'
+    func = 'flatten', input = 'null', output = '[null]'
 }
 
 t {
     schema = '"int*"',
-    func = 'unflatten', input = '[1, 42]', output = '42'
+    func = 'unflatten', input = '[42]', output = '42'
 }
 
 t {
     schema = '"int*"',
-    func = 'unflatten', input = '[0, null]', output = 'null'
+    func = 'unflatten', input = '[null]', output = 'null'
 }

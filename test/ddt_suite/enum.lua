@@ -95,11 +95,11 @@ t {
 t {
     schema = card_face_nullable,
     func = 'flatten',
-    input = '"HEARTS"', output = '[1, 1]'
+    input = '"HEARTS"', output = '[1]'
 }
 
 t {
     schema = card_face_nullable,
     func = 'flatten',
-    input = 'null', output = '[0, null]'
+    input = 'null', output = '[null]'
 }
