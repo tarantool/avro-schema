@@ -215,6 +215,9 @@ local function convert_stage(test, args)
             if i == 1 then
                 output_i = json2msgpack(output_i)
             end
+            -- WARNING: This comparison is sensitive to order
+            -- of fields in a dictionary. Use jsons as an input and output
+            -- instead of lua tables.
             if result_i ~= output_i then
                 if i == 1 then
                     result_i = msgpack2json(result_i)

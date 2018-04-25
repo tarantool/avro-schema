@@ -551,3 +551,59 @@ t {
     input = [[ { "Y": "kek" } ]],
     output = ' [null, "kek"]'
 }
+
+-- Check that fields which are defined after the fields with undefined size are
+-- are flattened and unflattened correctly.
+local complex_nullable_schema = [[
+    {"type":"record*","name":"X","fields":[
+        {"name":"f1","type":"int"},
+        {"name":"f2","type":
+            {"type":"array*","items":"int*"}},
+        {"name":"f3","type":
+            {"type":"record*","name":"Y","fields":[
+                {"name":"yf1","type":"string*"}]}},
+        {"name":"f4","type":
+            {"type":"map*","values":"X"}},
+        {"name":"f5","type":"double"}]}]]
+
+t {
+    schema = complex_nullable_schema,
+    func = 'flatten',
+    input = [[
+        {"f4":
+            {"map_element_1":
+                {"f5":15,"f1":13}},
+        "f2":
+            [5,7,9,null],
+        "f5":17,
+        "f3":
+            {"yf1":"yf1_11"},
+        "f1":3}]],
+    output = [=[
+    [[
+        3,
+        [5,7,9,null],
+        ["yf1_11"],
+        {"map_element_1":[13,null,null,null,15.0]},
+        17.0]]
+    ]=]
+}
+
+t {
+    schema = complex_nullable_schema,
+    func = 'unflatten',
+    input = [=[
+    [[
+        3,
+        [5,7,9,null],
+        ["yf1_11"],
+        {"map_element_1":[13,null,null,null,15.0]},
+        17.0]]
+    ]=],
+    output = [[{
+        "f1": 3, "f2": [5, 7, 9, null],
+        "f3": {"yf1": "yf1_11"},
+        "f4": {"map_element_1":
+            {"f1": 13, "f2": null, "f3": null, "f4": null, "f5": 15.0}},
+        "f5": 17.0 } ]]
+}
