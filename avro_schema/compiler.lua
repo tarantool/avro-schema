@@ -184,7 +184,7 @@ end
 -----------------------------------------------------------------------
 -- ir utils
 
--- RECORD/UNION ir consists of two objects, ex. (record): 
+-- RECORD/UNION ir consists of two objects, ex. (record):
 --   RECORD ---(nested)---> __RECORD__
 -- Basically, RECORD represents a container (a MsgPack array
 -- of a sufficient length), while __RECORD__ represents a content.
@@ -263,7 +263,7 @@ end
 --    ensure obuf has enough capacity, render results at [$0], and update $0.
 --    Excludes checks implied by 'c'.
 --  * GET NEXT - compute position of an object following [$ipv + ipo]
---    and store it in $ripv. 
+--    and store it in $ripv.
 --    Excludes checks implied by 'c'.
 --
 -- See new_codegen() below for il:append_code() / __FUNC__ / __CALL__ info.
@@ -445,7 +445,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
     insert(loop_body, strswitch)
     -- create a branch in strswitch for each field (source schema)
     for i, field in ipairs(from_fields) do
-        -- declare field var; before the loop
+        -- declare field var before the loop
         insert(code, il.beginvar(v_base + i))
         local branch = {
             il.sbranch(field.name),
@@ -481,7 +481,6 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             end
         end
         local field_ir = unwrap_ir(ir[i])
-        -- print("  __RECORD__ field IR: "..json.encode(ir[i]))
         local field_default = field.default
         if next_offset then -- at fixed offset, patch
             -- Process all fields of fixed size until the first field of
@@ -560,7 +559,6 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         if i then insert(code_section2, il.endvar(v_base + i)) end
     end
     -- sync offset (unless already synced)
-    -- print("offset ("..json.encode(ir.from).." ): "..tostring(offset))
     if offset then insert(code_section2, il.move(0, 0, offset)) end
     append(code, code_section2)
 end
@@ -642,11 +640,6 @@ end
 -- UNION discriminator and a branch (for XUPDATE)
 local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
     local  ir_type = ir.type
-    -- print("Do_append_flatten ")
-    -- print(" IR: "..tostring(json.encode(ir)))
-    -- print(" IR type: "..tostring(ir_type))
-    -- print(" from: "..json.encode(ir.from))
-    -- print(" mode: "..tostring(mode))
     if     ir_type == 'ENUM' then
         if ir.from.nullable then
             code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
@@ -877,7 +870,7 @@ local function emit_code(il, ir, service_fields)
         local v_base = il.id(#from_fields) - 1
         -- we append instructions before and after the loop when convenient;
         -- for these reasons we initially accumulate the loop and subsequent
-        -- instructions in code_section2, and append it to code once done 
+        -- instructions in code_section2, and append it to code once done
         local code_section2 = {}
         -- emit parsing loop
         local loop_var, loop_body = append_objforeach(il, code_section2, ipv, ipo)
