@@ -919,8 +919,23 @@ local function emit_code(il, ir, service_fields)
             update_cell = update_cell + schema_width(ir.nested.to)
         elseif ir_type == '__RECORD__' then
             insert(code, il.ismap(ipv, ipo))
-            do_append_convert_record_xflatten(il, code, ir, ipv, ipo, f_codegen)
-            if find(mode, 'n') then insert(code, il.skip(ripv, ipv, ipo)) end
+            if ir.from.nullable then
+                extend(code,
+                        il.checkobuf(3),
+                        il.putarrayc(0, 3),
+                        il.putstrc(1, '='),
+                        il.putintkc(2, update_cell),
+                        il.move(0, 0, 3))
+                f_codegen:append_code('cxn', code, ir, ipv, ipo, ipv)
+                update_cell = update_cell + 1
+                return
+            else
+                do_append_convert_record_xflatten(il, code, ir, ipv, ipo,
+                    f_codegen)
+                if find(mode, 'n') then
+                    insert(code, il.skip(ripv, ipv, ipo))
+                end
+            end
         elseif ir_type == '__UNION__' and is_record_or_union(ir.to) then
             if is_union(ir.to) then
                 extend(code, il.checkobuf(6),
