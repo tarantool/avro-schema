@@ -607,3 +607,114 @@ t {
             {"f1": 13, "f2": null, "f3": null, "f4": null, "f5": 15.0}},
         "f5": 17.0 } ]]
 }
+
+-- nullable xflatten
+local nullable_xflatten = [[{
+    "type": "record", "name": "X", "fields": [
+        {"name": "f1", "type": "int*"},
+        {"name": "f2", "type": {
+            "type": "array*", "items": "string*"}},
+        {"name": "f3", "type":[
+            "int", "X*"]},
+        {"name": "f4", "type": {
+            "type": "map*", "values": "int*"}}]}
+    ]]
+
+t {
+    schema = nullable_xflatten,
+    func = "xflatten",
+    input = '{"f1":null, "f2":null, "f3":{"X":null}, "f4":null}',
+    output = [=[
+        [["=", 1, null], ["=", 2, null], ["=", 3, 1],
+        ["=", 4, [null]], ["=", 5, null]]
+    ]=]
+}
+
+t {
+    schema = nullable_xflatten,
+    func = "xflatten",
+    input = '{"f3":{"X":{"f1":1}}}',
+    error = [[f3/X: Key missing: "f3"]]
+}
+
+t {
+    schema = nullable_xflatten,
+    func = "xflatten",
+    input = '{"f3":{"X":{"f1":1, "f3":{"int":1}}}}',
+    output = [=[
+        [["=", 3, 1], ["=", 4, [[1, null, 0, 1, null]]]]
+    ]=]
+}
+
+local nullable_root_record_xflatten = [[{
+        "type": "record*", "name": "X", "fields": [
+            {"name": "f1", "type": "int"},
+            {"name": "f2", "type": "int"}]}
+    ]]
+
+t {
+    schema = nullable_root_record_xflatten,
+    func = "xflatten",
+    input = [[ {"f1":1} ]],
+    error = [[Key missing: "f2"]]
+}
+
+t {
+    schema = nullable_root_record_xflatten,
+    func = "xflatten",
+    input = [[ {"f1":1, "f2":2} ]],
+    output = [=[
+        [["=", 1, [1,2]]]
+    ]=]
+}
+
+local nullable_record_xflatten = [[{
+        "type": "record", "name": "X", "fields": [
+            {"name": "f1", "type": "int"},
+            {"name": "f2", "type": {
+                "type": "record*", "name": "Y", "fields": [
+                    {"name": "f3", "type": "int"},
+                    {"name": "f4", "type": "int"} ] }} ]}
+    ]]
+
+t {
+    schema = nullable_record_xflatten,
+    func = "xflatten",
+    input = [[ {"f2":{"f3":3}} ]],
+    error = [[f2: Key missing: "f4"]]
+}
+
+t {
+    schema = nullable_record_xflatten,
+    func = "xflatten",
+    input = [[ {"f2":{"f3":3, "f4":4}} ]],
+    output = [[ [ ["=", 2, [3,4] ] ] ]]
+}
+
+-- ensure that element position is calculated correctly
+local complex_xflatten = [[
+    {"type":"record","name":"X","fields":[
+        {"name":"f1","type":"int"},
+        {"name":"f2","type":
+            {"type":"array*","items":"int*"}},
+        {"name":"f3","type":
+            {"type":"record*","name":"Y","fields":[
+                {"name":"yf1","type":"string*"}]}},
+        {"name":"f4","type":
+            {"type":"map*","values":"X"}},
+        {"name":"f5","type":"double"}]}]]
+
+t {
+    schema = complex_xflatten,
+    func = "xflatten",
+    input = [[
+        {"f2": [2, null], "f3": {"yf1": "yf1str"},
+        "f4": {"map_key_1" : { "f1":1, "f5":5.0 } },
+        "f5": 5.5 }
+    ]],
+    output = [=[
+        [["=", 2, [2, null]], ["=", 3, ["yf1str"]],
+        ["=", 4, {"map_key_1": [1, null, null, null, 5.0]}],
+        ["=", 5, 5.5]]
+    ]=]
+}
