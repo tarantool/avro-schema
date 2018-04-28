@@ -219,3 +219,130 @@ t {
     func = 'unflatten',
     input = '[[null, "hello"]]', output = '[null, "hello"]'
 }
+
+local array_complex_1 = [[ {
+    "type": "array",
+    "items": {
+        "type": "record*",
+        "name": "X",
+        "fields": [
+            {"name":"f1", "type":"string*"},
+            {"name":"f2", "type":"string*"},
+            {"name":"f3", "type":"string*"}
+        ]
+    }
+}
+]]
+
+t {
+    schema = array_complex_1,
+    func = "flatten",
+    input = [[ [
+        {"f1":"1"},
+        {"f2":"2"},
+        null,
+        {"f3":"3"}] ]],
+    output = [=[ [[["1",null,null],[null,"2",null], null,
+        [null,null,"3"]]] ]=]
+}
+
+t {
+    schema = array_complex_1,
+    func = "unflatten",
+    output = [[
+    [{"f1": "1", "f2": null, "f3": null}, {"f1": null, "f2": "2", "f3": null},
+    null, {"f1": null, "f2": null, "f3": "3"}] ]],
+    input = [=[ [[["1",null,null],[null,"2",null], null,
+        [null,null,"3"]]] ]=]
+}
+
+local array_complex_2 = [[ {
+    "type": "array",
+    "items": {
+        "type": "record",
+        "name": "X",
+        "fields": [
+            {"name":"f1", "type":"string*"},
+            {"name":"f2", "type":"string*"},
+            {"name":"f3", "type":"string*"}
+        ]
+    }
+}
+]]
+
+t {
+    schema = array_complex_2,
+    func = "flatten",
+    input = [[ [
+        {"f1":"1"},
+        {"f2":"2"},
+        {"f3":"3"}] ]],
+    output = [=[ [[["1",null,null],[null,"2",null],[null,null,"3"]]] ]=]
+}
+
+t {
+    schema = array_complex_2,
+    func = "unflatten",
+    output = [[
+        [{"f1": "1", "f2": null, "f3": null},
+        {"f1": null, "f2": "2", "f3": null},
+        {"f1": null, "f2": null, "f3": "3"}] ]],
+    input = [=[ [[["1",null,null],[null,"2",null],[null,null,"3"]]] ]=]
+}
+
+local array_complex_3 = [[ {
+    "type": "array",
+    "items": {
+        "type": "map*",
+        "name": "X",
+        "values": "string"
+    }
+}
+]]
+
+t {
+    schema = array_complex_3,
+    func = "flatten",
+    input = [[ [
+        {"f1":"1",
+        "f2":"2"},
+        null,
+        {"f3":"3"}] ]],
+    output = [=[ [[{"f1": "1", "f2": "2"}, null, {"f3": "3"}]] ]=]
+}
+
+t {
+    schema = array_complex_3,
+    func = "unflatten",
+    output = [=[ [
+        {"f1":"1",
+        "f2":"2"},
+        null,
+        {"f3":"3"}] ]=],
+    input = [=[ [[{"f1": "1", "f2": "2"}, null, {"f3": "3"}]] ]=]
+}
+
+local array_complex_4 = [[ {
+    "type": "array",
+    "items": [
+        "null",
+        "int",
+        {
+            "type": "record*",
+            "name": "X",
+            "fields":[
+                {"name": "f1", "type":"string*"},
+                {"name": "f2", "type":"string*"}
+            ]
+        }]} ]]
+
+t {
+    schema = array_complex_4,
+    func = "flatten",
+    input = [[ [
+        {"X":{"f1":"1", "f2":"2"}},
+        {"X":null},
+        null,
+        {"int":7}] ]],
+    output = [=[ [[[2, ["1", "2"]], [2, null], [0, null], [1, 7]]] ]=]
+}

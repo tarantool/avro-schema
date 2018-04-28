@@ -197,6 +197,18 @@ local function unwrap_ir(ir)
     end
 end
 
+-- this method is used when nullable record is stored directly inside of array
+-- or union, because without unwrapping record data would be flattened inside of
+-- two levels of arrays (one for RECORD and one for nullability), while
+-- one level of arrays is enough to restore the data properly.
+local function unwrap_nullable_record(ir)
+    if ir.type == 'RECORD' and ir.nullable then
+        return ir.nested
+    else
+        return ir
+    end
+end
+
 -----------------------------------------------------------------------
 -- basic codegen
 
@@ -312,7 +324,8 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
                    il.move(0, 0, 1))
             local loop_var, loop_body = append_objforeach(il, code,
                 ipv, ipo)
-            il:append_code('cxn', loop_body, ir.nested, loop_var, 0, loop_var)
+            il:append_code('cxn', loop_body, unwrap_nullable_record(ir.nested),
+                loop_var, 0, loop_var)
         end
         if find(mode, 'n') then
             insert(code, il.skip(ripv, ipv, ipo))
@@ -622,7 +635,8 @@ local function do_append_union_flatten(il, mode, code, ir,
                 if to_union then
                     extend(dest, il.checkobuf(xgap),
                            il.putintc(0, o - 1), il.move(0, 0, xgap))
-                    il:append_code(x_or_cx, dest, ir[i], ipv, val_ipo)
+                    il:append_code(x_or_cx, dest, unwrap_nullable_record(ir[i]),
+                        ipv, val_ipo)
                 else -- target is not a union (maybe a record, hence unwrap) 
                     il:append_code(x_or_cx, dest, unwrap_ir(ir[i]),
                                    ipv, val_ipo)
@@ -779,7 +793,8 @@ local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
                            il.move(0, 0, 2))
                 end
             end
-            il:append_code(mode, code_branch, ir[i], ipv, ipo + 1, ripv)
+            il:append_code(mode, code_branch, unwrap_nullable_record(ir[i]),
+                ipv, ipo + 1, ripv)
         end
     end
 end
