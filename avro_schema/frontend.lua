@@ -803,7 +803,7 @@ copy_data = function(schema, data, visited)
             end
             -- copy data
             for _, field in ipairs(schema.fields) do
-                if data[field.name] then
+                if data[field.name] ~= nil then
                     -- a field is present in data
                     ptr = field.name
                     res[field.name] =

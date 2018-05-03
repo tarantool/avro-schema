@@ -38,6 +38,19 @@ t {
     validate_error = 'Not a boolean: 100500'
 }
 
+-- regression gh-88, false in record field is treated as absense of value
+t {
+    schema = [[{
+        "type": "record",
+        "name": "X",
+        "fields": [
+            {"name": "f1", "type": "boolean"}
+        ]
+    }]],
+    validate = [[ {"f1": false} ]],
+    validate_only = true
+}
+
 -- int
 
 t {
