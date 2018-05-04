@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(47)
+test:plan(53)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -173,16 +173,20 @@ test:test("compile / int", function(test)
 end)
 
 -- get_names
-test:is_deeply(schema.get_names(int), {}, 'get_names (int)')
+local ok, err_msg = pcall(schema.get_names, int)
+test:like(tostring(err_msg), "expected non%-nullable record at the top level",
+    'get_names (int)')
 test:is_deeply(schema.get_names(foobar),
                {'A.X','A.Y','B.X','B.Y','C.$type$','C','D'},
                'get_names (FooBar)')
 
 -- get_types
-test:is_deeply(schema.get_types(int), {}, 'get_types (int)')
+local ok, err_msg = pcall(schema.get_types, int)
+test:like(tostring(err_msg), "expected non%-nullable record at the top level",
+    'get_types (int)')
 test:is_deeply(schema.get_types(foobar),
-               {'double','double','double','double',nil,nil,'string'},
-               'get_types (FooBar)')
+               {'double','double','double','double','union_type','union_value',
+                   'string'}, 'get_types (FooBar)')
 
 -- is
 test:is(schema.is(int), true, 'schema handle is a schema (1)')
@@ -332,6 +336,56 @@ local ok, compiled = schema.compile(res[2])
 local ok, err_mesg = compiled.xflatten({y={f1="a"}})
 test:like(err_mesg, "xflatten for nullable record is on developement stage",
     "nullable record xflatten prohibited")
+
+local get_names_types = [[
+ {"type": "record", "name": "X", "fields":[
+        {"name": "x1", "type":"string*"},
+        {"name": "x2", "type": {
+            "type":"record", "name": "Y", "fields": [
+                {"name":"y1", "type": "string"},
+                {"name":"y2", "type": "long"}]}},
+        {"name": "x3", "type": {
+            "type":"record*","name": "Z", "fields": [
+                {"name":"z1", "type": "string*"},
+                {"name":"z2", "type": "long*"}]}},
+        {"name": "x4", "type": ["int", "string*" ]},
+        {"name": "x5", "type": {"type": "array*", "items": "int*"}},
+        {"name": "x6", "type": {"type": "map", "values": "float"}},
+        {"name": "x7", "type": {"type": "fixed*", "name":"W", "size":5}}
+    ]}
+]]
+get_names_types = json.decode(get_names_types)
+
+local ok, handle = schema.create(get_names_types)
+local service_fields = {"string", "int"}
+local ok, compiled = schema.compile({handle, service_fields = service_fields})
+assert(ok, compiled)
+-- get_names
+test:is_deeply(schema.get_names(handle),
+    {"x1","x2.y1","x2.y2","x3","x4.$type$","x4","x5","x6","x7"},
+    "get_names")
+test:is_deeply(schema.get_names(handle, service_fields),
+    {"$service_field$", "$service_field$", "x1","x2.y1","x2.y2","x3",
+        "x4.$type$", "x4","x5","x6","x7"},
+    "get_names sf")
+test:is_deeply(compiled.get_names(),
+    {"$service_field$", "$service_field$", "x1","x2.y1","x2.y2","x3",
+        "x4.$type$", "x4","x5","x6","x7"},
+    "compiled.get_names")
+
+-- get_types
+test:is_deeply(schema.get_types(handle),
+    {"string*","string","long","record*","union_type","union_value",
+        "array*","map","fixed*"},
+    "get_types")
+test:is_deeply(schema.get_types(handle, service_fields),
+    {"string", "int", "string*","string","long","record*",
+        "union_type","union_value", "array*","map","fixed*"},
+    "get_types sf")
+test:is_deeply(compiled.get_types(),
+    {"string", "int", "string*","string","long","record*",
+        "union_type","union_value", "array*","map","fixed*"},
+    "compiled.get_types")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)

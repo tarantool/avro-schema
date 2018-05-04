@@ -381,12 +381,20 @@ v0 = encode_proc(r, v0)]],
     })
 end
 
--- service fields, a subset of AVRO types
-local valid_service_field = {
-    boolean = 1, int =    1, long =  1, float = 1,
-    double =  1, string = 1, bytes = 1
-}
+local function validate_service_fields(sfs)
+    -- service fields, a subset of AVRO types
+    local valid_service_field = {
+        boolean = 1, int =    1, long =  1, float = 1,
+        double =  1, string = 1, bytes = 1
+    }
+    for i, field in ipairs(sfs) do
+        if not valid_service_field[field] then
+            error(format('service_fields[%d]: Invalid type: %s', i, field), 0)
+        end
+    end
+end
 
+local get_names, get_types
 -- compile(schema)
 -- compile(schema1, schema2)
 -- compile({schema1, schema2, downgrade = true, service_fields = { ... }})
@@ -402,18 +410,18 @@ local function compile(...)
         args = args[1]
     end
     local service_fields = args.service_fields or {}
+    -- Make private copy for get_names & get_types.
+    service_fields = table.copy(service_fields)
     -- would be deleted after #85
     local alpha_nullable_record_xflatten = args.alpha_nullable_record_xflatten
     if type(service_fields) ~= 'table' then
         error('service_fields: Expecting a table', 0)
     end
-    for i, field in ipairs(service_fields) do
-        if not valid_service_field[field] then
-            error(format('service_fields[%d]: Invalid type: %s', i, field), 0)
-        end
-    end
+    validate_service_fields(service_fields)
     local list = {}
+    local handler_schema_to
     for i = 1, n do
+        handler_schema_to = args[i]
         insert(list, get_schema(args[i]))
     end
     if #list == 0 then
@@ -460,79 +468,46 @@ local function compile(...)
             xflatten          = process_lua.xflatten,
             flatten_msgpack   = process_msgpack.flatten,
             unflatten_msgpack = process_msgpack.unflatten,
-            xflatten_msgpack  = process_msgpack.xflatten
+            xflatten_msgpack  = process_msgpack.xflatten,
+            get_names         = function ()
+                return get_names(handler_schema_to, service_fields)
+            end,
+            get_types         = function ()
+                return get_types(handler_schema_to, service_fields)
+            end
         }
     end
 end
 
 -----------------------------------------------------------------------
 -- misc
-local get_names_helper
-get_names_helper = function(res, pos, names, rec)
-    local fields = rec.fields
-    for i = 1, #fields do
-        local ftype = fields[i].type
-        insert(names, fields[i].name)
-        if type(ftype) == 'string' then
-            res[pos] = concat(names, '.')
-            pos = pos + 1
-        elseif ftype.type == 'record' then
-            pos = get_names_helper(res, pos, names, ftype)
-        elseif not ftype.type then -- union
-            local path = concat(names, '.')
-            res[pos] = path .. '.$type$'
-            res[pos + 1] = path
-            pos = pos + 2
-        else
-            res[pos] = concat(names, '.')
-            pos = pos + 1
-        end
-        remove(names)
-    end
-    return pos
-end
-
-local function get_names(schema_h)
+get_names = function(schema_h, service_fields)
     local schema = get_schema(schema_h)
-    if type(schema) == 'table' and schema.type == 'record' then
-        local res = {}
-        local names = {}
-        get_names_helper(res, 1, names, schema)
-        return res
-    else
-        return {}
+    service_fields = service_fields or {}
+    validate_service_fields(service_fields)
+    local res = {}
+    for i = 1, #service_fields do
+        insert(res, "$service_field$")
     end
+    assert(type(schema) == 'table' and schema.type == 'record' and
+        not schema.nullable, "expected non-nullable record at the top level")
+    local names = {}
+    front.get_names_helper(res, #res + 1, names, schema)
+    return res
 end
 
-local get_types_helper
-get_types_helper = function(res, pos, rec)
-    local fields = rec.fields
-    for i = 1, #fields do
-        local ftype = fields[i].type
-        if type(ftype) == 'string' then
-            res[pos] = ftype
-            pos = pos + 1
-        elseif ftype.type == 'record' then
-            pos = get_types_helper(res, pos, ftype)
-        elseif not ftype.type then -- union
-            pos = pos + 2
-        else
-            res[pos] = ftype.name or ftype.type
-            pos = pos + 1
-        end
-    end
-    return pos
-end
-
-local function get_types(schema_h)
+get_types =  function(schema_h, service_fields)
     local schema = get_schema(schema_h)
-    if type(schema) == 'table' and schema.type == 'record' then
-        local res = {}
-        get_types_helper(res, 1, schema)
-        return res
-    else
-        return {}
+    service_fields = service_fields or {}
+    validate_service_fields(service_fields)
+    local res = {}
+    for _, sf in ipairs(service_fields) do
+        insert(res, sf)
     end
+    assert(type(schema) == 'table' and schema.type == 'record' and
+        not schema.nullable, "expected non-nullable record at the top level")
+    front.get_types_helper(res, #res + 1, schema)
+    return res
 end
 
 local function export(schema_h)
