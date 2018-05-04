@@ -152,6 +152,8 @@ local function compile_stage(test, args)
     local compile_opts          = test.schema
     compile_opts.service_fields = service_fields
     compile_opts.downgrade      = compile_downgrade
+    -- would be deleted after #85
+    compile_opts.alpha_nullable_record_xflatten = true
     local ok, schema_c
     if args.compile_dump then
         local path = gsub(test.id, '/', '_')

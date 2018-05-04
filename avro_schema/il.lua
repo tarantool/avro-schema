@@ -765,7 +765,8 @@ voptimizeblock = function(il, scope, block, res)
                 vexecute(il, scope, head, lblock)
                 local loop_var = head.ripv
                 voptimizeblock(il, lscope, o, lblock)
-                if scope[loop_var].gen == lscope[loop_var].gen then
+                if lscope[loop_var] ~= nil -- loop_var may be optimized away
+                        and scope[loop_var].gen == lscope[loop_var].gen then
                     -- loop variable incremented in fixed steps
                     head.step = lscope[loop_var].inc
                     lscope[loop_var] = nil

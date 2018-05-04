@@ -861,7 +861,7 @@ local sf2ilfuncs = {
     bytes =   { is = 'isbin',    put = 'putbinc',    v = '' }
 }
 
-local function emit_code(il, ir, service_fields)
+local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
     ir = unwrap_ir(ir)
     local from, to = ir.from, ir.to
     local funcs = {
@@ -935,6 +935,13 @@ local function emit_code(il, ir, service_fields)
         elseif ir_type == '__RECORD__' then
             insert(code, il.ismap(ipv, ipo))
             if ir.from.nullable then
+                -- would be deleted after #85
+                if not alpha_nullable_record_xflatten then
+                    local err_msg = "xflatten for nullable record is on developement stage. Use alpha_nullable_record_xflatten option if you understand what you do."
+                    insert(code, il.error(err_msg))
+                    update_cell = update_cell + 1
+                    return
+                end
                 extend(code,
                         il.checkobuf(3),
                         il.putarrayc(0, 3),
