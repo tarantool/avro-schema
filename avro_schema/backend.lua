@@ -336,6 +336,12 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
                             varref(o.ipv, o.ipo, varmap),
                             il.get_extra(o)))
     -----------------------------------------------------------
+    elseif o.op == opcode.ERROR then
+        local str = il.get_extra(o)
+        local pos = il.cpool_add(str)
+        insert(res, format('error(cpool:sub(#cpool - %d, #cpool - %d))',
+                           pos - 1, pos - #str))
+    -----------------------------------------------------------
     else
         assert(false)
     end

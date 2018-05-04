@@ -109,6 +109,8 @@ struct schema_il_Opcode {
 
     static const int ERRVALUEV   = 0xfd;
 
+    static const int ERROR   = 0xfe;
+
     static const unsigned NILREG  = 0xffffffff;
 };
 
@@ -159,7 +161,8 @@ local op2str = {
     [opcode.ISNULORMAP ] = 'ISNULORMAP ',   [opcode.LENIS      ] = 'LENIS      ',
     [opcode.ISSET      ] = 'ISSET      ',   [opcode.ISNOTSET   ] = 'ISNOTSET   ',
     [opcode.BEGINVAR   ] = 'BEGINVAR   ',   [opcode.ENDVAR     ] = 'ENDVAR     ',
-    [opcode.CHECKOBUF  ] = 'CHECKOBUF  ',   [opcode.ERRVALUEV  ] = 'ERRVALUEV  '
+    [opcode.CHECKOBUF  ] = 'CHECKOBUF  ',   [opcode.ERRVALUEV  ] = 'ERRVALUEV  ',
+    [opcode.ERROR      ] = 'ERROR      ',
 }
 
 local function opcode_new(op)
@@ -914,6 +917,11 @@ local function il_create()
             local o = opcode_new(opcode.ISSET)
             o.ripv = ripv; o.ipv = ipv
             o.ipo = ipo; extra[o] = cs
+            return o
+        end,
+        error = function(cs)
+            local o = opcode_new(opcode.ERROR)
+            extra[o] = cs
             return o
         end,
     ----------------------------------------------------------------
