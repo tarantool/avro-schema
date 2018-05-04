@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(46)
+test:plan(47)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -317,6 +317,21 @@ local deferred_type_initialization_for_nullable_type = {
 }
 res = {schema.create(deferred_type_initialization_for_nullable_type)}
 test:is(res[1], true, "deferred initialization of nullable/non-nullable types")
+
+-- should be deleted after #85
+local prohibit_nullable_record_xflatten = {
+    type = "record", name = "X", fields = {
+        {name = "y", type = {
+            name = "Y", type = "record*", fields = {
+                {name = "f1", type = "string"}}}}
+    }
+}
+
+res = {schema.create(prohibit_nullable_record_xflatten)}
+local ok, compiled = schema.compile(res[2])
+local ok, err_mesg = compiled.xflatten({y={f1="a"}})
+test:like(err_mesg, "xflatten for nullable record is on developement stage",
+    "nullable record xflatten prohibited")
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)

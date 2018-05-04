@@ -402,6 +402,8 @@ local function compile(...)
         args = args[1]
     end
     local service_fields = args.service_fields or {}
+    -- would be deleted after #85
+    local alpha_nullable_record_xflatten = args.alpha_nullable_record_xflatten
     if type(service_fields) ~= 'table' then
         error('service_fields: Expecting a table', 0)
     end
@@ -428,7 +430,8 @@ local function compile(...)
     else
         local il = il_create()
         local debug = args.debug
-        local ok, il_code = pcall(c_emit_code, il, ir, service_fields)
+        local ok, il_code = pcall(c_emit_code, il, ir, service_fields,
+            alpha_nullable_record_xflatten)
         if not ok then return false, il_code end
         if not debug then
             il_code = il.optimize(il_code)
