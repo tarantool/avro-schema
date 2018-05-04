@@ -1243,11 +1243,66 @@ export_helper = function(node, already_built)
     end
 end
 
+local get_names_helper
+get_names_helper = function(res, pos, names, rec)
+    local fields = rec.fields
+    for i = 1, #fields do
+        local ftype = fields[i].type
+        insert(names, fields[i].name)
+        if type(ftype) == 'string' then
+            res[pos] = concat(names, '.')
+            pos = pos + 1
+        elseif ftype.type == 'record' and not ftype.nullable then
+            pos = get_names_helper(res, pos, names, ftype)
+        elseif not ftype.type then -- union
+            local path = concat(names, '.')
+            res[pos] = path .. '.$type$'
+            res[pos + 1] = path
+            pos = pos + 2
+        else
+            -- record*, scalar*, fixed, array, map
+            res[pos] = concat(names, '.')
+            pos = pos + 1
+        end
+        remove(names)
+    end
+    return pos
+end
+
+local get_types_helper
+get_types_helper = function(res, pos, rec)
+    local fields = rec.fields
+    for i = 1, #fields do
+        local ftype = fields[i].type
+        if type(ftype) == 'string' then
+            res[pos] = ftype
+            pos = pos + 1
+        elseif ftype.type == 'record' and not ftype.nullable then
+            pos = get_types_helper(res, pos, ftype)
+        elseif not ftype.type then -- union
+            res[pos] = "union_type"
+            res[pos + 1] = "union_value"
+            pos = pos + 2
+        else
+            -- record*, scalar*, fixed, array, map
+            local xtype = ftype.type
+            assert(type(xtype) == "string",
+                "Deep type declarations are not supported")
+            if ftype.nullable then xtype = xtype .. "*" end
+            res[pos] = xtype
+            pos = pos + 1
+        end
+    end
+    return pos
+end
+
 return {
     create_schema         = create_schema,
     validate_data         = validate_data,
     create_ir             = create_ir,
     get_enum_symbol_map   = get_enum_symbol_map,
     get_union_tag_map     = get_union_tag_map,
-    export_helper         = export_helper
+    export_helper         = export_helper,
+    get_names_helper      = get_names_helper,
+    get_types_helper      = get_types_helper
 }
