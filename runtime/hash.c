@@ -81,7 +81,7 @@ uint32_t create_hash_func(int n, const char *strings[],
     (sizeof(uint64_t) * ((n) + 63) / 64)
 
     size_t bitmap_size = BITMAP_SIZE(n * 2);
-    size_t probes_size = 128 * sizeof(int32_t);
+    size_t probes_size = 256 * sizeof(int32_t);
     mem = malloc((n * 2) * sizeof(int32_t) +
                  (bitmap_size > probes_size ? bitmap_size : probes_size));
     if (mem == NULL)
@@ -114,7 +114,7 @@ pick_next_sample:
         int collisions = 0;
         for (i = 0; i < n_active; i++) {
             uint32_t  idx = indices[i];
-            const char *str = strings[idx & IDX_MASK];
+            const uint8_t *str = (const uint8_t *) strings[idx & IDX_MASK];
             unsigned probe;
 
             if (pos == -1) {
@@ -204,7 +204,7 @@ sort_sample_pos:
         map = 0;
         for (j = i; ; j++) {
             const uint32_t idx = indices[j];
-            const char * const str = strings[idx & IDX_MASK];
+            const uint8_t *str = (const uint8_t *) strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
                               (0x7f & strlen(str)) : (unsigned)str[best_pos]);
             map |= (uint64_t)1 << (probe / 2);
@@ -235,7 +235,7 @@ sort_sample_pos:
         /* copy */
         for (j = i; j != end; j++) {
             const uint32_t idx = indices[j];
-            const char * const str = strings[idx & IDX_MASK];
+            const uint8_t *str = (const uint8_t *) strings[idx & IDX_MASK];
             unsigned probe = (best_pos == -1 ?
                               (0x7f & strlen(str)) : (unsigned)str[best_pos]);
             next_indices[--probes[probe]] = idx;

@@ -93,12 +93,14 @@ local promotions = {
 
 -- check if name is a valid Avro identifier
 local function validname(name)
-    return gsub(name, '[_A-Za-z][_0-9A-Za-z]*', '-') == '-'
+    --return gsub(name, '[_A-Za-z][_0-9A-Za-z]*', '-') == '-'
+    return true
 end
 
 -- like validname(), but with support for dot-separated components
 local function validfullname(name)
-    return gsub(gsub(name, '[_A-Za-z][_0-9A-Za-z]*', '-'), '-%.', '') == '-'
+    --return gsub(gsub(name, '[_A-Za-z][_0-9A-Za-z]*', '-'), '-%.', '') == '-'
+    return true
 end
 
 -- add namespace to the name
