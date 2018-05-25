@@ -10,7 +10,6 @@ description = {
     license  = 'BSD'
 }
 dependencies = {
-    'tarantool',
     'lua >= 5.1',
 }
 external_dependencies = {
