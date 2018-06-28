@@ -89,12 +89,22 @@ Troubleshooting codegen issues:
 avro_schema.compile({schema1, schema2, debug = true, dump_il = "output.il"})
 ```
 
+Add service fields (which are part of a tuple, but are not part of an object):
+
+```lua
+avro_schema.compile({schema, service_fields = {'string', 'int'}})
+```
+
 ## Generated Routines
 `Compile` produces the following routines (returned in a Lua table):
   * `flatten`
   * `unflatten`
+  * `xflatten`
   * `flatten_msgpack`
   * `unflatten_msgpack`
+  * `xflatten_msgpack`
+  * `get_types`
+  * `get_names`
 
 ## Miscelania
 Checking if an object is a schema:
@@ -104,12 +114,12 @@ avro_schema.is(object)
 
 Quering schema field names (the order matches the field order in the flat representation):
 ```lua
-avro_schema.get_names(schema)
+avro_schema.get_names(schema[, service-fields])
 ```
 
 Quering schema field types (the order matches `get_names`):
 ```lua
-avro_schema.get_types(schema)
+avro_schema.get_types(schema[, service-fields])
 ```
 
 ## References
