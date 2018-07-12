@@ -393,11 +393,24 @@ copy_schema = function(schema, context, ns, open_rec)
                     end
                     local xdefault = xfield.default
                     if type(xdefault) ~= 'nil' then
-                        local ok, res = copy_field_default(field.type, xdefault)
-                        if not ok then
-                            copy_schema_error('Default value not valid (%s)', res)
+                        if type(field.type) ~= 'table' then
+                            local ok, res = copy_field_default(field.type,
+                                                               xdefault)
+                            if not ok then
+                                copy_schema_error('Default value not valid (%s)', res)
+                            end
+                            field.default = res
+                        else
+                            -- Defer check of a complex type to the end of the
+                            -- `create` stage. Type may be incomplete.
+                            local to_validate = {
+                                field = field,
+                                default = xdefault,
+                                li = copy_schema_location_info()
+                            }
+                            table.insert(context.post_validate_default_value,
+                                         to_validate)
                         end
-                        field.default = res
                     end
                     local xaliases = xfield.aliases
                     if xaliases then
@@ -578,15 +591,20 @@ copy_schema_location_info = function()
     return #res ~= 0 and concat(res, '/') or nil
 end
 
--- report error condition while in copy_schema()
-copy_schema_error = function(fmt, ...)
-    local msg = format(fmt, ...)
-    local li  = copy_schema_location_info()
+-- Print an error with a local info.
+local function li_error(li, msg)
     if li then
         error(format('%s: %s', li, msg), 0)
     else
         error(msg, 0)
     end
+end
+
+-- report error condition while in copy_schema()
+copy_schema_error = function(fmt, ...)
+    local msg = format(fmt, ...)
+    local li  = copy_schema_location_info()
+    li_error(li, msg)
 end
 
 local function copy_fields_non_deep(from, to)
@@ -615,7 +633,11 @@ local function create_schema(schema, options)
         scope = {},
         -- `TYPE_STATE` union; stores only nonnullable equivalents of typeids
         type_state = {},
-        options = options
+        options = options,
+        -- It is necessary to check default values at the end because:
+        -- 1. nullable type is completed only after postprocess_copy_schema
+        -- 2. forward_references may be defined after default val is specified
+        post_validate_default_value = {},
     }
     local res
     if not options.forward_reference then
@@ -630,6 +652,15 @@ local function create_schema(schema, options)
         end
     end
     postprocess_copy_schema(context)
+    for _, pp in ipairs(context.post_validate_default_value) do
+        local ok, res = copy_field_default(pp.field.type, pp.default)
+        if not ok then
+            local msg = string.format('Default value not valid (%s)', res)
+            li_error(pp.li, msg)
+        else
+            pp.field.default = res
+        end
+    end
     return res
 end
 
