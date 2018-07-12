@@ -162,8 +162,12 @@ local schema2ilfunc = {
 local function append_put_value(il, flat, code, schema, value)
     local n = #code
     code[n + 1] = il.checkobuf(1)
-    local ilfunc = schema2ilfunc[schema]
-    if ilfunc then
+    local ilfunc = schema2ilfunc[schema.nullable and schema.type or schema]
+    if value == nil then
+        -- Set default value for nullable types.
+        assert(schema.nullable or is_union(schema))
+        code[n + 2] = il.putnulc(0)
+    elseif ilfunc then
         code[n + 2] = il[ilfunc](0, value)
     elseif schema.type == 'fixed' then
         code[n + 2] = il.putstrc(0, value)
@@ -427,7 +431,14 @@ end
 -- updates $0 accordingly
 local append_put_field_values
 append_put_field_values = function(il, code, field_type, field_val)
-    if is_record(field_type) then
+    if is_record(field_type) and field_val ~= nil then
+        if field_type.nullable then
+            -- Warning! Number of places in obuf should be calculated
+            -- recursively for this type.
+            table.insert(code, il.checkobuf(1))
+            table.insert(code, il.putarrayc(0, abs(record_internal_width(field_type))))
+            table.insert(code, il.move(0, 0, 1))
+        end
         for _, field in ipairs(field_type.fields) do
             append_put_field_values(il, code,
                                     field.type, field_val[field.name])
@@ -505,20 +516,15 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 il:append_code('cxn', branch, field_ir, loop_var, 1, loop_var)
                 insert(branch, il.move(0, 0, -next_offset))
             end
-            if type(field_default) ~= 'nil' then
+
+            if field.type.nullable or type(field_default) ~= 'nil' then
                 insert(code, il.move(0, 0, offset))
                 append_put_field_values(il, code, field.type, field.default)
+                -- Reverse append_put_field_values side-effect.
                 insert(code, il.move(0, 0, -next_offset))
             else
-                if not field.type.nullable then
-                    insert(code_section2,
-                           il.isset(v_base + i, ipv, ipo, from_fields[i].name))
-                end
-            end
-            -- If field is nullable, set tag to NULL by default
-            if field.type.nullable then
-                insert(code, il.checkobuf(1))
-                insert(code, il.putnulc(offset))
+                insert(code_section2,
+                        il.isset(v_base + i, ipv, ipo, from_fields[i].name))
             end
         elseif i then -- and not next_offset: v/offset or v/length, append
             -- Process fields of variable size and fields of fixed size which
@@ -526,7 +532,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
 
             local branch = strswitch[i + 1]
             il:append_code('cn', branch, field_ir, loop_var, 1, loop_var)
-            if type(field_default) ~= 'nil' then
+            if field.type.nullable or type(field_default) ~= 'nil' then
                 local t_branch = { il.ibranch(1) }
                 il:append_code('x', t_branch, field_ir, v_base + i, 0)
                 local f_branch = { il.ibranch(0) }
@@ -534,33 +540,11 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 insert(code_section2,
                        { il.ifset(v_base + i), f_branch, t_branch })
             else
-                if not field.type.nullable then
-                    -- check if the field was found in the input
-                    insert(code_section2,
-                           il.isset(v_base + i, ipv, ipo, from_fields[i].name))
-                    -- process the field
-                    il:append_code('x', code_section2, field_ir, v_base + i, 0)
-                else
-                    local variable_is_set = {
-                        il.ibranch(1),
-                    }
-                    local variable_is_not_set = {
-                        il.ibranch(0),
-                    }
-                    insert(code_section2, {
-                        il.ifset(v_base + i),
-                        variable_is_set,
-                        variable_is_not_set
-                    })
-                    -- default field processing
-                    il:append_code('x', variable_is_set, field_ir,
-                        v_base + i, 0)
-                    -- if the field was not presented in the input
-                    extend(variable_is_not_set,
-                        il.checkobuf(1),
-                        il.putnulc(0),
-                        il.move(0, 0, 1))
-                end
+                -- check if the field was found in the input
+                insert(code_section2,
+                       il.isset(v_base + i, ipv, ipo, from_fields[i].name))
+                -- process the field
+                il:append_code('x', code_section2, field_ir, v_base + i, 0)
             end
         else -- not next_offset and not i: v/offset (defaults only), append
             append_put_field_values(il, code_section2,
