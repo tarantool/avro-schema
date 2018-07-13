@@ -172,7 +172,7 @@ local function append_put_value(il, flat, code, schema, value)
     elseif schema.type == 'fixed' then
         code[n + 2] = il.putstrc(0, value)
     elseif schema.type == 'enum' then
-        code[n + 2] = flat == 'flat' and
+        code[n + 2] = flat and
                       il.putintc(0, get_enum_symbol_map(schema)[value] - 1) or
                       il.putstrc(0, value)
     elseif schema.type == 'array' and next(value) == nil then
@@ -430,26 +430,42 @@ end
 -- emit code that fills-in field defaults starting at $0 and
 -- updates $0 accordingly
 local append_put_field_values
-append_put_field_values = function(il, code, field_type, field_val)
+append_put_field_values = function(il, flat, code, field_type, field_val)
     if is_record(field_type) and field_val ~= nil then
-        if field_type.nullable then
+        if field_type.nullable and flat then
             -- Warning! Number of places in obuf should be calculated
             -- recursively for this type.
             table.insert(code, il.checkobuf(1))
-            table.insert(code, il.putarrayc(0, abs(record_internal_width(field_type))))
+            table.insert(code, il.putarrayc(0,
+                abs(record_internal_width(field_type))))
+            table.insert(code, il.move(0, 0, 1))
+        end
+        if not flat then
+            table.insert(code, il.checkobuf(1))
+            table.insert(code, il.putmapc(0, #field_type.fields))
             table.insert(code, il.move(0, 0, 1))
         end
         for _, field in ipairs(field_type.fields) do
-            append_put_field_values(il, code,
-                                    field.type, field_val[field.name])
+            if not flat then
+                table.insert(code, il.checkobuf(1))
+                table.insert(code, il.putstrc(0, field.name))
+                table.insert(code, il.move(0, 0, 1))
+            end
+            append_put_field_values(il, flat, code,
+                field.type, field_val[field.name])
         end
-    elseif is_union(field_type) then
+    elseif is_union(field_type) and field_val ~= nil then
         local branch_no, branch_v = split_union_value(field_type, field_val)
-        extend(code,
-               il.checkobuf(1), il.putintc(0, branch_no - 1), il.move(0, 0, 1))
-        append_put_value(il, 'flat', code, field_type[branch_no], branch_v)
+        if flat then
+            extend(code, il.checkobuf(1), il.putintc(0, branch_no - 1),
+                il.move(0, 0, 1))
+        else
+            extend(code, il.checkobuf(2), il.putmapc(0, 1),
+                il.putstrc(1, next(field_val)), il.move(0, 0, 2))
+        end
+        append_put_value(il, flat, code, field_type[branch_no], branch_v)
     else
-        append_put_value(il, 'flat', code, field_type, field_val)
+        append_put_value(il, flat, code, field_type, field_val)
     end
 end
 
@@ -519,7 +535,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
 
             if field.type.nullable or type(field_default) ~= 'nil' then
                 insert(code, il.move(0, 0, offset))
-                append_put_field_values(il, code, field.type, field.default)
+                append_put_field_values(il, true, code, field.type, field.default)
                 -- Reverse append_put_field_values side-effect.
                 insert(code, il.move(0, 0, -next_offset))
             else
@@ -536,7 +552,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 local t_branch = { il.ibranch(1) }
                 il:append_code('x', t_branch, field_ir, v_base + i, 0)
                 local f_branch = { il.ibranch(0) }
-                append_put_field_values(il, f_branch, field.type, field.default)
+                append_put_field_values(il, true, f_branch, field.type, field.default)
                 insert(code_section2,
                        { il.ifset(v_base + i), f_branch, t_branch })
             else
@@ -547,7 +563,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                 il:append_code('x', code_section2, field_ir, v_base + i, 0)
             end
         else -- not next_offset and not i: v/offset (defaults only), append
-            append_put_field_values(il, code_section2,
+            append_put_field_values(il, true, code_section2,
                                     field.type, field.default)
         end
         offset = next_offset
@@ -575,7 +591,7 @@ local function do_append_union_flatten(il, mode, code, ir,
         return il:append_code(mode, code, ir[1], ipv, ipo, ripv)
     end
     -- a union mapped to either a union or a non-union
-    local accepts_null = get_union_tag_map(from) ['null'] 
+    local accepts_null = get_union_tag_map(from) ['null']
     local num_branches = #from
     local check, skip
     if accepts_null then
@@ -621,7 +637,7 @@ local function do_append_union_flatten(il, mode, code, ir,
                            il.putintc(0, o - 1), il.move(0, 0, xgap))
                     il:append_code(x_or_cx, dest, unwrap_nullable_record(ir[i]),
                         ipv, val_ipo)
-                else -- target is not a union (maybe a record, hence unwrap) 
+                else -- target is not a union (maybe a record, hence unwrap)
                     il:append_code(x_or_cx, dest, unwrap_ir(ir[i]),
                                    ipv, val_ipo)
                 end
@@ -737,7 +753,7 @@ local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
             putmapc.ci = putmapc.ci + 1
             extend(code, il.checkobuf(1),
                     il.putstrc(0, field.name), il.move(0, 0, 1))
-            append_put_value(il, '', code, field.type, field.default)
+            append_put_field_values(il, false, code, field.type, field.default)
         end
     end
 end
