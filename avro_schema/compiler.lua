@@ -145,7 +145,7 @@ local function split_union_value(schema, value)
     local m = get_union_tag_map(schema)
     if type(value) == 'table' then
         local k, v = next(value)
-        return m['k'], v
+        return m[k], v
     else -- null
         return m['null'], value
     end
