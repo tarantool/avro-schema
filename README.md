@@ -360,6 +360,40 @@ Notes:
 
 ...
 
+## Default values
+
+Default values are substituted in two cases:
+1. during flattening if the fields are not presented in the data
+2. during unflattening and schema evolution in case the target schema
+   has extra fields with the default values
+
+Notes:
+
+* Only zero-size arrays and maps are supported by now.
+* Default value may be inherited from an inner field with a default
+value or overridden. Example:
+```lua
+local schema = {
+    type = "record", name = "Frob", fields = {
+        { name = "foo", default = {f1=1, f2={f2_1=2}}, type =
+            { type = "record", name = "default_1", fields = {
+                {name = "f1", type = "int"},
+                {name = "f2", default = {f2_1=21}, type =
+                    {type = "record", name = "default_2", fields = {
+                        {name = "f2_1", type = "int"}}
+                    }}
+            }}},
+        { name = "bar", type = "int"}
+    }
+}
+ok, handle = avro_schema.create(schema)
+ok, methods = avro_schema.compile(handle)
+ok, unflattened = methods.flatten({bar=11})
+-- returns {1,2,11}
+ok, unflattened = methods.flatten({foo={f1=3},bar=11})
+-- returns {3,21,11}
+```
+
 [1]: http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
 [2]: https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
 [3]: http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
