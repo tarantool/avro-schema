@@ -5,7 +5,7 @@ Notable features:
  * Avro defaults;
  * Avro aliases;
  * data transformations are fast due to runtime code generation;
- * extensions such as a built-in nullable string type.
+ * extensions such as built-in nullable types.
 
 ```lua
 avro_schema = require('avro_schema')
@@ -47,7 +47,7 @@ Allowed modifications include:
   2. extending records with new fields (these fields are initialized with default values, which are mandatory);
   3. removing fields (contents are simply removed during conversion);
   4. modifying unions and enums (provided that type definitions retain some similarity);
-  5. type promotions are allowed (e.x. `int` is compatible with `long` but not vice versa).
+  5. type promotions are allowed (e.g. `int` is compatible with `long` but not vice versa).
 
 Let's assume that `B` is newer than `A`. `A` defines `Apple` (a record type). `B` renames it to `Banana`.
 Upgrading data from `A` to `B` works, since `Banana` is marked as an alias of `Apple`.
@@ -56,22 +56,28 @@ However, downgrading data from `B` to `A` does not work, since in `A` the record
 To make it work we implement `downgrade` mode. In downgrade mode, name mapping rules
 take into account the aliases in the source schema,
 and ignore the aliases in the target schem.
+ 
+## Checking if an object is a schema object
 
-## Miscellaneous
-Checking if an object is a schema:
 ```lua
 avro_schema.is(object)
 ```
 
-Querying schema field names (the order matches the field order in the flat representation):
+## Querying a schema's field names or field types
+
 ```lua
-avro_schema.get_names(schema[, service-fields])
+avro_schema.get_names(schema [, service-fields])
 ```
 
-Querying schema field types (the order matches the field order in the flat representation):
 ```lua
-avro_schema.get_types(schema[, service-fields])
+avro_schema.get_types(schema [, service-fields])
 ```
+
+The first argument must be a schema object, such as the one created in the ``Creating a Schema`` example above.
+The optional second argument is a table with names of types, such as {'string', 'int'}.
+The result will be a Lua table of field names (for the get_names method)
+or a Lua table of field types (for the get_types method).
+The order will match the field order in the flat representation.
 
 ## Compiling Schemas
 Compiling a schema creates optimized data conversion routines (runtime code generation).
@@ -84,10 +90,6 @@ If two schemas are provided, then the generated routines consume data in `schema
 What if the schema1 source and the schema2 destination are not adjacent revisions, i.e. there were some revisions in between?
 While going from source to destination directly is fast, sometimes it alters the results. Performing conversion
 step by step, using all the in-between revisions, always yields correct results but it is slow.
-
-```lua
-ok, methods = avro_schema.compile({schema1, ... schemaN})
-```
 
 There is a third option: let `compile` generate routines that are fast yet produce the correct results.
 
@@ -178,19 +180,27 @@ result
 box.space.T:update({42},result)
 -- And the result looks like:
 -- -- - [1, 'Hello, world!']
+```
 
-So: with `flatten()` for inserting, `xflatten()` for updating, `unflatten()`
+So: with `flatten()` for inserting, `xflatten()` for updating,
+`unflatten()`
 for getting, we have ways to use avro_schema objects as tuples in
 Tarantool databases.
 
-With the other three methods that work with transformations of avro_schema objects
--- `flatten_msgpack()` and `xflatten_msgpack()` and `unflatten_msgpack()` --
-we have similar functionality, except that the transformations are to and
-from MsgPack objects.
+With the other three methods that work with transformations of
+avro_schema objects  -- `flatten_msgpack()` and `xflatten_msgpack()` and
+`unflatten_msgpack()` --  we have similar functionality,
+except that the transformations are to
+and from MsgPack objects.
+(The ..._msgpack() methods are usually faster because
+they do not need to encode or decode internally.)
 
-The final two methods -- `get_types()` and `get_names()` -- have the
+The final two methods -- `get_types()` and `get_names()` -- have almost the
 same effect as `get_types()` and `get_names()` described in the earlier
-section "Miscellaneous". For example:
+section "Querying a schema's field names or field types".
+(The only difference is that the optional "service-fields" argument
+is not understood by the module-level methods but is understood by
+the compiled-schema methods.) For example:
 
 ```lua
 tarantool> methods.get_names()
@@ -203,7 +213,7 @@ tarantool> methods.get_types()
 - - int
   - string
 ...
-
+```
 
 ## References
 
@@ -251,10 +261,8 @@ Notes:
 * An array and a map are unnamed and cannot be referenced by a name, consider
   related discussions below.
 
-### Related discussions
-
-* [[Avro-user] Why Array and Map are not named type ?][1].
-* [AEP 102 - Named Unions][2].
+For related discussions see the later section "Further Reading", particularly
+"[Avro-user] Why Array and Map are not named type" and "AEP 102 - Named Unions".
 
 ## Nullability (extension)
 
@@ -264,7 +272,7 @@ can contain both NULL and integers.
 One can try to handle this with a union such as `{'null', 'long'}` which
 can have both `null` and `{long = 42}`. What really is necessary, though,
 is that a single field, whose name determines the type, can contain both
-`null` and `42` a valid values (see the [JSON Encoding][3]
+`null` and `42` as valid values (see the [JSON Encoding][3]
 section of the avro-schema standard). This problem -- expressing a single
 type that accepts both  `null` and `42` -- is the problem that the
 nullability extension solves.
@@ -295,9 +303,16 @@ Notes:
 * A type reference can be non-nullable or nullable (asterisk-marked)
   independently of the original type definition.
 * Use standard `{'null', ...}` without an asterisk to make a union nullable type.
+* The xflatten method is not designed to work with complex nullable types.
 
 ...
 
-[1]: http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
-[2]: https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
-[3]: http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
+## Further Reading
+
+   1. https://ocelot.ca/blog/blog/2016/08/
+   2. https://travis-ci.org/tarantool/avro-schema.svg?branch=master
+   3. https://travis-ci.org/tarantool/avro-schema
+   4. http://avro.apache.org/docs/1.8.0/spec.html
+   5. http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
+   6. https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
+   7. http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
