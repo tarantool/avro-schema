@@ -98,23 +98,23 @@ A few options affecting compilation are recognized.
 
 Enabling `downgrade` mode (see `avro_schema.are_compatible` for details):
 ```lua
-avro_schema.compile({schema1, schema2, downgrade = true})
+ok, methods = avro_schema.compile({schema1, schema2, downgrade = true})
 ```
 
 Dumping generated code for inspection:
 ```lua
-avro_schema.compile({schema1, schema2, dump_src = "output.lua"})
+ok, methods = avro_schema.compile({schema1, schema2, dump_src = "output.lua"})
 ```
 
 Troubleshooting code generation issues:
 ```lua
-avro_schema.compile({schema1, schema2, debug = true, dump_il = "output.il"})
+ok, methods = avro_schema.compile({schema1, schema2, debug = true, dump_il = "output.il"})
 ```
 
 Add service fields (which are part of a tuple, but are not part of an object):
 
 ```lua
-avro_schema.compile({schema, service_fields = {'string', 'int'}})
+ok, methods = avro_schema.compile({schema, service_fields = {'string', 'int'}})
 ```
 
 ## Generated Routines
@@ -198,9 +198,9 @@ they do not need to encode or decode internally.)
 The final two methods -- `get_types()` and `get_names()` -- have almost the
 same effect as `get_types()` and `get_names()` described in the earlier
 section "Querying a schema's field names or field types".
-(The only difference is that the optional "service-fields" argument
-is not understood by the module-level methods but is understood by
-the compiled-schema methods.) For example:
+(The main difference is that the optional "service_fields" argument
+is unnecessary if `methods` is the result of a compile done with
+the "service_fields =" option.) For example:
 
 ```lua
 tarantool> methods.get_names()
@@ -261,8 +261,10 @@ Notes:
 * An array and a map are unnamed and cannot be referenced by a name, consider
   related discussions below.
 
-For related discussions see the later section "Further Reading", particularly
-"[Avro-user] Why Array and Map are not named type" and "AEP 102 - Named Unions".
+### Related discussions
+
+* [[Avro-user] Why Array and Map are not named type ?][1].
+* [AEP 102 - Named Unions][2].
 
 ## Nullability (extension)
 
@@ -307,12 +309,7 @@ Notes:
 
 ...
 
-## Further Reading
+[1]: http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
+[2]: https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
+[3]: http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
 
-   1. https://ocelot.ca/blog/blog/2016/08/
-   2. https://travis-ci.org/tarantool/avro-schema.svg?branch=master
-   3. https://travis-ci.org/tarantool/avro-schema
-   4. http://avro.apache.org/docs/1.8.0/spec.html
-   5. http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
-   6. https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
-   7. http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
