@@ -56,7 +56,7 @@ However, downgrading data from `B` to `A` does not work, since in `A` the record
 To make it work we implement `downgrade` mode. In downgrade mode, name mapping rules
 take into account the aliases in the source schema,
 and ignore the aliases in the target schema.
- 
+
 ## Checking if an object is a schema object
 
 ```lua
