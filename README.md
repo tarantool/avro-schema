@@ -312,4 +312,3 @@ Notes:
 [1]: http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
 [2]: https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
 [3]: http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
-
