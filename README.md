@@ -1,7 +1,16 @@
-# avro-schema [![Build Status](https://travis-ci.org/tarantool/avro-schema.svg?branch=master)](https://travis-ci.org/tarantool/avro-schema)
-[Apache Avro](http://avro.apache.org/docs/1.8.0/spec.html) schema tools for Tarantool, implemented from scratch in Lua
+<a href="http://tarantool.org">
+  <img src="https://avatars2.githubusercontent.com/u/2344919?v=2&s=250" align="right">
+</a>
+
+[![Build Status](https://travis-ci.org/tarantool/avro-schema.svg?branch=master)](https://travis-ci.org/tarantool/avro-schema)
+
+# Apache Avro schema tools
+
+[Apache Avro](http://avro.apache.org/docs/1.8.0/spec.html) schema tools for Tarantool,
+implemented from scratch in Lua.
 
 Notable features:
+
  * Avro defaults;
  * Avro aliases;
  * data transformations are fast due to runtime code generation;
@@ -11,7 +20,22 @@ Notable features:
 avro_schema = require('avro_schema')
 ```
 
-## Creating a Schema
+## Table of contents
+
+* [Creating a schema](#creating-a-schema)
+* [Validating and normalizing data with a schema](#validating-and-normalizing-data-with-a-schema)
+* [Checking if schemas are compatible](#checking-if-schemas-are-compatible)
+* [Checking if an object is a schema object](#checking-if-an-object-is-a-schema-object)
+* [Querying a schema's field names or field types](#querying-a-schemas-field-names-or-field-types)
+* [Compiling schemas](#compiling-schemas)
+  * [Compile options](#compile-options)
+* [Generated routines](#generated-routines)
+* [References](#references)
+  * [Related discussions](#related-discussions)
+* [Nullability (extension)](#nullability-extension)
+
+## Creating a schema
+
 ```lua
 ok, schema = avro_schema.create {
     type = "record",
@@ -22,39 +46,53 @@ ok, schema = avro_schema.create {
     }
   }
 ```
-Creates a schema object (`ok == true`). If there was a syntax error, returns `false` and the error message.
 
-## Validating and Normalizing Data with a Schema
+Creates a schema object (`ok == true`). If there was a syntax error, returns `false` and the
+error message.
+
+## Validating and normalizing data with a schema
+
 ```lua
 ok, normalized_data_copy = avro_schema.validate(schema, { bar = "Hello, world!" })
 ```
+
 Returns `true` if the data was valid. Otherwise, returns `false` and the error message.
 
-The `avro_schema.validate()` function creates a normalized copy of the data. Normalization implies
-filling in default values for missing fields.
+The `avro_schema.validate()` function creates a normalized copy of the data.
+Normalization implies filling in default values for missing fields.
 For example, because the "foo" field has a default value = 42,
-the result from the above example will be { foo = 42, bar = "Hello, world!" }.
+the result from the above example will be `{ foo = 42, bar = "Hello, world!" }`.
 
-## Checking if Schemas are Compatible
+## Checking if schemas are compatible
+
 To facilitate data evolution Avro defines certain schema mapping rules.
 If schemas `A` and `B` are compatible, then one can convert data from `A` to `B`.
+
 ```lua
 ok = avro_schema.are_compatible(schema1, schema2)
 ok = avro_schema.are_compatible(schema2, schema1, "downgrade")
 ```
+
 Allowed modifications include:
+
   1. renaming types and record fields (provided that `aliases` are correctly set);
   2. extending records with new fields (these fields are initialized with default values, which are mandatory);
   3. removing fields (contents are simply removed during conversion);
   4. modifying unions and enums (provided that type definitions retain some similarity);
   5. type promotions are allowed (e.g. `int` is compatible with `long` but not vice versa).
 
-Let's assume that `B` is newer than `A`. `A` defines `Apple` (a record type). `B` renames it to `Banana`.
-Upgrading data from `A` to `B` works, since `Banana` is marked as an alias of `Apple`.
-However, downgrading data from `B` to `A` does not work, since in `A` the record type `Apple` has no aliases.
+Let's assume:
 
-To make it work we implement `downgrade` mode. In downgrade mode, name mapping rules
-take into account the aliases in the source schema,
+* `B` is newer than `A`.
+* `A` defines `Apple` (a record type).
+* `B` renames it to `Banana`.
+
+Upgrading data from `A` to `B` works, since `Banana` is marked as an alias of `Apple`.
+However, downgrading data from `B` to `A` does not work, since in `A` the record type
+`Apple` has no aliases.
+
+To make it work we implement `downgrade` mode.
+In downgrade mode, name mapping rules take into account the aliases in the source schema,
 and ignore the aliases in the target schema.
 
 ## Checking if an object is a schema object
@@ -73,30 +111,43 @@ avro_schema.get_names(schema [, service-fields])
 avro_schema.get_types(schema [, service-fields])
 ```
 
-The first argument must be a schema object, such as the one created in the ``Creating a Schema`` example above.
-The optional second argument is a table with names of types, such as {'string', 'int'}.
-The result will be a Lua table of field names (for the get_names method)
-or a Lua table of field types (for the get_types method).
+The first argument must be a schema object, such as the one created in the
+[Creating a schema](#creating-a-schema) example above.
+
+The optional second argument is a table with names of types, such as `{'string', 'int'}`.
+
+The result will be a Lua table of field names (for the `get_names` method)
+or a Lua table of field types (for the `get_types` method).
+
 The order will match the field order in the flat representation.
 
-## Compiling Schemas
+## Compiling schemas
+
 Compiling a schema creates optimized data conversion routines (runtime code generation).
+
 ```lua
 ok, methods = avro_schema.compile(schema)
 ok, methods = avro_schema.compile({schema1, schema2})
 ```
-If two schemas are provided, then the generated routines consume data in `schema1` and produce results in `schema2`.
 
-What if the schema1 source and the schema2 destination are not adjacent revisions, i.e. there were some revisions in between?
-While going from source to destination directly is fast, sometimes it alters the results. Performing conversion
-step by step, using all the in-between revisions, always yields correct results but it is slow.
+If two schemas are provided, then the generated routines consume data in `schema1` and
+produce results in `schema2`.
 
-There is a third option: let `compile` generate routines that are fast yet produce the correct results.
+What if the `schema1` source and the `schema2` destination are not adjacent revisions,
+i.e. there were some revisions in between?
+While going from source to destination directly is fast, sometimes it alters the results.
+Performing conversion step by step, using all the in-between revisions, always yields
+correct results but it is slow.
 
-## Compile Options
+There is a third option: let `compile` generate routines that are fast yet produce the
+correct results.
+
+### Compile options
+
 A few options affecting compilation are recognized.
 
-Enabling `downgrade` mode (see `avro_schema.are_compatible` for details):
+Enabling `downgrade` mode (see [avro_schema.are_compatible](#checking-if-schemas-are-compatible)
+for details):
 ```lua
 ok, methods = avro_schema.compile({schema1, schema2, downgrade = true})
 ```
@@ -112,12 +163,12 @@ ok, methods = avro_schema.compile({schema1, schema2, debug = true, dump_il = "ou
 ```
 
 Add service fields (which are part of a tuple, but are not part of an object):
-
 ```lua
 ok, methods = avro_schema.compile({schema, service_fields = {'string', 'int'}})
 ```
 
-## Generated Routines
+## Generated routines
+
 `Compile` produces the following routines (returned in a Lua table):
   * `flatten`
   * `unflatten`
@@ -129,8 +180,8 @@ ok, methods = avro_schema.compile({schema, service_fields = {'string', 'int'}})
   * `get_names`
 
 Here is an example which uses the avro schema that we described in
-the section `Creating a Schema`, a Tarantool database space, and
-the methods that `compile` produces. This is a script that you
+the section [Creating a schema](#creating-a-schema), a Tarantool database space,
+and the methods that `compile` produces. This is a script that you
 can paste into a client of a Tarantool server; the comments explain
 what the results look like and what they mean.
 
@@ -184,23 +235,22 @@ box.space.T:update({42},result)
 
 So: with `flatten()` for inserting, `xflatten()` for updating,
 `unflatten()`
-for getting, we have ways to use avro_schema objects as tuples in
+for getting, we have ways to use `avro_schema` objects as tuples in
 Tarantool databases.
 
 With the other three methods that work with transformations of
-avro_schema objects  -- `flatten_msgpack()` and `xflatten_msgpack()` and
-`unflatten_msgpack()` --  we have similar functionality,
-except that the transformations are to
-and from MsgPack objects.
-(The ..._msgpack() methods are usually faster because
+`avro_schema` objects -- `flatten_msgpack()` and `xflatten_msgpack()` and
+`unflatten_msgpack()` -- we have similar functionality,
+except that the transformations are to and from MsgPack objects.
+(The `..._msgpack()` methods are usually faster because
 they do not need to encode or decode internally.)
 
 The final two methods -- `get_types()` and `get_names()` -- have almost the
-same effect as `get_types()` and `get_names()` described in the earlier
-section "Querying a schema's field names or field types".
+same effect as `get_types()` and `get_names()` described in the earlier section 
+[Querying a schema's field names or field types](#querying-a-schemas-field-names-or-field-types).
 (The main difference is that the optional "service_fields" argument
 is unnecessary if `methods` is the result of a compile done with
-the "service_fields =" option.) For example:
+the `service_fields =` option.) For example:
 
 ```lua
 tarantool> methods.get_names()
@@ -263,23 +313,24 @@ Notes:
 
 ### Related discussions
 
-* [[Avro-user] Why Array and Map are not named type ?][1].
-* [AEP 102 - Named Unions][2].
+* [[Avro-user] Why Array and Map are not named type ?][1]
+* [AEP 102 - Named Unions][2]
 
 ## Nullability (extension)
 
 The problem: in database management systems NULL is a value, not a type.
 So it should be possible, for example, to have a "long integer" type that
 can contain both NULL and integers.
+
 One can try to handle this with a union such as `{'null', 'long'}` which
 can have both `null` and `{long = 42}`. What really is necessary, though,
 is that a single field, whose name determines the type, can contain both
 `null` and `42` as valid values (see the [JSON Encoding][3]
 section of the avro-schema standard). This problem -- expressing a single
-type that accepts both  `null` and `42` -- is the problem that the
+type that accepts both `null` and `42` -- is the problem that the
 nullability extension solves.
 
-A type can be marked as nullable by adding an asterisk ("*") at the end of the type name:
+A type can be marked as nullable by adding an asterisk ("\*") at the end of the type name:
 
 ```lua
 {
@@ -312,3 +363,4 @@ Notes:
 [1]: http://grokbase.com/t/avro/user/108svyaz63/why-array-and-map-are-not-named-type
 [2]: https://cwiki.apache.org/confluence/display/AVRO/AEP+102+-+Named+Unions
 [3]: http://avro.apache.org/docs/1.8.2/spec.html#json_encoding
+
