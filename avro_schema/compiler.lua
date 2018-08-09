@@ -251,7 +251,7 @@ local ir2ilfuncs = {
 -- It is implemented by emitting the first part straight in this function
 -- and returning non-null branch, so that it can be extended with a basic
 -- procedure (for non-null type).
-local function do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+local function do_append_nullable_type(il, mode, code, ipv, ipo)
     local null_branch = { il.ibranch(1) }
     local non_null_branch = { il.ibranch(0) }
     insert(code, {
@@ -267,7 +267,7 @@ local function do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
                il.move(0, 0, 1))
     end
     if find(mode, 'n') then
-        insert(null_branch, il.move(ripv, ipv, ipo + 1))
+        insert(null_branch, il.move(ipv, ipv, ipo + 1))
     end
     return code
 end
@@ -279,13 +279,13 @@ end
 --    ensure obuf has enough capacity, render results at [$0], and update $0.
 --    Excludes checks implied by 'c'.
 --  * GET NEXT - compute position of an object following [$ipv + ipo]
---    and store it in $ripv.
+--    and store it in $ipv.
 --    Excludes checks implied by 'c'.
 --
 -- See new_codegen() below for il:append_code() / __FUNC__ / __CALL__ info.
-local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
+local function do_append_code(il, mode, code, ir, ipv, ipo, is_flatten)
     if ir.nullable then
-        code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+        code = do_append_nullable_type(il, mode, code, ipv, ipo)
     end
     local ir_type = ir.type
     if not ir_type then
@@ -309,7 +309,7 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
                        il.move(0, 0, 1))
             end
         end
-        if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
+        if find(mode, 'n') then insert(code, il.move(ipv, ipv, ipo + 1)) end
     elseif ir_type == 'FIXED' then
         if find(mode, 'c') then
             extend(code, il.isbin(ipv, ipo), il.lenis(ipv, ipo, ir.size))
@@ -318,7 +318,7 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
             extend(code,
                    il.checkobuf(1), il.putbin(0, ipv, ipo), il.move(0, 0, 1))
         end
-        if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
+        if find(mode, 'n') then insert(code, il.move(ipv, ipv, ipo + 1)) end
     elseif ir_type == 'ARRAY' then
         if find(mode, 'c') then insert(code, il.isarray(ipv, ipo)) end
         if find(mode, 'x') then
@@ -329,10 +329,10 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
             local loop_var, loop_body = append_objforeach(il, code,
                 ipv, ipo)
             il:append_code('cxn', loop_body, unwrap_nullable_record(ir.nested),
-                loop_var, 0, loop_var)
+                loop_var, 0)
         end
         if find(mode, 'n') then
-            insert(code, il.skip(ripv, ipv, ipo))
+            insert(code, il.skip(ipv, ipv, ipo))
         end
     elseif ir_type == 'MAP' then
         if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
@@ -342,14 +342,14 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
             local loop_var, loop_body = append_objforeach(il, code, ipv, ipo)
             extend(loop_body, il.isstr(loop_var, 0), il.checkobuf(1),
                    il.putstr(0, loop_var, 0), il.move(0, 0, 1))
-            il:append_code('cxn', loop_body, ir.nested, loop_var, 1, loop_var)
+            il:append_code('cxn', loop_body, ir.nested, loop_var, 1)
         end
-        if find(mode, 'n') then insert(code, il.skip(ripv, ipv, ipo)) end
+        if find(mode, 'n') then insert(code, il.skip(ipv, ipv, ipo)) end
     elseif ir_type == '__CALL__' then
-        insert(code, il.callfunc(find(mode, 'n') and ripv, ipv, ipo,
+        insert(code, il.callfunc(find(mode, 'n') and ipv, ipv, ipo,
                ir.func[1].name))
     elseif ir_type == '__FUNC__' then
-        return il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
+        return il:append_code(mode, code, ir.nested, ipv, ipo)
     else
         assert(false, 'Unhandled type: '..ir_type)
     end
@@ -375,7 +375,7 @@ local function new_codegen(il, funcs, next_appender, root_ir, root_func, is_flat
         type = '__CALL__', func = root_func, nested = root_ir }
     }
     local appender
-    appender = function(il, mode, code, ir, ipv, ipo, ripv)
+    appender = function(il, mode, code, ir, ipv, ipo)
         if ir.type == '__RECORD__' and find(mode, 'x') then
             local call = cache[ir]
             if not call and (open_records[ir] or #ir.from.fields > 15) then
@@ -388,7 +388,7 @@ local function new_codegen(il, funcs, next_appender, root_ir, root_func, is_flat
                 local prev_open_records = open_records
                 open_records = {}
                 next_appender(il, 'cxn', func,
-                              { type = '__FUNC__', nested = ir }, 1, 0, 1)
+                              { type = '__FUNC__', nested = ir }, 1, 0)
                 open_records = prev_open_records
             end
             if call and call.func ~= code then
@@ -398,13 +398,13 @@ local function new_codegen(il, funcs, next_appender, root_ir, root_func, is_flat
                     -- only an entry point, but also called by other funcs
                     call.func[1].name = il.id()
                 end
-                return next_appender(il, mode, code, call, ipv, ipo, ripv, is_flatten)
+                return next_appender(il, mode, code, call, ipv, ipo, is_flatten)
             end
             open_records[ir] = true
-            next_appender(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
+            next_appender(il, mode, code, ir, ipv, ipo, is_flatten)
             open_records[ir] = nil
         else
-            return next_appender(il, mode, code, ir, ipv, ipo, ripv, is_flatten)
+            return next_appender(il, mode, code, ir, ipv, ipo, is_flatten)
         end
     end
     return setmetatable({ append_code = appender }, { __index = il })
@@ -497,7 +497,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         -- data. It should be performed here, because only fields from output
         -- schema are checked in the loop below.
         if not i2o[i] then -- missing from target schema
-            il:append_code('cn', branch, ir[i], loop_var, 1, loop_var)
+            il:append_code('cn', branch, ir[i], loop_var, 1)
             if type(field.default) == 'nil' and not field.nullable then
                 -- mandatory field, add a check
                 insert(code_section2,
@@ -529,7 +529,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             if i then
                 local branch = strswitch[i + 1]
                 insert(branch, il.move(0, 0, offset))
-                il:append_code('cxn', branch, field_ir, loop_var, 1, loop_var)
+                il:append_code('cxn', branch, field_ir, loop_var, 1)
                 insert(branch, il.move(0, 0, -next_offset))
             end
 
@@ -547,7 +547,7 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
             -- goes after the first occurance of a field with variable size.
 
             local branch = strswitch[i + 1]
-            il:append_code('cn', branch, field_ir, loop_var, 1, loop_var)
+            il:append_code('cn', branch, field_ir, loop_var, 1)
             if field.type.nullable or type(field_default) ~= 'nil' then
                 local t_branch = { il.ibranch(1) }
                 il:append_code('x', t_branch, field_ir, v_base + i, 0)
@@ -580,7 +580,7 @@ end
 -- xgap is a secret knock to create a gap between a
 -- UNION discriminator and a branch (for XUPDATE)
 local function do_append_union_flatten(il, mode, code, ir,
-                                       ipv, ipo, ripv, xgap)
+                                       ipv, ipo, xgap)
     xgap = xgap or 1
     local i2o, from = ir.i2o, ir.from
     if not is_union(from) then -- non-union mapped to a union
@@ -588,7 +588,7 @@ local function do_append_union_flatten(il, mode, code, ir,
             extend(code, il.checkobuf(xgap),
                    il.putintc(0, i2o[1] - 1), il.move(0, 0, xgap))
         end
-        return il:append_code(mode, code, ir[1], ipv, ipo, ripv)
+        return il:append_code(mode, code, ir[1], ipv, ipo)
     end
     -- a union mapped to either a union or a non-union
     local accepts_null = get_union_tag_map(from) ['null']
@@ -646,17 +646,17 @@ local function do_append_union_flatten(il, mode, code, ir,
             end
         end
     end
-    if find(mode, 'n') then insert(code, il[skip](ripv, ipv, ipo)) end
+    if find(mode, 'n') then insert(code, il[skip](ipv, ipv, ipo)) end
 end
 
 -- main flatten codegen func
 -- xgap is a secret knock to create a gap between a
 -- UNION discriminator and a branch (for XUPDATE)
-local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
+local function do_append_flatten(il, mode, code, ir, ipv, ipo, xgap)
     local  ir_type = ir.type
     if     ir_type == 'ENUM' then
         if ir.from.nullable then
-            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+            code = do_append_nullable_type(il, mode, code, ipv, ipo)
         end
         if find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
         if find(mode, 'x') then
@@ -665,7 +665,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                    il.putenums2i(0, ipv, ipo, make_enums2i_tab(ir)),
                    il.move(0, 0, 1))
         end
-        if find(mode, 'n') then insert(code, il.move(ripv, ipv, ipo + 1)) end
+        if find(mode, 'n') then insert(code, il.move(ipv, ipv, ipo + 1)) end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
         local to = ir.nested.to
         if find(mode, 'x') and is_record_or_union(to) then
@@ -674,11 +674,11 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
                    il.putarrayc(0, abs(schema_width(to))),
                    il.move(0, 0, 1))
         end
-        il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
+        il:append_code(mode, code, ir.nested, ipv, ipo)
     elseif ir_type == '__RECORD__' then
         if ir.from.nullable then
             -- If null is passed, then just a null is encoded.
-            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+            code = do_append_nullable_type(il, mode, code, ipv, ipo)
         end
         if find(mode, 'c') then insert(code, il.ismap(ipv, ipo)) end
         if find(mode, 'x') then
@@ -695,15 +695,15 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, xgap)
             do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         end
         if find(mode, 'n') then
-            insert(code, il.pskip(ripv, ipv, ipo))
+            insert(code, il.pskip(ipv, ipv, ipo))
         end
     elseif ir_type == '__UNION__' then
         return do_append_union_flatten(il, mode, code, ir,
-                                       ipv, ipo, ripv, xgap)
+                                       ipv, ipo, xgap)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
+        return do_append_code(il, mode, code, ir, ipv, ipo, true)
     else -- defer to basic codegen
-        return do_append_code(il, mode, code, ir, ipv, ipo, ripv, true)
+        return do_append_code(il, mode, code, ir, ipv, ipo, true)
     end
 end
 
@@ -725,9 +725,8 @@ local function make_enumi2s_tab(ir)
     return tab
 end
 
-local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo)
     assert(find(mode, 'n'))
-    assert(ripv == ipv)
     local to, i2o, o2i = ir.to, ir.i2o, ir.o2i
     local to_fields = to.fields
     local x, putmapc = find(mode, 'x')
@@ -743,9 +742,9 @@ local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
             putmapc.ci = putmapc.ci + 1
             extend(code, il.checkobuf(1),
                     il.putstrc(0, field.name), il.move(0, 0, 1))
-            il:append_code('cxn', code, unwrap_ir(field_ir), ipv, 0, ipv)
+            il:append_code('cxn', code, unwrap_ir(field_ir), ipv, 0)
         else
-            il:append_code('cn', code, unwrap_ir(field_ir), ipv, 0, ipv)
+            il:append_code('cn', code, unwrap_ir(field_ir), ipv, 0)
         end
     end
     for o, field in ipairs(to_fields) do
@@ -758,7 +757,7 @@ local function do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
     end
 end
 
-local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo)
     local x = find(mode, 'x')
     assert(x or find(mode, 'n'))
     local i2o, from, to = ir.i2o, ir.from, ir.to
@@ -770,7 +769,7 @@ local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
                     il.putstrc(1, target.name or target.type or target),
                     il.move(0, 0, 2))
         end
-        return il:append_code(mode, code, unwrap_ir(ir[1]), ipv, ipo, ripv)
+        return il:append_code(mode, code, unwrap_ir(ir[1]), ipv, ipo)
     end
     if find(mode, 'c') then insert(code, il.isint(ipv, ipo)) end
     if x and to_union then -- extract common code
@@ -794,17 +793,17 @@ local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
                 end
             end
             il:append_code(mode, code_branch, unwrap_nullable_record(ir[i]),
-                ipv, ipo + 1, ripv)
+                ipv, ipo + 1)
         end
     end
 end
 
 -- main unflatten codegen func
-local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+local function do_append_unflatten(il, mode, code, ir, ipv, ipo)
     local  ir_type = ir.type
     if     ir_type == 'ENUM' then
         if ir.from.nullable then
-            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+            code = do_append_nullable_type(il, mode, code, ipv, ipo)
         end
         if find(mode, 'c') then insert(code, il.isint(ipv, ipo)) end
         if find(mode, 'x') then
@@ -818,7 +817,7 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
             if ir.from.nullable then
                 offset = 2
             end
-            insert(code, il.move(ripv, ipv, ipo + offset))
+            insert(code, il.move(ipv, ipv, ipo + offset))
         end
     elseif ir_type == 'RECORD' or ir_type == 'UNION' then
         local from = ir.nested.from
@@ -830,22 +829,22 @@ local function do_append_unflatten(il, mode, code, ir, ipv, ipo, ripv)
             end
             ipo = ipo + 1
         end
-        il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
+        il:append_code(mode, code, ir.nested, ipv, ipo)
     elseif ir_type == '__RECORD__' then
         if ir.from.nullable then
-            code = do_append_nullable_type(il, mode, code, ipv, ipo, ripv)
+            code = do_append_nullable_type(il, mode, code, ipv, ipo)
             if find(mode, 'c') then
                 extend(code, il.isarray(ipv, ipo))
             end
             extend(code, il.move(ipv, ipv, 1))
         end
-        return do_append_record_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+        return do_append_record_unflatten(il, mode, code, ir, ipv, ipo)
     elseif ir_type == '__UNION__' then
-        return do_append_union_unflatten(il, mode, code, ir, ipv, ipo, ripv)
+        return do_append_union_unflatten(il, mode, code, ir, ipv, ipo)
     elseif ir_type == 'ARRAY' or ir_type == 'MAP' then
-        do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        do_append_code(il, mode, code, ir, ipv, ipo)
     else -- defer to basic codegen
-        return do_append_code(il, mode, code, ir, ipv, ipo, ripv)
+        return do_append_code(il, mode, code, ir, ipv, ipo)
     end
 end
 
@@ -873,8 +872,8 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
     local f_codegen = new_codegen(il, funcs, do_append_flatten,   ir, funcs[1], true)
     local u_codegen = new_codegen(il, funcs, do_append_unflatten, ir, funcs[2])
 
-    f_codegen:append_code('cxn', funcs[1], ir, 1, 0, 1)
-    u_codegen:append_code('cxn', funcs[2], ir, 1, 0, 1)
+    f_codegen:append_code('cxn', funcs[1], ir, 1, 0)
+    u_codegen:append_code('cxn', funcs[2], ir, 1, 0)
 
     local update_cell = 0
 
@@ -902,7 +901,7 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
             }
             strswitch[i + 1] = branch
             if not i2o[i] then -- missing from target schema
-                f_codegen:append_code('cn', branch, ir[i], loop_var, 1, loop_var)
+                f_codegen:append_code('cn', branch, ir[i], loop_var, 1)
             end
             insert(code_section2, il.endvar(v_base + i))
         end
@@ -912,7 +911,7 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
             local field_ir = unwrap_ir(ir[i])
             if i then
                 local branch = strswitch[i + 1]
-                il:append_code('cxn', branch, field_ir, loop_var, 1, loop_var)
+                il:append_code('cxn', branch, field_ir, loop_var, 1)
             else
                 update_cell = update_cell + schema_width(field.type)
             end
@@ -920,16 +919,16 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
         append(code, code_section2)
     end
 
-    local function do_append_xflatten(il, mode, code, ir, ipv, ipo, ripv)
+    local function do_append_xflatten(il, mode, code, ir, ipv, ipo)
         assert(find(mode, 'cx'), mode)
         local ir_type = ir.type
         if ir_type == '__FUNC__' then
             local prev_update_cell = update_cell
             update_cell = 0
-            il:append_code(mode, code, ir.nested, ipv, ipo, ripv)
+            il:append_code(mode, code, ir.nested, ipv, ipo)
             update_cell = prev_update_cell
         elseif ir_type == '__CALL__' then
-            insert(code, il.callfunc(find(mode, 'n') and ripv, ipv, ipo,
+            insert(code, il.callfunc(find(mode, 'n') and ipv, ipv, ipo,
                    ir.func[1].name, update_cell))
             update_cell = update_cell + schema_width(ir.nested.to)
         elseif ir_type == '__RECORD__' then
@@ -948,14 +947,14 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
                         il.putstrc(1, '='),
                         il.putintkc(2, update_cell),
                         il.move(0, 0, 3))
-                f_codegen:append_code('cxn', code, ir, ipv, ipo, ipv)
+                f_codegen:append_code('cxn', code, ir, ipv, ipo)
                 update_cell = update_cell + 1
                 return
             else
                 do_append_convert_record_xflatten(il, code, ir, ipv, ipo,
                     f_codegen)
                 if find(mode, 'n') then
-                    insert(code, il.skip(ripv, ipv, ipo))
+                    insert(code, il.skip(ipv, ipv, ipo))
                 end
             end
         elseif ir_type == '__UNION__' and is_record_or_union(ir.to) then
@@ -969,18 +968,18 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
                 update_cell = update_cell + 2
                 il = f_codegen
             end
-            return do_append_flatten(il, mode, code, ir, ipv, ipo, ripv, 4)
+            return do_append_flatten(il, mode, code, ir, ipv, ipo, 4)
         else
             extend(code, il.checkobuf(3), il.putarrayc(0, 3),
                    il.putstrc(1, '='), il.putintkc(2, update_cell),
                    il.move(0, 0, 3))
             update_cell = update_cell + 1
-            return do_append_flatten(f_codegen, mode, code, ir, ipv, ipo, ripv)
+            return do_append_flatten(f_codegen, mode, code, ir, ipv, ipo)
         end
     end
 
     local x_codegen = new_codegen(il, funcs, do_append_xflatten, ir, funcs[3])
-    x_codegen:append_code('cxn', funcs[3], ir, 1, 0, 1)
+    x_codegen:append_code('cxn', funcs[3], ir, 1, 0)
 
     -- augment code (see comments)
 
