@@ -120,11 +120,16 @@ add_test(NAME api_tests/export
          COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/api_tests/export.lua
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
 
+add_test(NAME api_tests/evolution
+         COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/api_tests/evolution.lua
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
+
 add_test(NAME buf_grow_test
          COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/buf_grow_test.lua
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
 
-set(TESTS ddt_tests api_tests/var api_tests/export buf_grow_test)
+set(TESTS ddt_tests api_tests/var api_tests/export
+    api_tests/evolution buf_grow_test)
 foreach(test IN LISTS TESTS)
 
     set_property(TEST ${test} PROPERTY ENVIRONMENT "LUA_PATH=${LUA_PATH}")
