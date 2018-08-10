@@ -105,6 +105,8 @@ local schema_width_cache = setmetatable({}, weak_keys)
 -- * abs(size) places in an msgpack array are required
 -- * number of required places in obuf depends on the data
 --
+-- Used only for flatten.
+--
 schema_width = function(s)
     if type(s) == "string" then
         if default_type_size[s] then
@@ -126,7 +128,8 @@ schema_width = function(s)
     local res = schema_width_cache[s]
     if res then return res end
     if s_type == 'record' then
-        -- Extra space for an array in case of nullable record
+        -- Extra space in obuf for an array in case of
+        -- nullable record.
         if s.nullable then return -1 end
         local width, vlo = 0, false
         for _, field in ipairs(s.fields) do
@@ -242,12 +245,14 @@ end
 -- or union, because without unwrapping record data would be flattened inside of
 -- two levels of arrays (one for RECORD and one for nullability), while
 -- one level of arrays is enough to restore the data properly.
-local function unwrap_nullable_record(ir)
-    if ir.type == 'RECORD' and ir.nullable then
-        return ir.nested
-    else
-        return ir
+local function unwrap_nullable_record(ir, is_flatten)
+    if ir.type == 'RECORD' then
+        if (is_flatten and ir.nested.to.nullable) or
+                (not is_flatten and ir.nested.from.nullable) then
+            return ir.nested
+        end
     end
+    return ir
 end
 
 -----------------------------------------------------------------------
@@ -357,8 +362,8 @@ local function do_append_code(il, mode, code, ir, ipv, ipo, is_flatten)
                    il.move(0, 0, 1))
             local loop_var, loop_body = append_objforeach(il, code,
                 ipv, ipo)
-            il:append_code('cxn', loop_body, unwrap_nullable_record(ir.nested),
-                loop_var, 0)
+            il:append_code('cxn', loop_body,
+                unwrap_nullable_record(ir.nested, is_flatten), loop_var, 0)
         end
         if find(mode, 'n') then
             insert(code, il.skip(ipv, ipv, ipo))
@@ -465,6 +470,9 @@ append_put_field_values = function(il, flat, code, field_type, field_val)
             -- Warning! Number of places in obuf should be calculated
             -- recursively for this type.
             table.insert(code, il.checkobuf(1))
+            -- TODO: record_internal_width is designed for
+            -- `flatten` and in case it has nested record or
+            -- union would return wrong value for `unflatten`.
             table.insert(code, il.putarrayc(0,
                 abs(record_internal_width(field_type))))
             table.insert(code, il.move(0, 0, 1))
@@ -669,8 +677,8 @@ local function do_append_union_flatten(il, mode, code, ir,
                 if to_union then
                     extend(dest, il.checkobuf(xgap),
                            il.putintc(0, o - 1), il.move(0, 0, xgap))
-                    il:append_code(x_or_cx, dest, unwrap_nullable_record(ir[i]),
-                        ipv, val_ipo)
+                    il:append_code(x_or_cx, dest,
+                        unwrap_nullable_record(ir[i], true), ipv, val_ipo)
                 else -- target is not a union (maybe a record, hence unwrap)
                     il:append_code(x_or_cx, dest, unwrap_ir(ir[i]),
                                    ipv, val_ipo)
@@ -689,7 +697,7 @@ end
 local function do_append_flatten(il, mode, code, ir, ipv, ipo, xgap)
     local  ir_type = ir.type
     if     ir_type == 'ENUM' then
-        if ir.from.nullable then
+        if ir.to.nullable then
             code = do_append_nullable_type(il, mode, code, ipv, ipo)
         end
         if find(mode, 'c') then insert(code, il.isstr(ipv, ipo)) end
@@ -710,7 +718,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, xgap)
         end
         il:append_code(mode, code, ir.nested, ipv, ipo)
     elseif ir_type == '__RECORD__' then
-        if ir.from.nullable then
+        if ir.to.nullable then
             -- If null is passed, then just a null is encoded.
             code = do_append_nullable_type(il, mode, code, ipv, ipo)
         end
@@ -718,7 +726,7 @@ local function do_append_flatten(il, mode, code, ir, ipv, ipo, xgap)
         if find(mode, 'x') then
             -- If nullable record is passed to the input the record would be
             -- encoded as a subarray.
-            if ir.from.nullable then
+            if ir.to.nullable then
                 local record_width = abs(record_internal_width(ir.to))
                 extend(code,
                     il.checkobuf(1),
@@ -826,8 +834,8 @@ local function do_append_union_unflatten(il, mode, code, ir, ipv, ipo)
                            il.move(0, 0, 2))
                 end
             end
-            il:append_code(mode, code_branch, unwrap_nullable_record(ir[i]),
-                ipv, ipo + 1)
+            il:append_code(mode, code_branch,
+                unwrap_nullable_record(ir[i], false), ipv, ipo + 1)
         end
     end
 end
@@ -967,7 +975,7 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
             update_cell = update_cell + schema_width(ir.nested.to)
         elseif ir_type == '__RECORD__' then
             insert(code, il.ismap(ipv, ipo))
-            if ir.from.nullable then
+            if ir.to.nullable then
                 -- would be deleted after #85
                 if not alpha_nullable_record_xflatten then
                     local err_msg = "xflatten for nullable record is on developement stage. Use alpha_nullable_record_xflatten option if you understand what you do."

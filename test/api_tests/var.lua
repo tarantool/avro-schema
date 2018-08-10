@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(55)
+test:plan(53)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -386,75 +386,6 @@ test:is_deeply(compiled.get_types(),
     {"string", "int", "string*","string","long","record*",
         "union_type","union_value", "array*","map","fixed*"},
     "compiled.get_types")
-
-
--- Schema evolution: extend a schema with a record field of type
--- union or record with a default value.
-
-local nullable_default_record_1 = json.decode([[
-{
-    "type": "record",
-    "name": "Frob",
-    "fields": [
-        { "name": "bar", "type": "string" }
-    ]
-}
-]])
-local nullable_default_record_2 = json.decode([[
-{
-    "type": "record",
-    "name": "Frob",
-    "fields": [
-        { "name": "foo", "type":
-            { "type": "record", "name": "default_record", "fields":[
-                {"name": "f1", "type": "int"},
-                {"name": "f2", "type": "int"} ]},
-                 "default": { "f1": 1, "f2": 2}},
-        { "name": "foo_nullable", "type": "default_record",
-                 "default": { "f1": 1, "f2": 2}},
-        { "name": "bar", "type": "string" }
-    ]
-}
-]])
-local ok, handle_1 = schema.create(nullable_default_record_1)
-local ok, handle_2 = schema.create(nullable_default_record_2)
-local ok, compiled = schema.compile({handle_1, handle_2})
-local ok, data = compiled.unflatten({"asd"})
-test:is_deeply(data, {foo={f1=1,f2=2}, foo_nullable={f1=1,f2=2},bar="asd"},
-    'evolution unflatten record')
-
-local nullable_default_union_1 = json.decode([[
-{
-    "type": "record",
-    "name": "Frob",
-    "fields": [
-        { "name": "bar", "type": "string" }
-    ]
-}
-]])
-
-local nullable_default_union_2 = json.decode([[
-{
-    "type": "record",
-    "name": "Frob",
-    "fields": [
-        { "name": "foo", "type":
-            { "type": "record*", "name": "default_record", "fields":[
-                {"name": "f1", "type": ["int", "null"]},
-                {"name": "f2", "type": ["null", "int"]} ]},
-                 "default": { "f1": {"int": 1}}},
-        { "name": "bar", "type": "string" }
-    ]
-}
-]])
-
-local ok, handle_1 = schema.create(nullable_default_union_1)
-local ok, handle_2 = schema.create(nullable_default_union_2)
-local ok, compiled = schema.compile({handle_1, handle_2})
-local ok, data = compiled.unflatten({"asd"})
-test:is_deeply(data,
-    json.decode([[{"foo":{"f2":null,"f1":{"int":1}},"bar":"asd"}]]),
-    'evolution unflatten union')
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)

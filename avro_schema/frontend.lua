@@ -86,6 +86,18 @@ local function extract_nullable(name)
     end
 end
 
+--
+-- Get qualified (representative) name with respect to
+-- nullability.
+--
+local function qname(node)
+    local xname = node.name
+        or (type(node.type) == 'string' and node.type)
+        or node
+    xname = node.nullable and xname .. "*" or xname
+    return xname
+end
+
 -- type tags used in unions
 local function type_tag(t)
     return (type(t) == 'string' and t) or t.name or t.type
@@ -678,6 +690,7 @@ end
 -- from.type == to.type and from.name == to.name (considering aliases)
 local function complex_types_may_match(from, to, imatch)
     if from.type ~= to.type then return false end
+    if from.nullable and not to.nullable then return false end
     if from.name == to.name then return true end
     if imatch then
         local tmp = from; from = to; to = tmp
@@ -962,7 +975,7 @@ end
 --   { type = 'ENUM',   nullable = nil/true,
 --     from = <schema>, to = <schema>, i2o = ? }
 --
---   { type = 'RECORD', nullable = nil/true, nested = {
+--   { type = 'RECORD', nested = {
 --           type = '__RECORD__',
 --           from = <schema>, to = <schema>, i2o = ?, o2i = ?, ... }}
 --
@@ -1019,25 +1032,30 @@ build_ir = function(from, to, mem, imatch)
             return nil, (err or build_ir_error(nil, 'No common types'))
         end
         return { type = 'UNION', nested = ir }
-    elseif type(from) == 'string' then
-        if from == to then
+    elseif type(from) == 'string' and type(type_tag(to)) == 'string' then
+        -- If from non nullable and primitive, treat to as non-nullable.
+        local xto = to.nullable and to.type or to
+        if from == xto then
             return primitive_type[from]
-        elseif promotions[from] and promotions[from][to] then
-            return promotions[from][to]
+        elseif promotions[from] and promotions[from][xto] then
+            return promotions[from][xto]
         else
-            return nil, build_ir_error(1, 'Types incompatible: %s and %s', from,
-                                       type(to) == 'string' and to or to.name or to.type)
-        end
-    elseif primitive_type[from.type]  then
-        if from.nullable then
-            return {primitive_type[from.type], nullable=from.nullable, from = from, to = to}
-        else
-            return primitive_type[from.type]
+            return nil, build_ir_error(1, 'Types incompatible: %s and %s',
+                                       from, qname(to))
         end
     elseif not complex_types_may_match(from, to, imatch) then
         return nil, build_ir_error(1, 'Types incompatible: %s and %s',
-                                   from.name or from.type,
-                                   to.name or to.type or to)
+                                   qname(from), qname(to))
+    elseif primitive_type[from.type]  then
+        if from.nullable then
+            return {
+                primitive_type[from.type],
+                nullable=from.nullable,
+                from = from, to = to
+            }
+        else
+            return primitive_type[from.type]
+        end
     elseif from.type == 'array' then
         local bc, err = build_ir(from.items, to.items, mem, imatch)
         if not bc then
@@ -1070,7 +1088,7 @@ build_ir = function(from, to, mem, imatch)
         local ir = {
             type = '__RECORD__', from = from, to = to, i2o = i2o, o2i = o2i
         }
-        res = { type = 'RECORD', nested = ir, nullable=from.nullable }
+        res = { type = 'RECORD', nested = ir }
         mem[to] = res -- NB: clean on error!
         for i, field in ipairs(from.fields) do
             local o = i2o[i]
