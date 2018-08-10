@@ -1,5 +1,13 @@
 -- The frontend.
--- Loads schema and generates IR.
+--
+-- Module overview:
+-- * `copy_schema` - validate and create schema
+-- * `copy_data` - validate a data by a schema; copy it
+--   substituting default values
+-- * `build_ir` - generate IR
+-- * `export_helper` - prepare the schema to be returned to a
+--   user
+--
 --
 -- # About schemas
 --
@@ -14,47 +22,6 @@
 -- For convenience, any reference to an earlier-defined type by name
 -- is replaced with an object itself (loops!).
 --
---
--- # About IR
---
--- Compiler generates code from the IR, which is more generic than
--- a bare schema. IR defines a 'from' schema, a 'to' schema and a mapping.
---
--- IR is a graph of nodes mirroring a schema structure.
--- Simple terminal nodes (string):
---
---   NUL, BOOL, INT, LONG, FLT, DBL, BIN, STR,
---   INT2LONG, INT2FLT, INT2DBL, LONG2FLT, LONG2DBL,
---   FLT2DBL, STR2BIN, BIN2STR
---
--- Complex nodes (table):
---
---   { type = 'FIXED',  size   = <n>  }
---   { type = 'ARRAY',  nested = <ir> }
---   { type = 'MAP',    nested = <ir> }
---
---   { type = 'ENUM',       from = <schema>, to = <schema>, i2o = ? }
---
---   { type = 'RECORD', nested = {
---           type = '__RECORD__',
---           from = <schema>, to = <schema>, i2o = ?, o2i = ?, ... }}
---
---   { type = 'UNION', nested = {
---           type = '__UNION__',
---           from = <schema>, to = <schema>, i2o = ?, ... }}
---
--- Legend: n      — size of fixed
---         ir     - ir of the array item / map value
---         schema - source or destination schema (for this particular node)
---         i2o    - input-index-to-output-index mapping
---         o2i    - i2o backwards
---         ...    - ir of record fields / union branches (source schema order)
---
--- Note 1: RECORD/__RECORD__ are for the compiler's convenience
---         (distinguishing container and contents)
---
--- Note 2: In a UNION, is_union(from) or is_union(to) holds
---         (Avro allows mapping a union to non-union and vice versa)
 
 local debug = require('debug')
 local json = require('json')
@@ -710,9 +677,6 @@ end
 
 -- from.type == to.type and from.name == to.name (considering aliases)
 local function complex_types_may_match(from, to, imatch)
-    -- print("may_match ")
-    -- print("  from: "..json.encode(from))
-    -- print("    to: "..json.encode(to))
     if from.type ~= to.type then return false end
     if from.name == to.name then return true end
     if imatch then
@@ -978,9 +942,48 @@ function debug_print_indent(msg)
     print(msg)
 end
 
+--
+-- Compiler generates code from the IR, which is more generic than
+-- a bare schema. IR defines a 'from' schema, a 'to' schema and a mapping.
+--
+-- IR is a graph of nodes mirroring a schema structure.
+-- Simple terminal nodes (string):
+--
+--   NUL, BOOL, INT, LONG, FLT, DBL, BIN, STR,
+--   INT2LONG, INT2FLT, INT2DBL, LONG2FLT, LONG2DBL,
+--   FLT2DBL, STR2BIN, BIN2STR
+--
+-- Complex nodes (table):
+--
+--   { type = 'FIXED',  size   = <n>  , nullable = nil/true }
+--   { type = 'ARRAY',  nested = <ir> , nullable = nil/true }
+--   { type = 'MAP',    nested = <ir> , nullable = nil/true }
+--
+--   { type = 'ENUM',   nullable = nil/true,
+--     from = <schema>, to = <schema>, i2o = ? }
+--
+--   { type = 'RECORD', nullable = nil/true, nested = {
+--           type = '__RECORD__',
+--           from = <schema>, to = <schema>, i2o = ?, o2i = ?, ... }}
+--
+--   { type = 'UNION', nested = {
+--           type = '__UNION__',
+--           from = <schema>, to = <schema>, i2o = ?, ... }}
+--
+-- Legend: n      — size of fixed
+--         ir     - ir of the array item / map value
+--         schema - source or destination schema (for this particular node)
+--         i2o    - input-index-to-output-index mapping
+--         o2i    - i2o backwards
+--         ...    - ir of record fields / union branches (source schema order)
+--
+-- Note 1: RECORD/__RECORD__ are for the compiler's convenience
+--         (distinguishing container and contents)
+--
+-- Note 2: In a UNION, is_union(from) or is_union(to) holds
+--         (Avro allows mapping a union to non-union and vice versa)
+--
 build_ir = function(from, to, mem, imatch)
-    -- print("enter build_ir")
-    -- print("  from: "..json.encode(from))
     local ptrfrom, ptrto
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
@@ -1026,7 +1029,6 @@ build_ir = function(from, to, mem, imatch)
                                        type(to) == 'string' and to or to.name or to.type)
         end
     elseif primitive_type[from.type]  then
-        -- print("Return "..json.encode({primitive_type[from.type], nullable=from.nullable}))
         if from.nullable then
             return {primitive_type[from.type], nullable=from.nullable, from = from, to = to}
         else
@@ -1057,7 +1059,6 @@ build_ir = function(from, to, mem, imatch)
         end
         return { type = 'FIXED', size = from.size }
     elseif from.type == 'record' then
-        -- print("-->"..json.encode(from))
         local res = mem[to]
         if res then return res end
         local i2o, o2i
@@ -1106,10 +1107,6 @@ Field %s is missing in source schema, and no default value was provided]],
             to = to.type
             nullable = true
         end
-        -- print(" INSIDE enum ")
-        -- print("    from: "..json.encode(to))
-        -- print("      to: "..json.encode(from))
-        -- print("    null: "..tostring(nullable))
         local res = mem[to]
         if res then return res end
         local symmap      = get_enum_symbol_map(to)
