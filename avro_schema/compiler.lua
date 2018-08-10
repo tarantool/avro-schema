@@ -1,3 +1,24 @@
+--
+-- This module generates `il` code for a given schema.
+--
+-- Terminology:
+-- * `ipv` register which stores current position in an output
+--   buffer.
+-- * `ipo` offset from the current position in ibuf to the next
+--   piece of data to be transormed.
+-- * `code` Lua array, which contains a sequence of opcodes.
+-- * mode: c - check, x - transform, n - get next
+--  * CHECK - ensure an object at [$ipv + ipo] matches
+--    the IR (a shallow check, ex: in an array ignore contents)
+--  * TRANSFORM - convert object at [$ipv + ipo] according to the IR,
+--    ensure obuf has enough capacity, render results at [$0], and update $0.
+--  * GET NEXT - compute position of an object following [$ipv + ipo]
+--    and store it back to $ipv.
+--
+-- For more information read
+-- https://github.com/tarantool/avro-schema/wiki/Developer-Guide
+--
+
 local json = require('json')
 json.cfg{encode_use_tostring = true}
 
@@ -43,6 +64,12 @@ end
 local function is_record_or_union(s)
     return type(s) == 'table' and (s.type or 'record') == 'record'
 end
+
+-- Those tables contain a size of a field by its type.
+-- Negative size means that the field is complex and may contain
+-- a data inside of it. However this field requires `|size|`
+-- places in a msgpack array.
+
 local default_type_size = {
     -- complex
     array      = -1, enum  = 1,
@@ -71,9 +98,13 @@ local default_nullable_type_size = {
 
 local schema_width
 local schema_width_cache = setmetatable({}, weak_keys)
+--
 -- How many places in an array should be reserved for the structure.
--- In case of negative result, the number of required places in obuf can be
--- different from the returned number.
+-- In case of positive result, the same obuf size is required.
+-- In case of negative result:
+-- * abs(size) places in an msgpack array are required
+-- * number of required places in obuf depends on the data
+--
 schema_width = function(s)
     if type(s) == "string" then
         if default_type_size[s] then
@@ -105,6 +136,7 @@ schema_width = function(s)
         end
         res = vlo and -width or width
     elseif s_type == nil then -- union
+        -- Union takes two places in an array.
         res = 2
         for _, branch in ipairs(s) do
             if is_record(branch) or schema_width(branch) ~= 1 then
@@ -119,6 +151,7 @@ schema_width = function(s)
     return res
 end
 
+--
 -- The function calculates how many places in the array internals of the
 -- record take.
 --
@@ -152,13 +185,17 @@ local function split_union_value(schema, value)
 end
 
 -- convenience table for append_put_value
+-- map: type -> opcode
 local schema2ilfunc = {
     null = 'putnulc', boolean = 'putboolc', int = 'putintc',
     long = 'putlongc', float = 'putfloatc', double = 'putdoublec',
     bytes = 'putbinc', string = 'putstrc'
 }
 
--- emit code that writes value at $0 and updates $0
+--
+-- Emit code that writes value at $0 (obuf) and updates obuf
+-- position.
+--
 local function append_put_value(il, flat, code, schema, value)
     local n = #code
     code[n + 1] = il.checkobuf(1)
@@ -243,14 +280,16 @@ local ir2ilfuncs = {
     STR2BIN  = { is = 'isstr',    put = 'putstr2bin' }
 }
 
--- This function is helper for nullable type code emmitting
--- It checks if the argument is nullable, then
+--
+-- This function is helper for nullable type code emitting.
+-- It checks if the argument is nullable, then:
 -- 1. if nullable: store it to the output buffer
--- 2. if non-nullable: execute code for non-nullable version of the type
+-- 2. if non-nullable: generate code for non-nullable version of the type
 --
 -- It is implemented by emitting the first part straight in this function
 -- and returning non-null branch, so that it can be extended with a basic
 -- procedure (for non-null type).
+--
 local function do_append_nullable_type(il, mode, code, ipv, ipo)
     local null_branch = { il.ibranch(1) }
     local non_null_branch = { il.ibranch(0) }
@@ -258,7 +297,7 @@ local function do_append_nullable_type(il, mode, code, ipv, ipo)
            il.ifnul(ipv, ipo),
            null_branch,
            non_null_branch})
-    -- emit type specific code directly to the non_null_branch
+    -- Emit type specific code directly to the non_null_branch.
     code = non_null_branch
     if find(mode, 'x') then
         extend(null_branch,
@@ -272,16 +311,6 @@ local function do_append_nullable_type(il, mode, code, ipv, ipo)
     return code
 end
 
--- mode: c - check, x - transform, n - get next
---  * CHECK - ensure an object at [$ipv + ipo] matches
---    the IR (a shallow check, ex: in an array ignore contents)
---  * TRANSFORM - convert object at [$ipv + ipo] according to the IR,
---    ensure obuf has enough capacity, render results at [$0], and update $0.
---    Excludes checks implied by 'c'.
---  * GET NEXT - compute position of an object following [$ipv + ipo]
---    and store it in $ipv.
---    Excludes checks implied by 'c'.
---
 -- See new_codegen() below for il:append_code() / __FUNC__ / __CALL__ info.
 local function do_append_code(il, mode, code, ir, ipv, ipo, is_flatten)
     if ir.nullable then
@@ -525,6 +554,8 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
         if next_offset then -- at fixed offset, patch
             -- Process all fields of fixed size until the first field of
             -- variable size.
+            -- Those fields have a known offset and can be transformed
+            -- (written to obuf) right inside of the field-loop.
 
             if i then
                 local branch = strswitch[i + 1]
@@ -543,8 +574,11 @@ local function do_append_convert_record_flatten(il, code, ir, ipv, ipo)
                         il.isset(v_base + i, ipv, ipo, from_fields[i].name))
             end
         elseif i then -- and not next_offset: v/offset or v/length, append
-            -- Process fields of variable size and fields of fixed size which
-            -- goes after the first occurance of a field with variable size.
+            -- Process fields goes after the first occurrence of a
+            -- field with a variable size.
+            -- Those fields are only found inside of the field-loop,
+            -- the transform is performed after the field-loop (when
+            -- its position in the obuf is known).
 
             local branch = strswitch[i + 1]
             il:append_code('cn', branch, field_ir, loop_var, 1)
@@ -629,7 +663,7 @@ local function do_append_union_flatten(il, mode, code, ir,
                 insert(strswitch, dest)
                 x_or_cx = 'cx'
                 err_ipo = ipo + 1 -- associate error message with a key
-                val_ipo = ipo + 2 -- value embeded in map
+                val_ipo = ipo + 2 -- value embedded in map
             end
             if o then
                 if to_union then
