@@ -154,7 +154,7 @@ local function msgpack_decode(r, s)
     if rt_C.parse_msgpack(r, s, #s) ~= 0 then
         error(ffi.string(r.res, r.res_size), 0)
     end
-    return tonumber(r.res_size)
+    return s
 end
 
 local function msgpack_encode(r, n)
@@ -171,7 +171,7 @@ local function universal_decode(r, s)
     if rt_C.parse_msgpack(r, s, #s) ~= 0 then
         error(ffi.string(r.res, r.res_size), 0)
     end
-    return tonumber(r.res_size)
+    return s
 end
 
 local function lua_encode(r, n)
