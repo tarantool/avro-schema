@@ -324,10 +324,10 @@ return linker
 
     il.emit_lua_func(il_code[1], inner_decls, {
         func_decl = format('local function flatten(data%s)', param_list(n)),
-        func_locals = 'local r, v0, v1',
+        func_locals = 'local r, v0, v1, msgpack_data',
         conversion_init = [[
         r = rt_regs; v1 = 0; v0 = 0
-        decode_proc(r, data)
+        msgpack_data = decode_proc(r, data)
         r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool]],
         conversion_complete = concat(f_complete, '\n'),
         func_return = 'return v0'
@@ -339,11 +339,11 @@ return linker
 
     il.emit_lua_func(il_code[2], inner_decls, {
         func_decl = 'local function unflatten(data)',
-        func_locals = 'local r, v0, v1',
+        func_locals = 'local r, v0, v1, msgpack_data',
         nlocals_min = n,
         conversion_init = [[
 r = rt_regs; v0 = 0; v1 = 0
-decode_proc(r, data)
+msgpack_data = decode_proc(r, data)
 r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool]],
         conversion_complete = concat(u_complete, '\n'),
         func_return = 'return v0' .. param_list(n, 'sf'),
@@ -353,10 +353,10 @@ r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool]],
     -- xflatten
     il.emit_lua_func(il_code[3], inner_decls, {
         func_decl = 'local function xflatten(data)',
-        func_locals = 'local r, v0, v1',
+        func_locals = 'local r, v0, v1, msgpack_data',
         conversion_init = format([[
 r = rt_regs
-decode_proc(r, data)
+msgpack_data = decode_proc(r, data)
 r.b2 = ffi_cast("const uint8_t *", cpool) + #cpool
 r.k = %d; v0 = 0; v1 = 0]], n + 1),
         conversion_complete = [[
