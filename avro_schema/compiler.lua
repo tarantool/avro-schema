@@ -24,7 +24,7 @@ json.cfg{encode_use_tostring = true}
 
 local front      = require('avro_schema.frontend')
 local insert     = table.insert
-local find, gsub = string.find, string.gsub
+local find = string.find
 local abs        = math.abs
 
 local get_union_tag_map   = front.get_union_tag_map
@@ -1030,7 +1030,7 @@ local function emit_code(il, ir, service_fields, alpha_nullable_record_xflatten)
         il.declfunc(1, 1), il.checkobuf(1 + 2*#service_fields),
         il.putarrayc(0, #service_fields + (to and abs(schema_width(to)) or 1))
     }, funcs[1], 1
-    for i, ft in ipairs(service_fields) do
+    for _, ft in ipairs(service_fields) do
         local m = sf2ilfuncs[ft]
         insert(flatten, il[m.put](pos, m.v)); pos = pos + 1
         if m.v == '' then

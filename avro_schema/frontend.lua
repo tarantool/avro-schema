@@ -28,10 +28,9 @@ local ffi = require('ffi')
 local utils = require('avro_schema.utils')
 local null = ffi.cast('void *', 0)
 local format, find, gsub, len = string.format, string.find, string.gsub, string.len
-local sub, lower = string.sub, string.lower
+local sub = string.sub
 local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
-local clear = require('table.clear')
 local next, type = next, type
 -- states of type declaration
 local TYPE_STATE = {
@@ -161,7 +160,6 @@ end
 
 -- handle @name attribute of a named type
 local function checkname(schema, context, ns)
-    local scope = context.scope
     local xname = schema.name
     if not xname then
         copy_schema_error(context, 'Must have a "name"')
@@ -265,9 +263,7 @@ copy_schema = function(schema, context, ns, open_rec)
             local res = {}
             context.stack.push(res)
             for branchno, xbranch in ipairs(schema) do
-                local ptr = branchno
                 local branch = copy_schema(xbranch, context, ns, nil)
-                local bxtype, bxname
                 -- use `xbranch` for the checks, because `branch` may be not
                 -- initialized (but its nullable/non-nullable mirror is
                 -- initialized)
@@ -338,7 +334,6 @@ copy_schema = function(schema, context, ns, open_rec)
                 res.fields = {}
                 local fieldmap = {}
                 for fieldno, xfield in ipairs(xfields) do
-                    local ptr = fieldno
                     local field = {}
                     preserve_user_fields(xfield, field, context)
                     res.fields[fieldno] = field
@@ -362,12 +357,12 @@ copy_schema = function(schema, context, ns, open_rec)
                     end
                     fieldmap[xname] = fieldno
                     field.name = xname
-                    local xtype = xfield.type
-                    if not xtype then
+                    local ftype = xfield.type
+                    if not ftype then
                         copy_schema_error(context,
                             'Record field must have a "type"')
                     end
-                    field.type = copy_schema(xtype, context, ns, open_rec)
+                    field.type = copy_schema(ftype, context, ns, open_rec)
                     if open_rec[type_tag(field.type)] then
                         local path = {}
                         local stack = context.stack
@@ -379,11 +374,11 @@ copy_schema = function(schema, context, ns, open_rec)
                             'Open rec size is less than 1, size: ' ..
                             open_rec_size)
                         for i = stack.len - open_rec_size + 1, stack.len do
-                            local res = stack.get(i)
-                            assert(res,
+                            local node = stack.get(i)
+                            assert(node,
                                 ('Frame %d out of %d not found'):format(
                                 i, stack.len))
-                            insert(path, res.fields[#res.fields].name)
+                            insert(path, node.fields[#node.fields].name)
                         end
                         error(format('Record %s contains itself via %s',
                                      field.type.name,
@@ -392,13 +387,13 @@ copy_schema = function(schema, context, ns, open_rec)
                     local xdefault = xfield.default
                     if type(xdefault) ~= 'nil' then
                         if type(field.type) ~= 'table' then
-                            local ok, res = copy_field_default(field.type,
-                                                               xdefault)
+                            local ok, data =
+                                copy_field_default(field.type, xdefault)
                             if not ok then
                                 copy_schema_error(context,
-                                    'Default value not valid (%s)', res)
+                                    'Default value not valid (%s)', data)
                             end
-                            field.default = res
+                            field.default = data
                         else
                             -- Defer check of a complex type to the end of the
                             -- `create` stage. Type may be incomplete.
@@ -621,7 +616,7 @@ local function postprocess_copy_schema(context)
     local scope = context.scope
     for typeid, _ in pairs(context.type_state) do
         assert(type(typeid) == "string")
-        local nullable, typeid = extract_nullable(typeid)
+        local _, typeid = extract_nullable(typeid)
         local type_non_nullable = scope[typeid]
         local type_nullable = scope[typeid .. "*"]
         copy_fields_non_deep(type_non_nullable, type_nullable)
@@ -660,12 +655,12 @@ local function create_schema(schema, options)
     end
     postprocess_copy_schema(context)
     for _, pp in ipairs(context.post_validate_default_value) do
-        local ok, res = copy_field_default(pp.field.type, pp.default)
+        local ok, data = copy_field_default(pp.field.type, pp.default)
         if not ok then
             local msg = string.format('Default value not valid (%s)', res)
             li_error(pp.li, msg)
         else
-            pp.field.default = res
+            pp.field.default = data
         end
     end
     cs_prepopulated_stack.clear()
@@ -728,7 +723,7 @@ local function complex_types_may_match(from, to, imatch)
     if not aliases then return false end
     local alias_set = dcache[aliases]
     if alias_set then return alias_set[from.name] end
-    local alias_set = {}
+    alias_set = {}
     for _, name in ipairs(aliases) do
         alias_set[name] = true
     end
@@ -940,10 +935,10 @@ end
 local function copy_data_eh(stack, err)
     local path = {}
     for i = 1, stack.len do
-        local schema, data, ptr = stack.get(i)
+        local _, _, ptr = stack.get(i)
         insert(path, (ptr ~= nil and tostring(ptr)) or nil)
     end
-    local schema, data, ptr  = stack.get(stack.len)
+    local schema, data, _  = stack.get(stack.len)
     if type(err) == 'string' and sub(err, 1, 1) == '@' then
         err = sub(err, 2)
     else
@@ -1037,7 +1032,6 @@ local build_ir
 --         (Avro allows mapping a union to non-union and vice versa)
 --
 build_ir = function(context, from, to, mem, imatch)
-    local ptrfrom, ptrto
     local from_union = type(from) == 'table' and not from.type
     local to_union   = type(to)   == 'table' and not to.type
     context.stack.push(from, to)
@@ -1236,7 +1230,7 @@ build_ir_error = function(context, offset, fmt, ...)
     local stack = context.stack
     local msg = format(fmt, ...)
     local res = {}
-    local offset = offset or 0
+    offset = offset or 0
     for i = 1, stack.len - offset do
         local from, to, ptrfrom, ptrto = stack.get(i)
         assert(type(from) == 'table')
