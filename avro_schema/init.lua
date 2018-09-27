@@ -8,7 +8,7 @@ local fingerprint = require('avro_schema.fingerprint')
 local utils       = require('avro_schema.utils')
 
 local format, find, sub = string.format, string.find, string.sub
-local insert, remove, concat = table.insert, table.remove, table.concat
+local insert, concat = table.insert, table.concat
 
 local base64_encode       = digest.base64_encode
 local f_create_schema     = front.create_schema
@@ -17,7 +17,6 @@ local f_create_ir         = front.create_ir
 local c_emit_code         = c.emit_code
 local il_create           = il.il_create
 local rt_msgpack_encode   = rt.msgpack_encode
-local rt_msgpack_decode   = rt.msgpack_decode
 local rt_lua_encode       = rt.lua_encode
 local rt_universal_decode = rt.universal_decode
 local install_lua_backend = backend_lua.install
@@ -486,7 +485,7 @@ get_names = function(schema_h, service_fields)
     service_fields = service_fields or {}
     validate_service_fields(service_fields)
     local res = {}
-    for i = 1, #service_fields do
+    for _ = 1, #service_fields do
         insert(res, "$service_field$")
     end
     assert(type(schema) == 'table' and schema.type == 'record' and
@@ -513,6 +512,7 @@ end
 local function export(schema_h)
     return front.export_helper(get_schema(schema_h), {})
 end
+
 local function get_fingerprint(schema_h, hash, size)
     if hash == nil then hash = "sha256" end
     if size == nil then size = 8 end
@@ -520,9 +520,7 @@ local function get_fingerprint(schema_h, hash, size)
     return fingerprint.get_fingerprint(schema.schema, hash,
                                        size, schema.options)
 end
-local function to_json(schema_h)
-    return fingerprint.avro_json(get_schema(schema_h))
-end
+
 return {
     are_compatible = are_compatible,
     create         = create,
