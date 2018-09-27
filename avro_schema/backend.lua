@@ -18,7 +18,7 @@ local opcode = ffi_new('struct schema_il_Opcode')
 local random_bytes   = digest.base64_decode([[
 X1CntcveBDc4inHKyWfyXw5iCjg1f3TmeX88pZ2Galb9tXpTt1uBO0pZrkU5NW1/4Ki9g8fAwElq
 B3dRsBscsg==]])
-    
+
 -- The procedure gives ids to variables which then used to generate its names.
 -- The general rule is to give the same number as it was in `ir` representation.
 local sched_variables_helper
@@ -311,8 +311,6 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
         insert(res, format('if %s ~= 0 then rt_err_duplicate(r, %s) end',
                             pos, pos))
     -----------------------------------------------------------
-    elseif o.op == opcode.ENDVAR    then
-    -----------------------------------------------------------
     elseif o.op == opcode.CHECKOBUF then
         local expr
         if o.ipv == opcode.NILREG then
@@ -342,7 +340,8 @@ if r.v[%s].xlen ~= %d then rt_err_length(r, %s, %d) end]],
         insert(res, format('error(cpool:sub(#cpool - %d, #cpool - %d))',
                            pos - 1, pos - #str))
     -----------------------------------------------------------
-    else
+    elseif not (o.op == opcode.ENDVAR) then
+    -----------------------------------------------------------
         assert(false)
     end
 end
@@ -452,7 +451,7 @@ local function break_jit_trace(ctx, res)
     insert(res, format('::l%d::', label))
 end
 
-local function emit_objforeach_block(ctx, block, cc, res)
+local function emit_objforeach_block(ctx, block, _, res)
     local il      = ctx.il
     local varmap  = ctx.varmap
     local head    = block[1]
@@ -611,7 +610,7 @@ local function emit_locals(varmap, nservice_fields, res)
         end
     end
     local var_nums = {}
-    for i, num in pairs(varmap) do
+    for _, num in pairs(varmap) do
         table.insert(var_nums, num)
     end
     local pos = 0
@@ -634,7 +633,7 @@ local function emit_locals(varmap, nservice_fields, res)
 end
 
 local function emit_func_body(il, func, nlocals_min, res)
-    local nlocals, varmap = sched_func_variables(func)
+    local _, varmap = sched_func_variables(func)
     emit_locals(varmap, nlocals_min, res)
     if il.enable_loop_peeling then
         peel_annotate(func, 0)
@@ -846,7 +845,6 @@ r.ov[%s].xoff = (%s)[r.v[%s].ival*2+1];]],
     --   str_len, str_offset, v.
     local function putenums2i_prepare(tab)
         local seed = 0
-        local n = 0
         local s = {}
         local n = 0
         local v_max = 0

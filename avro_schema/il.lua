@@ -405,8 +405,8 @@ end
 -- visualize IL code
 local il_vis_helper
 il_vis_helper = function(res, il, indentcache, level, object)
-    if not object then -- pass
-    elseif type(object) == 'table' then
+    local object_t = type(object)
+    if object_t == 'table' then
         local start = 1
         if level ~= 0 or type(object[1]) ~= 'table' then
             il_vis_helper(res, il, indentcache, level, object[1])
@@ -416,7 +416,7 @@ il_vis_helper = function(res, il, indentcache, level, object)
         for i = start, #object do
             il_vis_helper(res, il, indentcache, level, object[i])
         end
-    else
+    elseif object_t ~= 'nil' then
         local indent = indentcache[level]
         if not indent then
             indent = '\n'..rep('  ', level)
@@ -721,13 +721,13 @@ voptimizeblock = function(il, scope, block, res)
                 local bblocks = {}
                 vexecute(il, scope, head, bblocks)
                 local cobhoistable, cobmaxoffset = 0, 0
-                for i = 2, #o do
-                    local branch = o[i]
+                for j = 2, #o do
+                    local branch = o[j]
                     local bscope = { parent = scope }
                     local bblock = { branch[1] }
                     voptimizeblock(il, bscope, branch, bblock)
-                    bscopes[i] = bscope
-                    bblocks[i] = bblock
+                    bscopes[j] = bscope
+                    bblocks[j] = bblock
                     -- update hoistable COBs counter
                     local cob = bblock[0]
                     if cob and cob.ipv == opcode.NILREG then
@@ -745,8 +745,8 @@ voptimizeblock = function(il, scope, block, res)
                 -- hoist COBs but only if at least half of the branches will
                 -- benefit
                 if cobhoistable >= #bblocks/2 then
-                    for i = 2, #bblocks do
-                        local bblock = bblocks[i]
+                    for j = 2, #bblocks do
+                        local bblock = bblocks[j]
                         local pos = bblock[-1]
                         if pos and bblock[0].ipv == opcode.NILREG then
                             remove(bblock, pos)

@@ -2,13 +2,11 @@ local ffi        = require('ffi')
 local bit        = require('bit')
 local msgpacklib = require('msgpack')
 
-local find, format = string.find, string.format
-local byte, sub = string.byte, string.sub
+local format = string.format
 local concat, insert = table.concat, table.insert
 local remove = table.remove
-local bor, band = bit.bor, bit.band
+local band = bit.band
 
-local ffi_cast = ffi.cast
 local ffi_string = ffi.string
 local msgpacklib_encode = msgpacklib and msgpacklib.encode
 local msgpacklib_decode = msgpacklib and msgpacklib.decode
@@ -167,7 +165,6 @@ local function msgpack_encode(r, n)
 end
 
 local function universal_decode(r, s)
-    local r = regs
     if type(s) ~= 'string' then
         s = msgpacklib_encode(s)
     end
@@ -234,9 +231,6 @@ end
 local function vis_msgpack(input)
 
     local n = universal_decode(regs, input)
-    local typeid = regs.t
-    local value  = regs.v
-
     local output = {}
     local todos = {}
     local todo = 1
