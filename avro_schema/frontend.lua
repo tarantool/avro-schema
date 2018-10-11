@@ -743,7 +743,7 @@ copy_data = function(stack, schema, data, visited)
     -- Due to this technique, a error message is often misleading,
     -- e.x. "attempt to perform arithmetic on a string value". Unless
     -- a message starts with '@', we replace it (see copy_data_eh).
-    if schema.nullable and (data == null or data == nil) then
+    if schema.nullable and (data == nil) then
         return null
     end
     if     schematype == 'null' then
@@ -832,6 +832,8 @@ copy_data = function(stack, schema, data, visited)
     else
         stack.push(schema, data)
         local frame_no = stack.len
+        -- Replace nil -> NULL to allow it to be a key in a table.
+        data = data ~= nil and data or null
         if visited[data] then
             error('@Infinite loop detected in the data', 0)
         end

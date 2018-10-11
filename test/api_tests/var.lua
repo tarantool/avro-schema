@@ -5,7 +5,7 @@ local msgpack = require('msgpack')
 
 local test = tap.test('api-tests')
 
-test:plan(53)
+test:plan(55)
 
 test:is_deeply({schema.create()}, {false, 'Unknown Avro type: nil'},
                'error unknown type')
@@ -386,6 +386,14 @@ test:is_deeply(compiled.get_types(),
     {"string", "int", "string*","string","long","record*",
         "union_type","union_value", "array*","map","fixed*"},
     "compiled.get_types")
+
+-- gh-113: nil and box.NULL are treated differently in validate of the union
+local ok, handle = schema.create({'int', 'null'})
+local ok, data = schema.validate(handle, nil)
+assert(ok, data)
+test:is(data == nil and type(data) == 'cdata', true, 'null returned')
+local ok, data = schema.validate(handle, msgpack.NULL)
+test:is(data == nil and type(data) == 'cdata', true, 'null returned')
 
 test:check()
 os.exit(test.planned == test.total and test.failed == 0 and 0 or -1)
