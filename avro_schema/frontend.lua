@@ -878,8 +878,11 @@ copy_data = function(stack, schema, data, visited)
                 end
             end
         elseif schematype == 'array'  then
-            for i, v in ipairs(data) do
+            for i, v in pairs(data) do
                 stack.ptr[frame_no] = i
+                if type(i) ~= 'number' then
+                    error('@Non-number array key', 0)
+                end
                 res[i] = copy_data(stack, schema.items, v, visited)
             end
         elseif schematype == 'map'    then
