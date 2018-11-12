@@ -305,6 +305,12 @@ t {
     validate_error = '6: Not a int: XXX'
 }
 
+t {
+    schema = array,
+    validate = '{"key":"value"}',
+    validate_error = 'key: Non-number array key'
+}
+
 -- map
 
 local map = '{"type":"map","values":"int"}'
