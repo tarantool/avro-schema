@@ -9,126 +9,128 @@ local insert, remove = table.insert, table.remove
 local concat         = table.concat
 local max            = math.max
 
-ffi.cdef([[
-struct schema_il_Opcode {
-    struct {
-        uint16_t op;
+local loaded, opcode = pcall(ffi_new, 'struct schema_il_Opcode')
+
+if not loaded then
+    ffi.cdef([[
+    struct schema_il_Opcode {
+        struct {
+            uint16_t op;
+            union {
+                uint16_t scale;
+                uint16_t step;
+                uint16_t k;
+            };
+        };
         union {
-            uint16_t scale;
-            uint16_t step;
-            uint16_t k;
+            uint32_t ripv;
+            uint32_t offset;
+            uint32_t name;
+            uint32_t len;
+        };
+        union {
+            struct {
+                uint32_t ipv;
+                 int32_t ipo;
+            };
+            int32_t  ci;
+            int64_t  cl;
+            double   cd;
+        };
+
+        // block
+        static const int CALLFUNC    = 0xc0;
+        static const int DECLFUNC    = 0xc1;
+        static const int IBRANCH     = 0xc2;
+        static const int SBRANCH     = 0xc3;
+        static const int IFSET       = 0xc4;
+        static const int IFNUL       = 0xc5;
+        static const int INTSWITCH   = 0xc6;
+        static const int STRSWITCH   = 0xc7;
+        // ripv ipv ipo
+        static const int OBJFOREACH  = 0xc8; // last block
+        static const int MOVE        = 0xc9;
+        static const int SKIP        = 0xca;
+        static const int PSKIP       = 0xcb;
+
+        static const int PUTBOOLC    = 0xcc;
+        static const int PUTINTC     = 0xcd;
+        static const int PUTLONGC    = 0xce;
+        static const int PUTFLOATC   = 0xcf;
+        static const int PUTDOUBLEC  = 0xd0;
+        static const int PUTSTRC     = 0xd1;
+        static const int PUTBINC     = 0xd2;
+        static const int PUTARRAYC   = 0xd3;
+        static const int PUTMAPC     = 0xd4;
+        static const int PUTXC       = 0xd5;
+        static const int PUTINTKC    = 0xd6;
+        static const int PUTDUMMYC   = 0xd7;
+        static const int PUTNULC     = 0xd8;
+
+        static const int PUTBOOL     = 0xd9;
+        static const int PUTINT      = 0xda;
+        static const int PUTLONG     = 0xdb;
+        static const int PUTFLOAT    = 0xdc;
+        static const int PUTDOUBLE   = 0xdd;
+        static const int PUTSTR      = 0xde;
+        static const int PUTBIN      = 0xdf;
+        static const int PUTARRAY    = 0xe0;
+        static const int PUTMAP      = 0xe1;
+        static const int PUTINT2LONG = 0xe2;
+        static const int PUTINT2FLT  = 0xe3;
+        static const int PUTINT2DBL  = 0xe4;
+        static const int PUTLONG2FLT = 0xe5;
+        static const int PUTLONG2DBL = 0xe6;
+        static const int PUTFLT2DBL  = 0xe7;
+        static const int PUTSTR2BIN  = 0xe8;
+        static const int PUTBIN2STR  = 0xe9;
+
+        static const int PUTENUMI2S  = 0xea;
+        static const int PUTENUMS2I  = 0xeb;
+
+        /* rt.err_type depends on these values */
+        static const int ISBOOL      = 0xec;
+        static const int ISINT       = 0xed;
+        static const int ISFLOAT     = 0xee;
+        static const int ISDOUBLE    = 0xef;
+        static const int ISLONG      = 0xf0;
+        static const int ISSTR       = 0xf1;
+        static const int ISBIN       = 0xf2;
+        static const int ISARRAY     = 0xf3;
+        static const int ISMAP       = 0xf4;
+        static const int ISNUL       = 0xf5;
+        static const int ISNULORMAP  = 0xf6;
+
+        static const int LENIS       = 0xf7;
+
+        static const int ISSET       = 0xf8;
+        static const int ISNOTSET    = 0xf9;
+        static const int BEGINVAR    = 0xfa;
+        static const int ENDVAR      = 0xfb;
+
+        static const int CHECKOBUF   = 0xfc;
+
+        static const int ERRVALUEV   = 0xfd;
+
+        static const int ERROR   = 0xfe;
+
+        static const unsigned NILREG  = 0xffffffff;
+    };
+
+    struct schema_il_V {
+        union {
+            uint64_t     raw;
+            struct {
+                uint32_t gen    :30;
+                uint32_t islocal:1;
+                uint32_t isdead :1;
+                 int32_t inc;
+            };
         };
     };
-    union {
-        uint32_t ripv;
-        uint32_t offset;
-        uint32_t name;
-        uint32_t len;
-    };
-    union {
-        struct {
-            uint32_t ipv;
-             int32_t ipo;
-        };
-        int32_t  ci;
-        int64_t  cl;
-        double   cd;
-    };
-
-    // block
-    static const int CALLFUNC    = 0xc0;
-    static const int DECLFUNC    = 0xc1;
-    static const int IBRANCH     = 0xc2;
-    static const int SBRANCH     = 0xc3;
-    static const int IFSET       = 0xc4;
-    static const int IFNUL       = 0xc5;
-    static const int INTSWITCH   = 0xc6;
-    static const int STRSWITCH   = 0xc7;
-    // ripv ipv ipo
-    static const int OBJFOREACH  = 0xc8; // last block
-    static const int MOVE        = 0xc9;
-    static const int SKIP        = 0xca;
-    static const int PSKIP       = 0xcb;
-
-    static const int PUTBOOLC    = 0xcc;
-    static const int PUTINTC     = 0xcd;
-    static const int PUTLONGC    = 0xce;
-    static const int PUTFLOATC   = 0xcf;
-    static const int PUTDOUBLEC  = 0xd0;
-    static const int PUTSTRC     = 0xd1;
-    static const int PUTBINC     = 0xd2;
-    static const int PUTARRAYC   = 0xd3;
-    static const int PUTMAPC     = 0xd4;
-    static const int PUTXC       = 0xd5;
-    static const int PUTINTKC    = 0xd6;
-    static const int PUTDUMMYC   = 0xd7;
-    static const int PUTNULC     = 0xd8;
-
-    static const int PUTBOOL     = 0xd9;
-    static const int PUTINT      = 0xda;
-    static const int PUTLONG     = 0xdb;
-    static const int PUTFLOAT    = 0xdc;
-    static const int PUTDOUBLE   = 0xdd;
-    static const int PUTSTR      = 0xde;
-    static const int PUTBIN      = 0xdf;
-    static const int PUTARRAY    = 0xe0;
-    static const int PUTMAP      = 0xe1;
-    static const int PUTINT2LONG = 0xe2;
-    static const int PUTINT2FLT  = 0xe3;
-    static const int PUTINT2DBL  = 0xe4;
-    static const int PUTLONG2FLT = 0xe5;
-    static const int PUTLONG2DBL = 0xe6;
-    static const int PUTFLT2DBL  = 0xe7;
-    static const int PUTSTR2BIN  = 0xe8;
-    static const int PUTBIN2STR  = 0xe9;
-
-    static const int PUTENUMI2S  = 0xea;
-    static const int PUTENUMS2I  = 0xeb;
-
-    /* rt.err_type depends on these values */
-    static const int ISBOOL      = 0xec;
-    static const int ISINT       = 0xed;
-    static const int ISFLOAT     = 0xee;
-    static const int ISDOUBLE    = 0xef;
-    static const int ISLONG      = 0xf0;
-    static const int ISSTR       = 0xf1;
-    static const int ISBIN       = 0xf2;
-    static const int ISARRAY     = 0xf3;
-    static const int ISMAP       = 0xf4;
-    static const int ISNUL       = 0xf5;
-    static const int ISNULORMAP  = 0xf6;
-
-    static const int LENIS       = 0xf7;
-
-    static const int ISSET       = 0xf8;
-    static const int ISNOTSET    = 0xf9;
-    static const int BEGINVAR    = 0xfa;
-    static const int ENDVAR      = 0xfb;
-
-    static const int CHECKOBUF   = 0xfc;
-
-    static const int ERRVALUEV   = 0xfd;
-
-    static const int ERROR   = 0xfe;
-
-    static const unsigned NILREG  = 0xffffffff;
-};
-
-struct schema_il_V {
-    union {
-        uint64_t     raw;
-        struct {
-            uint32_t gen    :30;
-            uint32_t islocal:1;
-            uint32_t isdead :1;
-             int32_t inc;
-        };
-    };
-};
-
-]])
-
-local opcode = ffi_new('struct schema_il_Opcode')
+    ]])
+    opcode = ffi_new('struct schema_il_Opcode')
+end
 
 local op2str = {
     [opcode.CALLFUNC   ] = 'CALLFUNC   ',   [opcode.DECLFUNC   ] = 'DECLFUNC   ',

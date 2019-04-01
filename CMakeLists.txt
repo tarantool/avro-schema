@@ -124,6 +124,10 @@ add_test(NAME api_tests/evolution
          COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/api_tests/evolution.lua
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
 
+add_test(NAME api_tests/reload
+         COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/api_tests/reload.lua
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
+
 add_test(NAME buf_grow_test
          COMMAND ${TARANTOOL} ${CMAKE_SOURCE_DIR}/test/buf_grow_test.lua
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
