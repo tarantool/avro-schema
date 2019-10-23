@@ -133,7 +133,7 @@ add_test(NAME buf_grow_test
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test)
 
 set(TESTS ddt_tests api_tests/var api_tests/export
-    api_tests/evolution buf_grow_test)
+    api_tests/evolution api_tests/reload buf_grow_test)
 foreach(test IN LISTS TESTS)
 
     set_property(TEST ${test} PROPERTY ENVIRONMENT "LUA_PATH=${LUA_PATH}")
