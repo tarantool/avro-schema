@@ -11,7 +11,12 @@ test:test('reload test', function(test)
 
     -- Unload it.
     package.loaded['avro_schema'] = nil
+    package.loaded['avro_schema.backend'] = nil
+    package.loaded['avro_schema.compiler'] = nil
+    package.loaded['avro_schema.fingerprint'] = nil
     package.loaded['avro_schema.il'] = nil
+    package.loaded['avro_schema.runtime'] = nil
+    package.loaded['avro_schema.utils'] = nil
 
     -- Require it again.
     local ok, err = pcall(require, 'avro_schema')
