@@ -8,138 +8,143 @@ local remove = table.remove
 local band = bit.band
 
 local ffi_string = ffi.string
+local ffi_new = ffi.new
 local msgpacklib_encode = msgpacklib and msgpacklib.encode
 local msgpacklib_decode = msgpacklib and msgpacklib.decode
 
--- pipeline -----------------------------------------------------------
-ffi.cdef[[
-struct schema_rt_Value {
-    union {
-        void          *p;
-        int64_t        ival;
-        uint64_t       uval;
-        double         dval;
-        struct {
-            uint32_t   xlen;
-            uint32_t   xoff;
+local loaded, regs = pcall(ffi_new, 'struct schema_rt_State')
+if not loaded then
+    -- pipeline -----------------------------------------------------------
+    ffi.cdef[[
+    struct schema_rt_Value {
+        union {
+            void          *p;
+            int64_t        ival;
+            uint64_t       uval;
+            double         dval;
+            struct {
+                uint32_t   xlen;
+                uint32_t   xoff;
+            };
         };
     };
-};
 
-struct schema_rt_State {
-    size_t                    t_capacity;
-    size_t                    ot_capacity;
-    size_t                    res_capacity;
-    size_t                    res_size;
-    uint8_t                  *res;
-    const uint8_t            *b1;
-    union {
-        const uint8_t        *b2;
-        const uint16_t       *b2_16;
-        const uint32_t       *b2_32;
+    struct schema_rt_State {
+        size_t                    t_capacity;
+        size_t                    ot_capacity;
+        size_t                    res_capacity;
+        size_t                    res_size;
+        uint8_t                  *res;
+        const uint8_t            *b1;
+        union {
+            const uint8_t        *b2;
+            const uint16_t       *b2_16;
+            const uint32_t       *b2_32;
+        };
+        uint8_t                  *t;
+        struct schema_rt_Value   *v;
+        uint8_t                  *ot;
+        struct schema_rt_Value   *ov;
+        int32_t                   k;
     };
-    uint8_t                  *t;
-    struct schema_rt_Value   *v;
-    uint8_t                  *ot;
-    struct schema_rt_Value   *ov;
-    int32_t                   k;
-};
 
-int
-parse_msgpack(struct schema_rt_State *state,
-              const uint8_t          *msgpack_in,
-              size_t                  msgpack_size);
+    int
+    parse_msgpack(struct schema_rt_State *state,
+                  const uint8_t          *msgpack_in,
+                  size_t                  msgpack_size);
 
-int
-unparse_msgpack(struct schema_rt_State *state,
-                size_t                  nitems);
+    int
+    unparse_msgpack(struct schema_rt_State *state,
+                    size_t                  nitems);
 
-int
-schema_rt_buf_grow(struct schema_rt_State *state,
-                   size_t                  min_capacity);
+    int
+    schema_rt_buf_grow(struct schema_rt_State *state,
+                       size_t                  min_capacity);
 
-int schema_rt_extract_location(struct schema_rt_State *state,
-                               intptr_t                pos);
+    int schema_rt_extract_location(struct schema_rt_State *state,
+                                   intptr_t                pos);
 
-void schema_rt_xflatten_done(struct schema_rt_State *state,
-                             size_t len);
+    void schema_rt_xflatten_done(struct schema_rt_State *state,
+                                 size_t len);
 
 ]]
 
--- hash ---------------------------------------------------------------
-ffi.cdef[[
-int32_t
-create_hash_func(int n, const char *strings[],
-                 const char *random, size_t size_random);
+    -- hash ---------------------------------------------------------------
+    ffi.cdef[[
+    int32_t
+    create_hash_func(int n, const char *strings[],
+                     const char *random, size_t size_random);
 
-int32_t
-eval_hash_func(int32_t func, const unsigned char *str, size_t len);
+    int32_t
+    eval_hash_func(int32_t func, const unsigned char *str, size_t len);
 
-int32_t
-eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
-]]
+    int32_t
+    eval_fnv1a_func(int32_t seed, const unsigned char *str, size_t len);
+    ]]
 
--- misc ---------------------------------------------------------------
-ffi.cdef[[
-int
-schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len);
+    -- misc ---------------------------------------------------------------
+    ffi.cdef[[
+    int
+    schema_rt_key_eq(const char *key, const char *str, size_t klen, size_t len);
 
-int32_t
-schema_rt_search8(const void *tab, int32_t k, size_t n);
+    int32_t
+    schema_rt_search8(const void *tab, int32_t k, size_t n);
 
-int32_t
-schema_rt_search16(const void *tab, int32_t k, size_t n);
+    int32_t
+    schema_rt_search16(const void *tab, int32_t k, size_t n);
 
-int32_t
-schema_rt_search32(const void *tab, int32_t k, size_t n);
-]]
+    int32_t
+    schema_rt_search32(const void *tab, int32_t k, size_t n);
+    ]]
 
--- phf ----------------------------------------------------------------
-ffi.cdef[[
-struct schema_rt_phf {
-    bool                      nodiv;
-    int32_t                   seed;
-    size_t                    r;
-    size_t                    m;
-    void                     *g;
-    size_t                    d_max;
-    int                       g_op;
-    intptr_t                  reserved;
-};
+    -- phf ----------------------------------------------------------------
+    ffi.cdef[[
+    struct schema_rt_phf {
+        bool                      nodiv;
+        int32_t                   seed;
+        size_t                    r;
+        size_t                    m;
+        void                     *g;
+        size_t                    d_max;
+        int                       g_op;
+        intptr_t                  reserved;
+    };
 
-int
-phf_init_uint32(struct schema_rt_phf *phf,
-                const int32_t *k,
-                size_t n,
-                size_t lambda,/* displacement table compaction factor (try 4) */
-                size_t alpha, /* hash table load factor (in percent, try 80%) */
-                int32_t seed,
-                bool nodiv);
+    int
+    phf_init_uint32(struct schema_rt_phf *phf,
+                    const int32_t *k,
+                    size_t n,
+                    size_t lambda,/* displacement table compaction factor (try 4) */
+                    size_t alpha, /* hash table load factor (in percent, try 80%) */
+                    int32_t seed,
+                    bool nodiv);
 
-void
-phf_compact(struct schema_rt_phf *phf);
+    void
+    phf_compact(struct schema_rt_phf *phf);
 
-int32_t
-phf_hash_uint32(struct schema_rt_phf *phf, int32_t k);
+    int32_t
+    phf_hash_uint32(struct schema_rt_phf *phf, int32_t k);
 
-void
-phf_destroy(struct schema_rt_phf *phf);
+    void
+    phf_destroy(struct schema_rt_phf *phf);
 
-int32_t
-phf_hash_uint32_band_raw8(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
+    int32_t
+    phf_hash_uint32_band_raw8(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 
-int32_t
-phf_hash_uint32_band_raw16(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
+    int32_t
+    phf_hash_uint32_band_raw16(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
 
-int32_t
-phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
-]]
+    int32_t
+    phf_hash_uint32_band_raw32(const void *g, int32_t k, int32_t seed, size_t r, size_t m);
+    ]]
 
-local rt_C_path   = package.search('avro_schema_rt_c') or
-                    package.searchpath('avro_schema_rt_c', package.cpath) or
-                    error('Failed to load avro_schema_rt_c.so, check LUA_CPATH.')
-local rt_C        = ffi.load(rt_C_path)
-local regs        = ffi.new('struct schema_rt_State')
+    regs = ffi_new('struct schema_rt_State')
+end
+
+local rt_C_path = package.search('avro_schema_rt_c') or
+        package.searchpath('avro_schema_rt_c', package.cpath) or
+        error('Failed to load avro_schema_rt_c.so, check LUA_CPATH.')
+local rt_C = ffi.load(rt_C_path)
 
 local function buf_grow(r, min_capacity)
     if rt_C.schema_rt_buf_grow(r, min_capacity) ~= 0 then
