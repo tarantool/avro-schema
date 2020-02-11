@@ -22,17 +22,26 @@ avro_schema = require('avro_schema')
 
 ## Table of contents
 
-* [Creating a schema](#creating-a-schema)
-* [Validating and normalizing data with a schema](#validating-and-normalizing-data-with-a-schema)
-* [Checking if schemas are compatible](#checking-if-schemas-are-compatible)
-* [Checking if an object is a schema object](#checking-if-an-object-is-a-schema-object)
-* [Querying a schema's field names or field types](#querying-a-schemas-field-names-or-field-types)
-* [Compiling schemas](#compiling-schemas)
-  * [Compile options](#compile-options)
-* [Generated routines](#generated-routines)
-* [References](#references)
-  * [Related discussions](#related-discussions)
-* [Nullability (extension)](#nullability-extension)
+  - [Installation](#installation)
+  - [Creating a schema](#creating-a-schema)
+  - [Validating and normalizing data with a schema](#validating-and-normalizing-data-with-a-schema)
+  - [Checking if schemas are compatible](#checking-if-schemas-are-compatible)
+  - [Checking if an object is a schema object](#checking-if-an-object-is-a-schema-object)
+  - [Querying a schema's field names or field types](#querying-a-schemas-field-names-or-field-types)
+  - [Compiling schemas](#compiling-schemas)
+    - [Compile options](#compile-options)
+  - [Generated routines](#generated-routines)
+  - [References](#references)
+    - [Related discussions](#related-discussions)
+  - [Nullability (extension)](#nullability-extension)
+  - [Default values](#default-values)
+
+## Installation
+
+To install the module use
+```lua
+tarantool rocks install avro-schema
+```
 
 ## Creating a schema
 
