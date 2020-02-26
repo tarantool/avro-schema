@@ -40,7 +40,7 @@ avro_schema = require('avro_schema')
 
 To install the module use
 ```lua
-tarantool rocks install avro-schema
+tarantoolctl rocks install avro-schema
 ```
 
 ## Creating a schema
