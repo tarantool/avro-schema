@@ -17,16 +17,18 @@ env:
     matrix:
       - OS=el DIST=6
       - OS=el DIST=7
+      - OS=el DIST=8
       - OS=fedora DIST=26
       - OS=fedora DIST=27
       - OS=fedora DIST=28
       - OS=fedora DIST=29
       - OS=fedora DIST=30
+      - OS=fedora DIST=31
       - OS=ubuntu DIST=trusty
       - OS=ubuntu DIST=xenial
       - OS=ubuntu DIST=bionic
-      - OS=ubuntu DIST=cosmic
       - OS=ubuntu DIST=disco
+      - OS=ubuntu DIST=eoan
       - OS=debian DIST=jessie
       - OS=debian DIST=stretch
       - OS=debian DIST=buster
@@ -91,6 +93,16 @@ deploy:
     on:
       branch: master
       condition: -n "${OS}" && -n "${DIST}" && -n "${PACKAGECLOUD_TOKEN}"
+  - provider: packagecloud
+    username: tarantool
+    repository: "2_4"
+    token: ${PACKAGECLOUD_TOKEN}
+    dist: ${OS}/${DIST}
+    package_glob: build/*.{rpm,deb,dsc}
+    skip_cleanup: true
+    on:
+      branch: master
+      condition: -n "${OS}" && -n "${DIST}" && -n "${PACKAGECLOUD_TOKEN}"
   # Deploy packages to PackageCloud from tags
   # see:
   #   * https://github.com/tarantool/tarantool/issues/3745
@@ -138,6 +150,16 @@ deploy:
   - provider: packagecloud
     username: tarantool
     repository: "2_3"
+    token: ${PACKAGECLOUD_TOKEN}
+    dist: ${OS}/${DIST}
+    package_glob: build/*.{rpm,deb,dsc}
+    skip_cleanup: true
+    on:
+      tags: true
+      condition: -n "${OS}" && -n "${DIST}" && -n "${PACKAGECLOUD_TOKEN}"
+  - provider: packagecloud
+    username: tarantool
+    repository: "2_4"
     token: ${PACKAGECLOUD_TOKEN}
     dist: ${OS}/${DIST}
     package_glob: build/*.{rpm,deb,dsc}
