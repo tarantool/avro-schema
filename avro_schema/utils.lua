@@ -89,6 +89,7 @@ local function init_fstack(keys)
     assert(table_contains(keys, 'clear') == false)
     local fstack_str = [[
         DECLARE_VARS
+        local table_clear = require('table.clear')
         local stack = {
             len = 0,
             MOVE_VARS_TO_MODULE
@@ -168,7 +169,7 @@ local function init_fstack(keys)
     fstack_str = fstack_str:gsub('CLEAR_CLEAR_TABLES',
         table.concat(
             map(function(_, key)
-                return ('table.clear(%s)'):format(key)
+                return ('table_clear(%s)'):format(key)
             end, keys),
             '\n')
         )
