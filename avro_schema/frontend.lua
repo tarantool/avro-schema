@@ -23,7 +23,7 @@
 -- is replaced with an object itself (loops!).
 --
 
-local json = require('json')
+local json = require('json').new()
 local ffi = require('ffi')
 local utils = require('avro_schema.utils')
 local null = ffi.cast('void *', 0)
@@ -32,6 +32,9 @@ local sub = string.sub
 local insert, remove, concat = table.insert, table.remove, table.concat
 local floor = math.floor
 local next, type = next, type
+
+json.cfg{encode_use_tostring = true}
+
 -- states of type declaration
 local TYPE_STATE = {
     NEVER_USED = nil, -- not referenced and not defined

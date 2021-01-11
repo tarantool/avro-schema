@@ -1,5 +1,5 @@
 local ffi            = require('ffi')
-local json           = require('json')
+local json           = require('json').new()
 local msgpack        = require('msgpack')
 local json_encode    = json and json.encode
 local msgpack_decode = msgpack and msgpack.decode
@@ -8,6 +8,8 @@ local format, rep    = string.format, string.rep
 local insert, remove = table.insert, table.remove
 local concat         = table.concat
 local max            = math.max
+
+json.cfg{encode_use_tostring = true}
 
 local loaded, opcode = pcall(ffi_new, 'struct schema_il_Opcode')
 
