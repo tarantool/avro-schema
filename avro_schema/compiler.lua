@@ -19,7 +19,7 @@
 -- https://github.com/tarantool/avro-schema/wiki/Developer-Guide
 --
 
-local json = require('json')
+local json = require('json').new()
 json.cfg{encode_use_tostring = true}
 
 local front      = require('avro_schema.frontend')

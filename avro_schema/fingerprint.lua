@@ -2,10 +2,12 @@
 -- It was necessary to implement our json encoder, because of some special
 -- rules for avro fingerptint generation and Parsing Canonical Form generation.
 
-local json = require "json"
+local json = require("json").new()
 local frontend = require "avro_schema.frontend"
 -- Tarantool specific module
 local digest = require "digest"
+
+json.cfg{encode_use_tostring = true}
 
 local avro_json
 
