@@ -755,6 +755,7 @@ local function complex_types_may_match(from, to, imatch)
     return alias_set[from.name]
 end
 
+local _
 local copy_data
 
 -- validate data against a schema; return a copy
@@ -785,6 +786,7 @@ copy_data = function(schema, data, visited)
             error()
         end
     elseif schematype == 'long' then
+        _ = data < 0
         local n = tonumber(data)
         -- note: if it's not a number or cdata(numbertype),
         --       the expression below will raise
@@ -961,6 +963,7 @@ validate = function(schema, data, visited)
             error()
         end
     elseif schematype == 'long' then
+        _ = data < 0
         local n = tonumber(data)
         -- note: if it's not a number or cdata(numbertype),
         --       the expression below will raise
