@@ -547,6 +547,27 @@ copy_schema = function(schema, context, ns, open_rec)
     end
 end
 
+-- find 1+ consecutive func frames
+local function find_frames(func)
+    local top
+    for i = 2, 1000000 do
+        local info = debug.getinfo(i)
+        if not info then
+            return 1, 0
+        end
+        if info.func == func then
+            top = i
+            break
+        end
+    end
+    for i = top, 1000000 do
+        local info = debug.getinfo(i)
+        if not info or info.func ~= func then
+            return top - 1, i - 2
+        end
+    end
+end
+
 -- extract copy_schema() current location
 copy_schema_location_info = function(context)
     local stack = context.stack
@@ -737,7 +758,9 @@ end
 local copy_data
 
 -- validate data against a schema; return a copy
-copy_data = function(stack, schema, data, visited)
+copy_data = function(schema, data, visited)
+    -- error handler peeks into ptr using debug.getlocal();
+    local ptr
     local schematype = type(schema) == 'string' and schema or schema.type
     -- primitives
     -- Note: sometimes we don't check the type explicitly, but instead
@@ -746,37 +769,23 @@ copy_data = function(stack, schema, data, visited)
     -- Due to this technique, a error message is often misleading,
     -- e.x. "attempt to perform arithmetic on a string value". Unless
     -- a message starts with '@', we replace it (see copy_data_eh).
-    if schema.nullable and (data == nil) then
+    if schema.nullable and (data == null or data == nil) then
         return null
     end
     if     schematype == 'null' then
         if data ~= null then
-            -- The stack push/pop should be called rarely to improve
-            -- speed.
-            stack.push(schema, data)
             error()
         end
-        return null
     elseif schematype == 'boolean' then
         if type(data) ~= 'boolean' then
-            stack.push(schema, data)
             error()
         end
-        return data
     elseif schematype == 'int' then
-        -- Error may occur during comparison.
-        stack.push(schema, data)
         if data < -2147483648 or data > 2147483647 or floor(tonumber(data)) ~= data then
             error()
         end
-        stack.remove_last()
-        return data
     elseif schematype == 'long' then
         local n = tonumber(data)
-        if not n then
-            stack.push(schema, data)
-            error()
-        end
         -- note: if it's not a number or cdata(numbertype),
         --       the expression below will raise
         -- note: boundaries were carefully picked to avoid
@@ -789,54 +798,38 @@ copy_data = function(stack, schema, data, visited)
             -- case; in number > cdata(uint64_t) expression, number
             -- is implicitly coerced to uint64_t
             if n ~= 9223372036854775808 or data > 9223372036854775807ULL then
-                stack.push(schema, data)
                 error()
             end
         end
-        return data
     elseif schematype == 'double' or schematype == 'float' then
         local xtype = type(data)
-        if xtype == "number" then
-            return data
-        else
+        if xtype ~= "number" then
             if xtype == "cdata" then
                 local xdata = tonumber(data)
                 if xdata == nil then
                     -- `tonumber` returns `nil` in case of an error
                     -- crutch: replace data with typeof(data) to produce more
                     -- readable error message
-                    stack.push(schema, ffi.typeof(data))
+                    data = ffi.typeof(data)
                     error()
-                else
-                    return xdata
                 end
+            else
+                error()
             end
         end
-        stack.push(schema, data)
-        error()
     elseif schematype == 'bytes' or schematype == 'string' then
         if type(data) ~= 'string' then
-            stack.push(schema, data)
             error()
         end
-        return data
     elseif schematype == 'enum' then
         if not get_enum_symbol_map(schema)[data] then
-            stack.push(schema, data)
             error()
         end
-        return data
     elseif schematype == 'fixed' then
         if type(data) ~= 'string' or #data ~= schema.size then
-            stack.push(schema, data)
             error()
         end
-        return data
     else
-        stack.push(schema, data)
-        local frame_no = stack.len
-        -- Replace nil -> NULL to allow it to be a key in a table.
-        data = data ~= nil and data or null
         if visited[data] then
             error('@Infinite loop detected in the data', 0)
         end
@@ -847,22 +840,21 @@ copy_data = function(stack, schema, data, visited)
             local fieldmap = get_record_field_map(schema)
             -- check if the data contains unknown fields
             for k, _ in pairs(data) do
-                stack.ptr[frame_no] = k
+                ptr = k
                 local field = schema.fields[fieldmap[k]]
                 if not field or field.name ~= k then
                     error('@Unknown field', 0)
                 end
-                stack.ptr[frame_no] = nil
+                ptr = nil
             end
             -- copy data
             for _, field in ipairs(schema.fields) do
                 if data[field.name] ~= nil then
                     -- a field is present in data
-                    stack.ptr[frame_no] = field.name
+                    ptr = field.name
                     res[field.name] =
-                        copy_data(stack, field.type, data[field.name],
-                            visited)
-                    stack.ptr[frame_no] = nil
+                        copy_data(field.type, data[field.name], visited)
+                    ptr = nil
                 elseif type(field.default) ~= 'nil' then
                     -- no field in data & the field has default that is not
                     -- nil/box.NULL
@@ -882,19 +874,19 @@ copy_data = function(stack, schema, data, visited)
             end
         elseif schematype == 'array'  then
             for i, v in pairs(data) do
-                stack.ptr[frame_no] = i
+                ptr = i
                 if type(i) ~= 'number' then
                     error('@Non-number array key', 0)
                 end
-                res[i] = copy_data(stack, schema.items, v, visited)
+                res[i] = copy_data(schema.items, v, visited)
             end
         elseif schematype == 'map'    then
             for k, v in pairs(data) do
-                stack.ptr[frame_no] = k
+                ptr = k
                 if type(k) ~= 'string' then
                     error('@Non-string map key', 0)
                 end
-                res[k] = copy_data(stack, schema.values, v, visited)
+                res[k] = copy_data(schema.values, v, visited)
             end
         elseif not schematype then -- union
             local tagmap = get_union_tag_map(schema)
@@ -906,13 +898,12 @@ copy_data = function(stack, schema, data, visited)
             else
                 local k, v = next(data)
                 local bpos = tagmap[k]
-                stack.ptr[frame_no] = k
+                ptr = k
                 if not bpos then
                     error('@Unexpected key in union', 0)
                 end
-                res[k] = copy_data(stack, schema[bpos], v, visited)
-                local ptr = next(data, k)
-                stack.ptr[frame_no] = ptr
+                res[k] = copy_data(schema[bpos], v, visited)
+                ptr = next(data, k)
                 if ptr then
                     error('@Unexpected key in union', 0)
                 end
@@ -920,11 +911,11 @@ copy_data = function(stack, schema, data, visited)
         elseif schematype == 'any' then
             if type(data) == 'table' then
                 for k, v in pairs(data) do
-                    stack.ptr[frame_no] = k
+                    ptr = k
                     if type(k) == 'table' then
                         error('@Invalid key', 0)
                     end
-                    res[k] = copy_data(stack, 'any', v, visited)
+                    res[k] = copy_data('any', v, visited)
                 end
             else
                 res = data
@@ -932,24 +923,27 @@ copy_data = function(stack, schema, data, visited)
         else
             assert(false)
         end
-        visited[data] = nil
-        stack.remove_last()
-        return res
+        data = res
     end
+    goto l
+::l::
+    return data
 end
 
 -- extract from the call stack a path to the fragment that failed
 -- validation; enhance error message
-local function copy_data_eh(stack, err)
+local function copy_data_eh(err)
+    local top, bottom = find_frames(copy_data)
     local path = {}
-    for i = 1, stack.len do
-        local _, _, ptr = stack.get(i)
+    for i = bottom, top, -1 do
+        local _, ptr = debug.getlocal(i, 4)
         insert(path, (ptr ~= nil and tostring(ptr)) or nil)
     end
-    local schema, data, _  = stack.get(stack.len)
     if type(err) == 'string' and sub(err, 1, 1) == '@' then
         err = sub(err, 2)
     else
+        local _, schema = debug.getlocal(top, 1)
+        local _, data   = debug.getlocal(top, 2)
         err = format('Not a %s: %s', (
             type(schema) == 'table' and (
                 schema.name or schema.type or 'union')) or schema, data)
@@ -961,14 +955,8 @@ local function copy_data_eh(stack, err)
     end
 end
 
-local vd_prepopulated_stack = utils.init_fstack({'schema', 'data', 'ptr'})
 local function validate_data(schema, data)
-    local ok, data = pcall(copy_data, vd_prepopulated_stack, schema, data, {})
-    if not ok then
-        data = copy_data_eh(vd_prepopulated_stack, data)
-    end
-    vd_prepopulated_stack.clear()
-    return ok, data
+    return xpcall(copy_data, copy_data_eh, schema, data, {})
 end
 
 copy_field_default = function(fieldtype, default)
