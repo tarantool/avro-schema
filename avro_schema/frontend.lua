@@ -930,33 +930,204 @@ copy_data = function(schema, data, visited)
     return data
 end
 
+
+local validate
+
+-- validate data against a schema
+validate = function(schema, data, visited)
+    -- error handler peeks into ptr using debug.getlocal();
+    local ptr
+    local schematype = type(schema) == 'string' and schema or schema.type
+    -- primitives
+    -- Note: sometimes we don't check the type explicitly, but instead
+    -- rely on an operation to fail on a wrong type. Done with integer
+    -- and fp types, also with tables.
+    -- Due to this technique, a error message is often misleading,
+    -- e.x. "attempt to perform arithmetic on a string value". Unless
+    -- a message starts with '@', we replace it (see validate_data_eh).
+    if schema.nullable and (data == null or data == nil) then
+        return
+    end
+    if     schematype == 'null' then
+        if data ~= null then
+            error()
+        end
+    elseif schematype == 'boolean' then
+        if type(data) ~= 'boolean' then
+            error()
+        end
+    elseif schematype == 'int' then
+        if data < -2147483648 or data > 2147483647 or floor(tonumber(data)) ~= data then
+            error()
+        end
+    elseif schematype == 'long' then
+        local n = tonumber(data)
+        -- note: if it's not a number or cdata(numbertype),
+        --       the expression below will raise
+        -- note: boundaries were carefully picked to avoid
+        --       rounding errors, they are INT64_MIN and INT64_MAX+1,
+        --       respectively (both 2**k)
+        if n < -9223372036854775808 or n >= 9223372036854775808 or
+           floor(n) ~= n then
+            -- due to rounding errors, INT64_MAX-1023..INT64_MAX
+            -- fails the range check above, check explicitly for this
+            -- case; in number > cdata(uint64_t) expression, number
+            -- is implicitly coerced to uint64_t
+            if n ~= 9223372036854775808 or data > 9223372036854775807ULL then
+                error()
+            end
+        end
+    elseif schematype == 'double' or schematype == 'float' then
+        local xtype = type(data)
+        if xtype ~= "number" then
+            if xtype == "cdata" then
+                local xdata = tonumber(data)
+                if xdata == nil then
+                    -- `tonumber` returns `nil` in case of an error
+                    -- crutch: replace data with typeof(data) to produce more
+                    -- readable error message
+                    data = ffi.typeof(data)
+                    error()
+                end
+            else
+                error()
+            end
+        end
+    elseif schematype == 'bytes' or schematype == 'string' then
+        if type(data) ~= 'string' then
+            error()
+        end
+    elseif schematype == 'enum' then
+        if not get_enum_symbol_map(schema)[data] then
+            error()
+        end
+    elseif schematype == 'fixed' then
+        if type(data) ~= 'string' or #data ~= schema.size then
+            error()
+        end
+    else
+        if visited[data] then
+            error('@Infinite loop detected in the data', 0)
+        end
+        visited[data] = true
+        -- record, enum, array, map, fixed
+        if     schematype == 'record' then
+            local fieldmap = get_record_field_map(schema)
+            -- check if the data contains unknown fields
+            for k, _ in pairs(data) do
+                ptr = k
+                local field = schema.fields[fieldmap[k]]
+                if not field or field.name ~= k then
+                    error('@Unknown field', 0)
+                end
+                ptr = nil
+            end
+            -- copy data
+            for _, field in ipairs(schema.fields) do
+                if data[field.name] ~= nil then
+                    -- a field is present in data
+                    ptr = field.name
+                    validate(field.type, data[field.name], visited)
+                    ptr = nil
+                elseif type(field.default) == 'nil' and
+                    -- value is nullable
+                        not (field.type and field.type.nullable) and
+                    -- value is nullable union
+                        not (field.type and type(field.type) == 'table' and
+                                #field.type > 0 and get_union_tag_map(field.type)['null']) then
+                    error(format('@Field %s missing', field.name), 0)
+                end
+            end
+        elseif schematype == 'array'  then
+            for i, v in pairs(data) do
+                ptr = i
+                if type(i) ~= 'number' then
+                    error('@Non-number array key', 0)
+                end
+                validate(schema.items, v, visited)
+            end
+        elseif schematype == 'map'    then
+            for k, v in pairs(data) do
+                ptr = k
+                if type(k) ~= 'string' then
+                    error('@Non-string map key', 0)
+                end
+                validate(schema.values, v, visited)
+            end
+        elseif not schematype then -- union
+            local tagmap = get_union_tag_map(schema)
+            if data == null then
+                if not tagmap['null'] then
+                    error('@Unexpected type in union: null', 0)
+                end
+            else
+                local k, v = next(data)
+                local bpos = tagmap[k]
+                ptr = k
+                if not bpos then
+                    error('@Unexpected key in union', 0)
+                end
+                validate(schema[bpos], v, visited)
+                ptr = next(data, k)
+                if ptr then
+                    error('@Unexpected key in union', 0)
+                end
+            end
+        elseif schematype == 'any' then
+            if type(data) == 'table' then
+                for k, v in pairs(data) do
+                    ptr = k
+                    if type(k) == 'table' then
+                        error('@Invalid key', 0)
+                    end
+                    validate('any', v, visited)
+                end
+            end
+        else
+            assert(false)
+        end
+    end
+    goto l
+::l::
+end
+
 -- extract from the call stack a path to the fragment that failed
 -- validation; enhance error message
-local function copy_data_eh(err)
-    local top, bottom = find_frames(copy_data)
-    local path = {}
-    for i = bottom, top, -1 do
-        local _, ptr = debug.getlocal(i, 4)
-        insert(path, (ptr ~= nil and tostring(ptr)) or nil)
-    end
-    if type(err) == 'string' and sub(err, 1, 1) == '@' then
-        err = sub(err, 2)
-    else
-        local _, schema = debug.getlocal(top, 1)
-        local _, data   = debug.getlocal(top, 2)
-        err = format('Not a %s: %s', (
-            type(schema) == 'table' and (
-                schema.name or schema.type or 'union')) or schema, data)
-    end
-    if #path == 0 then
-        return err
-    else
-        return format('%s: %s', concat(path, '/'), err)
+
+local function create_data_eh(fun)
+    return function(err)
+        local top, bottom = find_frames(fun)
+        local path = {}
+        for i = bottom, top, -1 do
+            local _, ptr = debug.getlocal(i, 4)
+            insert(path, (ptr ~= nil and tostring(ptr)) or nil)
+        end
+        if type(err) == 'string' and sub(err, 1, 1) == '@' then
+            err = sub(err, 2)
+        else
+            local _, schema = debug.getlocal(top, 1)
+            local _, data   = debug.getlocal(top, 2)
+            err = format('Not a %s: %s', (
+                type(schema) == 'table' and (
+                    schema.name or schema.type or 'union')) or schema, data)
+        end
+        if #path == 0 then
+            return err
+        else
+            return format('%s: %s', concat(path, '/'), err)
+        end
     end
 end
 
+local copy_data_eh = create_data_eh(copy_data)
+local validate_data_eh = create_data_eh(validate)
+
 local function validate_data(schema, data)
     return xpcall(copy_data, copy_data_eh, schema, data, {})
+end
+
+local function validate_data_only(schema, data)
+    return xpcall(validate, validate_data_eh, schema, data, {})
 end
 
 copy_field_default = function(fieldtype, default)
@@ -1422,6 +1593,7 @@ end
 return {
     create_schema         = create_schema,
     validate_data         = validate_data,
+    validate_data_only    = validate_data_only,
     create_ir             = create_ir,
     get_enum_symbol_map   = get_enum_symbol_map,
     get_union_tag_map     = get_union_tag_map,
