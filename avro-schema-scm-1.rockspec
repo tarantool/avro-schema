@@ -1,7 +1,7 @@
 package = 'avro-schema'
 version = 'scm-1'
 source  = {
-    url    = 'git://github.com/tarantool/avro-schema.git',
+    url    = 'git+https://github.com/tarantool/avro-schema.git',
     branch = 'master',
 }
 description = {
