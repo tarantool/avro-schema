@@ -531,4 +531,5 @@ return {
     validate       = validate,
     export         = export,
     fingerprint    = get_fingerprint,
+    _VERSION       = require('avro_schema.version'),
 }

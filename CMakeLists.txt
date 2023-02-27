@@ -86,6 +86,7 @@ add_custom_target(postprocess_lua ALL DEPENDS
 install(FILES avro_schema/init.lua avro_schema/compiler.lua
               avro_schema/frontend.lua avro_schema/runtime.lua
               avro_schema/fingerprint.lua avro_schema/utils.lua
+              avro_schema/version.lua
         DESTINATION ${TARANTOOL_INSTALL_LUADIR}/avro_schema)
 
 install(FILES ${CMAKE_BINARY_DIR}/il.lua
