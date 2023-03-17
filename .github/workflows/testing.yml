@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name != github.repository
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     strategy:
       fail-fast: false
@@ -40,14 +40,14 @@ jobs:
         tarantool:
           - '1.10'
           - '2.8'
-          - '2.9'
+          - '2.10'
 
     steps:
       - name: Clone the module
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Setup tarantool ${{ matrix.tarantool }}
-        uses: tarantool/setup-tarantool@v1
+        uses: tarantool/setup-tarantool@v2
         with:
           tarantool-version: ${{ matrix.tarantool }}
 
