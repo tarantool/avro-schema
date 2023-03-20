@@ -1,0 +1,55 @@
+name: Push rockspec
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+
+env:
+  ROCK_NAME: "avro-schema"
+
+jobs:
+  version-check:
+    # We need this job to run only on push with tag.
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Check module version
+        uses: tarantool/actions/check-module-version@master
+        with:
+          module-name: "avro_schema"
+
+  push-scm-rockspec:
+    runs-on: ubuntu-20.04
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@master
+
+      - uses: tarantool/rocks.tarantool.org/github-action@master
+        with:
+          auth: ${{ secrets.ROCKS_AUTH }}
+          files: ${{ env.ROCK_NAME }}-scm-1.rockspec
+
+  push-tagged-rockspec:
+    runs-on: ubuntu-20.04
+    if: startsWith(github.ref, 'refs/tags')
+    needs: version-check
+    steps:
+      - uses: actions/checkout@master
+
+      # https://stackoverflow.com/questions/58177786/get-the-current-pushed-tag-in-github-actions
+      - name: Set env
+        run: echo "GIT_TAG=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+
+      - name: Create release rockspec
+        run: |
+          sed \
+            -e "s/branch = '.\+'/tag = '${GIT_TAG}'/g" \
+            -e "s/version = '.\+'/version = '${GIT_TAG}-1'/g" \
+            ${{ env.ROCK_NAME }}-scm-1.rockspec > ${{ env.ROCK_NAME }}-${GIT_TAG}-1.rockspec
+      - uses: tarantool/rocks.tarantool.org/github-action@master
+        with:
+          auth: ${{ secrets.ROCKS_AUTH }}
+          files: ${{ env.ROCK_NAME }}-${GIT_TAG}-1.rockspec
