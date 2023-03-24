@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - [Add versioning support.](https://github.com/tarantool/avro-schema/pull/147)
 ### Changed
 - [Use git+https:// for git repository in rockspec](https://github.com/tarantool/avro-schema/pull/143)
+- [RPM build to support Fedora 33+](https://github.com/tarantool/avro-schema/issues/148)
 
 
 ## [3.0.6] - 2021-09-24

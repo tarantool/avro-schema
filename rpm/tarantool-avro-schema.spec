@@ -16,16 +16,26 @@ This package provides Apache Avro schema tools for Tarantool.
 
 %prep
 %setup -q -n %{name}-%{version}
+%if 0%{?fedora} >= 33
+  %define mflags %{?_smp_mflags} -C "%{_vpath_builddir}"
+%else
+  %define mflags %{?_smp_mflags}
+%endif
+
 
 %build
 %cmake . -DCMAKE_BUILD_TYPE=RelWithDebInfo
-make %{?_smp_mflags}
+make %{mflags}
 
 %check
-make %{?_smp_mflags} check
+make %{mflags} check
 
 %install
-%make_install
+%if 0%{?fedora} >= 33 || 0%{?rhel} >= 8
+  %cmake_install
+%else
+  %make_install
+%endif
 
 %files
 %{_libdir}/tarantool/avro_schema_rt_c.so
