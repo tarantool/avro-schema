@@ -19,7 +19,7 @@ jobs:
           repository: ${{ github.repository_owner }}/avro-schema
 
       - name: 'Download the tarantool build artifact'
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.artifact_name }}
 
