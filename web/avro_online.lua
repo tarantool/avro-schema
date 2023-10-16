@@ -24,7 +24,7 @@ local Flattener = {
 }
 
 -- export compile, flatten functions and listen 3301
-function compile(request, schema)
+function compile(schema)
     local data = nil
     local ok, err = pcall(function()
         data = json.decode(schema)
@@ -39,7 +39,7 @@ function compile(request, schema)
     end
     return 'Schema OK'
 end
-function validate(request, schema, data)
+function validate(schema, data)
     local json_data = nil
     local json_schema = nil
     local ok, err = pcall(function()
