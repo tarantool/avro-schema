@@ -52,4 +52,7 @@ function validate(request, schema, data)
     return Flattener:flatten(json_schema, json_data)
 end
 box.cfg{listen="3301"}
-box.schema.user.grant('guest', 'read,write,execute', 'universe')
+box.schema.func.create('compile', {if_not_exists = true})
+box.schema.func.create('validate', {if_not_exists = true})
+box.schema.user.grant('guest', 'execute', 'function', 'validate', {if_not_exists = true})
+box.schema.user.grant('guest', 'execute', 'function', 'compile', {if_not_exists = true})
