@@ -15,22 +15,20 @@ jobs:
     if: github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name != github.repository
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: false
       matrix:
         tarantool:
-          - '1.10'
-          - '2.8'
-          - '2.10'
+          - '2.11'
 
     steps:
       - name: Clone the module
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup tarantool ${{ matrix.tarantool }}
-        uses: tarantool/setup-tarantool@v2
+        uses: tarantool/setup-tarantool@v3
         with:
           tarantool-version: ${{ matrix.tarantool }}
 

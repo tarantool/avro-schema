@@ -14,7 +14,7 @@ jobs:
   version-check:
     # We need this job to run only on push with tag.
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Check module version
         uses: tarantool/actions/check-module-version@master
@@ -22,7 +22,7 @@ jobs:
           module-name: "avro_schema"
 
   push-scm-rockspec:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@master
@@ -33,7 +33,7 @@ jobs:
           files: ${{ env.ROCK_NAME }}-scm-1.rockspec
 
   push-tagged-rockspec:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags')
     needs: version-check
     steps:
